@@ -99,6 +99,20 @@ public sealed class ReplaySession
         return null;
     }
 
+    public BreakpointStop? RunToBreakpoints(
+    BreakpointCollection breakpoints)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        var active = breakpoints.GetActive();
+
+        if (active.Count == 0)
+            return null;
+
+        return RunToBreakpoints(
+            (IEnumerable<ConditionalBreakpoint>)active);
+    }
+
 
     /// <summary>
     /// Advances until any supplied breakpoint matches.
