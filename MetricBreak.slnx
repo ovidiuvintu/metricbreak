@@ -2,4 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/MetricBreak.Domain/MetricBreak.Domain.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MetricBreak.Domain.Tests/MetricBreak.Domain.Tests.csproj" />
+  </Folder>
 </Solution>
