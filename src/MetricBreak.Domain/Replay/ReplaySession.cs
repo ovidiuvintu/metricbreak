@@ -1,4 +1,5 @@
 
+using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Recordings;
 
 namespace MetricBreak.Domain.Replay;
@@ -60,5 +61,29 @@ public sealed class ReplaySession
         _cursor.Seek(sequenceNumber);
 
     public void Reset() => _cursor.Reset();
+
+
+    /// <summary>
+    /// Advances through the recording until the breakpoint matches
+    /// or the end of the recording is reached.
+    /// </summary>
+    /// <returns>
+    /// True if the breakpoint matched; otherwise false.
+    /// </returns>
+    public bool RunToBreakpoint(ConditionalBreakpoint breakpoint)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        while (_cursor.StepForward())
+        {
+            var sample = _reader.Read(_cursor.CurrentSequenceNumber);
+
+            if (BreakpointEvaluator.Evaluate(breakpoint, sample))
+                return true;
+        }
+
+        return false;
+    }
+
 }
 
