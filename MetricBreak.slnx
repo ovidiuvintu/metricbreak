@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/MetricBreak.Domain/MetricBreak.Domain.csproj" />
+    <Project Path="src/MetricBreak.Ingestion/MetricBreak.Ingestion.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MetricBreak.Domain.Tests/MetricBreak.Domain.Tests.csproj" />

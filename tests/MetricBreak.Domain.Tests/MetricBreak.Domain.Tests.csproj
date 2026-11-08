@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\MetricBreak.Domain\MetricBreak.Domain.csproj" />
+    <ProjectReference Include="..\..\src\MetricBreak.Ingestion\MetricBreak.Ingestion.csproj" />
   </ItemGroup>
 
 </Project>
