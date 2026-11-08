@@ -196,7 +196,7 @@ public sealed class MultipleBreakpointTests
         var session = CreateSession((8500, 72));
 
         Assert.Throws<ArgumentNullException>(() =>
-            session.RunToBreakpoints(null!));
+            session.RunToBreakpoints((BreakpointCollection)null!));
     }
 
     [Fact]
