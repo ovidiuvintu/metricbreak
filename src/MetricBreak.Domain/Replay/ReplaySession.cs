@@ -70,20 +70,35 @@ public sealed class ReplaySession
     /// <returns>
     /// True if the breakpoint matched; otherwise false.
     /// </returns>
-    public bool RunToBreakpoint(ConditionalBreakpoint breakpoint)
+    public bool RunToBreakpoint(
+    ConditionalBreakpoint breakpoint)
+    {
+        return RunToBreakpointHit(breakpoint) is not null;
+    }
+
+
+    public BreakpointHit? RunToBreakpointHit(
+        ConditionalBreakpoint breakpoint)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
         while (_cursor.StepForward())
         {
-            var sample = _reader.Read(_cursor.CurrentSequenceNumber);
+            var sample = _reader.Read(
+                _cursor.CurrentSequenceNumber);
 
-            if (BreakpointEvaluator.Evaluate(breakpoint, sample))
-                return true;
+            var hit = BreakpointEvaluator.EvaluateHit(
+                breakpoint,
+                _cursor.Position,
+                sample);
+
+            if (hit is not null)
+                return hit;
         }
 
-        return false;
+        return null;
     }
+
 
 }
 

@@ -44,4 +44,40 @@ public static class BreakpointEvaluator
                 "Unsupported comparison operator.")
         };
     }
+
+
+    public static BreakpointHit? EvaluateHit(
+        ConditionalBreakpoint breakpoint,
+        SamplePosition position,
+        TelemetrySample sample)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+        ArgumentNullException.ThrowIfNull(sample);
+
+        if (position.RecordingId == Guid.Empty ||
+            position.SequenceNumber != sample.SequenceNumber)
+        {
+            throw new ArgumentException(
+                "Position must identify the supplied sample.",
+                nameof(position));
+        }
+
+        if (!Evaluate(breakpoint, sample))
+            return null;
+
+        // Evaluate returning true guarantees a present,
+        // non-null, non-NaN value for the channel.
+        double observedValue =
+            sample.GetValue(breakpoint.ChannelId)!.Value;
+
+        return new BreakpointHit(
+            breakpoint.Id,
+            position,
+            sample.Timestamp,
+            breakpoint.ChannelId,
+            observedValue,
+            breakpoint.Operator,
+            breakpoint.Threshold);
+    }
+
 }
