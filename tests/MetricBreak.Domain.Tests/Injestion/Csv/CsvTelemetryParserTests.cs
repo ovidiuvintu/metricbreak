@@ -1,7 +1,6 @@
-
 using MetricBreak.Ingestion.Csv;
 
-namespace MetricBreak.Domain.Tests.Ingestion.Csv;
+namespace MetricBreak.Domain.Tests.Injestion.Csv;
 
 public sealed class CsvTelemetryParserTests
 {
