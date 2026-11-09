@@ -5,7 +5,8 @@ using MetricBreak.Domain.Recordings;
 namespace MetricBreak.Domain.Replay;
 
 /// <summary>
-/// Coordinates replay navigation and telemetry retrieval
+/// Coordinates deterministic replay navigation,
+/// breakpoint evaluation, and execution-state tracking
 /// for a single recording.
 /// </summary>
 public sealed class ReplaySession
@@ -25,6 +26,11 @@ public sealed class ReplaySession
 
     public TelemetrySample CurrentSample =>
         _reader.Read(_cursor.CurrentSequenceNumber);
+
+    /// <summary>
+    /// Immutable snapshot of the current execution state.
+    /// </summary>
+    public ReplayExecutionState ExecutionState { get; private set; }
 
     public ReplaySession(
         Recording recording,
@@ -48,59 +54,179 @@ public sealed class ReplaySession
         }
 
         _reader = reader;
+
         _cursor = new ReplayCursor(
             recording.Id,
             reader.SampleCount);
+
+        ExecutionState = new ReplayExecutionState(
+            ReplayExecutionStatus.Ready,
+            ReplayPauseReason.None,
+            null,
+            null);
     }
 
-    public bool StepForward() => _cursor.StepForward();
+    /// <summary>
+    /// Advances to the next sample.
+    /// Returns false when already at the end.
+    /// </summary>
+    public bool StepForward()
+    {
+        if (!_cursor.CanStepForward)
+            return false;
 
-    public bool StepBackward() => _cursor.StepBackward();
+        try
+        {
+            _cursor.StepForward();
 
-    public void Seek(long sequenceNumber) =>
-        _cursor.Seek(sequenceNumber);
+            UpdateExecutionState(
+                ReplayExecutionStatus.Paused,
+                ReplayPauseReason.User);
 
-    public void Reset() => _cursor.Reset();
-
+            return true;
+        }
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
+    }
 
     /// <summary>
-    /// Advances through the recording until the breakpoint matches
-    /// or the end of the recording is reached.
+    /// Moves to the previous sample.
+    /// Returns false when already at the beginning.
     /// </summary>
-    /// <returns>
-    /// True if the breakpoint matched; otherwise false.
-    /// </returns>
+    public bool StepBackward()
+    {
+        if (!_cursor.CanStepBackward)
+            return false;
+
+        try
+        {
+            _cursor.StepBackward();
+
+            UpdateExecutionState(
+                ReplayExecutionStatus.Paused,
+                ReplayPauseReason.User);
+
+            return true;
+        }
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Moves directly to the specified sequence number.
+    /// </summary>
+    public void Seek(long sequenceNumber)
+    {
+        // Validate before changing execution state.
+        // An invalid seek is a caller error, not a replay fault.
+        if (sequenceNumber < 0 ||
+            sequenceNumber >= SampleCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(sequenceNumber));
+        }
+
+        try
+        {
+            _cursor.Seek(sequenceNumber);
+
+            UpdateExecutionState(
+                ReplayExecutionStatus.Paused,
+                ReplayPauseReason.User);
+        }
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Restores the cursor and execution state
+    /// to their initial values.
+    /// </summary>
+    public void Reset()
+    {
+        _cursor.Reset();
+
+        ExecutionState = new ReplayExecutionState(
+            ReplayExecutionStatus.Ready,
+            ReplayPauseReason.None,
+            null,
+            null);
+    }
+
+    /// <summary>
+    /// Advances until the breakpoint matches
+    /// or the recording is exhausted.
+    /// </summary>
     public bool RunToBreakpoint(
-    ConditionalBreakpoint breakpoint)
+        ConditionalBreakpoint breakpoint)
     {
         return RunToBreakpointHit(breakpoint) is not null;
     }
 
-
+    /// <summary>
+    /// Advances until a breakpoint matches.
+    /// Returns the first matching hit, or null.
+    /// </summary>
     public BreakpointHit? RunToBreakpointHit(
         ConditionalBreakpoint breakpoint)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
-        while (_cursor.StepForward())
+        try
         {
-            var sample = _reader.Read(
-                _cursor.CurrentSequenceNumber);
+            UpdateExecutionState(
+                ReplayExecutionStatus.Running,
+                ReplayPauseReason.None);
 
-            var hit = BreakpointEvaluator.EvaluateHit(
-                breakpoint,
-                _cursor.Position,
-                sample);
+            while (_cursor.StepForward())
+            {
+                var sample = _reader.Read(
+                    _cursor.CurrentSequenceNumber);
 
-            if (hit is not null)
-                return hit;
+                var hit = BreakpointEvaluator.EvaluateHit(
+                    breakpoint,
+                    _cursor.Position,
+                    sample);
+
+                if (hit is not null)
+                {
+                    UpdateExecutionState(
+                        ReplayExecutionStatus.Paused,
+                        ReplayPauseReason.Breakpoint,
+                        sample);
+
+                    return hit;
+                }
+            }
+
+            UpdateExecutionState(
+                ReplayExecutionStatus.Completed,
+                ReplayPauseReason.EndOfRecording);
+
+            return null;
         }
-
-        return null;
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Advances until an enabled breakpoint matches.
+    /// Does not advance if none are enabled.
+    /// </summary>
     public BreakpointStop? RunToBreakpoints(
-    BreakpointCollection breakpoints)
+        BreakpointCollection breakpoints)
     {
         ArgumentNullException.ThrowIfNull(breakpoints);
 
@@ -113,17 +239,16 @@ public sealed class ReplaySession
             (IEnumerable<ConditionalBreakpoint>)active);
     }
 
-
     /// <summary>
     /// Advances until any supplied breakpoint matches.
-    /// Returns all matches at the first matching sample.
+    /// Returns all hits at the first matching sample.
     /// </summary>
     public BreakpointStop? RunToBreakpoints(
         IEnumerable<ConditionalBreakpoint> breakpoints)
     {
         ArgumentNullException.ThrowIfNull(breakpoints);
 
-        // Snapshot the definitions before advancing.
+        // Validate before changing execution state.
         var activeBreakpoints = breakpoints.ToArray();
 
         if (activeBreakpoints.Any(b => b is null))
@@ -140,7 +265,6 @@ public sealed class ReplaySession
                 nameof(breakpoints));
         }
 
-        // Reject duplicate breakpoint identities.
         if (activeBreakpoints
             .Select(b => b.Id)
             .Distinct()
@@ -151,34 +275,96 @@ public sealed class ReplaySession
                 nameof(breakpoints));
         }
 
-        while (_cursor.StepForward())
+        try
         {
-            var sample = _reader.Read(
-                _cursor.CurrentSequenceNumber);
+            UpdateExecutionState(
+                ReplayExecutionStatus.Running,
+                ReplayPauseReason.None);
 
-            var hits = new List<BreakpointHit>();
-
-            foreach (var breakpoint in activeBreakpoints)
+            while (_cursor.StepForward())
             {
-                var hit = BreakpointEvaluator.EvaluateHit(
-                    breakpoint,
-                    _cursor.Position,
-                    sample);
+                var sample = _reader.Read(
+                    _cursor.CurrentSequenceNumber);
 
-                if (hit is not null)
-                    hits.Add(hit);
+                var hits = new List<BreakpointHit>();
+
+                foreach (var breakpoint in activeBreakpoints)
+                {
+                    var hit = BreakpointEvaluator.EvaluateHit(
+                        breakpoint,
+                        _cursor.Position,
+                        sample);
+
+                    if (hit is not null)
+                        hits.Add(hit);
+                }
+
+                if (hits.Count > 0)
+                {
+                    UpdateExecutionState(
+                        ReplayExecutionStatus.Paused,
+                        ReplayPauseReason.Breakpoint,
+                        sample);
+
+                    return new BreakpointStop(
+                        _cursor.Position,
+                        sample.Timestamp,
+                        hits);
+                }
             }
 
-            if (hits.Count > 0)
-            {
-                return new BreakpointStop(
-                    _cursor.Position,
-                    sample.Timestamp,
-                    hits);
-            }
+            UpdateExecutionState(
+                ReplayExecutionStatus.Completed,
+                ReplayPauseReason.EndOfRecording);
+
+            return null;
+        }
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Creates a new immutable execution-state snapshot
+    /// using the current cursor position.
+    /// </summary>
+    private void UpdateExecutionState(
+        ReplayExecutionStatus status,
+        ReplayPauseReason reason,
+        TelemetrySample? sample = null)
+    {
+        if (status == ReplayExecutionStatus.Ready)
+        {
+            ExecutionState = new ReplayExecutionState(
+                status,
+                reason,
+                null,
+                null);
+
+            return;
         }
 
-        return null;
+        sample ??= CurrentSample;
+
+        ExecutionState = new ReplayExecutionState(
+            status,
+            reason,
+            _cursor.Position,
+            sample.Timestamp);
+    }
+
+    /// <summary>
+    /// Marks execution as faulted without attempting
+    /// another telemetry read.
+    /// </summary>
+    private void SetFaultedState()
+    {
+        ExecutionState = new ReplayExecutionState(
+            ReplayExecutionStatus.Faulted,
+            ReplayPauseReason.None,
+            null,
+            null);
     }
 }
-

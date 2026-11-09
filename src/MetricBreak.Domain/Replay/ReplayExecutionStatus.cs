@@ -5,5 +5,6 @@ public enum ReplayExecutionStatus
     Ready,
     Running,
     Paused,
-    Completed
+    Completed,
+    Faulted
 }
