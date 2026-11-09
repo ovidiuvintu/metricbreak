@@ -67,6 +67,13 @@ public sealed record ReplayExecutionState
                 "A completed replay must indicate the end of the recording.");
         }
 
+        if (status == ReplayExecutionStatus.Faulted &&
+            pauseReason != ReplayPauseReason.None)
+        {
+            throw new ArgumentException(
+                "A faulted replay cannot have a pause reason.");
+        }
+
         Status = status;
         PauseReason = pauseReason;
         Position = position;
