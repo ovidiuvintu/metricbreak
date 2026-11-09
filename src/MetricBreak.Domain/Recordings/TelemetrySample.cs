@@ -3,36 +3,15 @@ using System.Collections.ObjectModel;
 
 namespace MetricBreak.Domain.Recordings;
 
-/// <summary>
-/// Represents a single immutable telemetry sample within a recording.
-/// </summary>
-/// <remarks>
-/// A sample is uniquely identified within its recording by its
-/// sequence number, not its timestamp.
-///
-/// Multiple samples may have identical timestamps.
-///
-/// This class is intended as a logical representation of a sample,
-/// not as the bulk storage format for millions of measurements.
-/// </remarks>
 public sealed class TelemetrySample
 {
-    /// <summary>
-    /// Original zero-based position of the sample within its recording.
-    /// </summary>
     public long SequenceNumber { get; }
 
-    /// <summary>
-    /// Absolute UTC timestamp with nanosecond precision.
-    /// </summary>
     public TelemetryTimestamp Timestamp { get; }
 
-    /// <summary>
-    /// Channel measurements indexed by channel ID.
-    /// A null value represents a missing measurement.
-    /// </summary>
     public IReadOnlyDictionary<Guid, double?> Values { get; }
 
+    // Existing dictionary-backed constructor.
     public TelemetrySample(
         long sequenceNumber,
         TelemetryTimestamp timestamp,
@@ -41,55 +20,112 @@ public sealed class TelemetrySample
         if (sequenceNumber < 0)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(sequenceNumber),
-                "Sequence number cannot be negative.");
+                nameof(sequenceNumber));
         }
 
         ArgumentNullException.ThrowIfNull(values);
 
-        if (values.ContainsKey(Guid.Empty))
+        foreach (var channelId in values.Keys)
         {
-            throw new ArgumentException(
-                "Channel IDs cannot be empty.",
-                nameof(values));
+            if (channelId == Guid.Empty)
+            {
+                throw new ArgumentException(
+                    "Channel IDs cannot be empty.",
+                    nameof(values));
+            }
         }
 
         SequenceNumber = sequenceNumber;
         Timestamp = timestamp;
 
-        // Defensive copy prevents external modification.
-        Values = new ReadOnlyDictionary<Guid, double?>(
-            new Dictionary<Guid, double?>(values));
+        var copy = new Dictionary<Guid, double?>(values);
+
+        Values = new ReadOnlyDictionary<Guid, double?>(copy);
     }
 
-    /// <summary>
-    /// Returns the measurement for a channel, or null when the
-    /// channel is absent or its measurement is missing.
-    /// </summary>
-    public double? GetValue(Guid channelId)
+    // New indexed constructor.
+
+    public TelemetrySample(
+        long sequenceNumber,
+        TelemetryTimestamp timestamp,
+        ChannelIndex channelIndex,
+        IReadOnlyList<Guid> channelIds,
+        double?[] values)
     {
-        if (channelId == Guid.Empty)
+        if (sequenceNumber < 0)
         {
-            throw new ArgumentException(
-                "Channel ID cannot be empty.",
-                nameof(channelId));
+            throw new ArgumentOutOfRangeException(
+                nameof(sequenceNumber));
         }
 
+        ArgumentNullException.ThrowIfNull(channelIndex);
+        ArgumentNullException.ThrowIfNull(channelIds);
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (channelIndex.Count != channelIds.Count)
+        {
+            throw new ArgumentException(
+                "Channel count must match the index.",
+                nameof(channelIds));
+        }
+
+        for (var position = 0; position < channelIds.Count; position++)
+        {
+            if (channelIndex.ChannelIds[position] != channelIds[position])
+            {
+                throw new ArgumentException(
+                    "Channel order must match the index.",
+                    nameof(channelIds));
+            }
+        }
+
+        SequenceNumber = sequenceNumber;
+        Timestamp = timestamp;
+
+        var copiedValues = (double?[])values.Clone();
+
+        Values = new IndexedValueDictionary(
+            channelIndex,
+            copiedValues);
+    }
+
+
+    public TelemetrySample(
+        long sequenceNumber,
+        TelemetryTimestamp timestamp,
+        ChannelIndex channelIndex,
+        double?[] values)
+    {
+        if (sequenceNumber < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(sequenceNumber));
+        }
+
+        ArgumentNullException.ThrowIfNull(channelIndex);
+        ArgumentNullException.ThrowIfNull(values);
+
+        SequenceNumber = sequenceNumber;
+        Timestamp = timestamp;
+
+        var copiedValues = (double?[])values.Clone();
+
+        Values = new IndexedValueDictionary(
+            channelIndex,
+            copiedValues);
+    }
+
+
+
+    public double? GetValue(Guid channelId)
+    {
         return Values.TryGetValue(channelId, out var value)
             ? value
             : null;
     }
 
-    /// <summary>
-    /// Determines whether this sample contains the specified channel.
-    /// </summary>
     public bool HasChannel(Guid channelId)
     {
-        if (channelId == Guid.Empty)
-        {
-            return false;
-        }
-
         return Values.ContainsKey(channelId);
     }
 }
