@@ -11,7 +11,7 @@ public sealed class IndexedCsvTelemetryParser
     {
         ArgumentNullException.ThrowIfNull(reader);
 
-        var header = ReadRecord(reader);
+        var header = CsvRecordReader.ReadRecord(reader);
 
         if (header is null)
             throw new FormatException("CSV is empty.");
