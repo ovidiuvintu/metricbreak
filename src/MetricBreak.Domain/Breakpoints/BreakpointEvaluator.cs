@@ -58,7 +58,7 @@ public static class BreakpointEvaluator
             position.SequenceNumber != sample.SequenceNumber)
         {
             throw new ArgumentException(
-                "Position must identify the supplied sample.",
+                "_position must identify the supplied sample.",
                 nameof(position));
         }
 
