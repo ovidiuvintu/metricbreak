@@ -7,34 +7,37 @@ namespace MetricBreak.Ingestion.Csv;
 
 public sealed class CsvRecordingImporter
 {
-    private readonly CsvTelemetryParser _parser = new();
-
     public ImportedCsvRecording Import(string filePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
-        // Read the original bytes once so the hash, file size,
-        // and parsed content refer to the same snapshot.
+        // Read the original file bytes once.
+        // Preserve the exact source identity.
         var bytes = File.ReadAllBytes(filePath);
+
+        var contentHash = Convert.ToHexString(
+            SHA256.HashData(bytes));
 
         var source = new RecordingSource(
             Path.GetFileName(filePath),
-            Convert.ToHexString(SHA256.HashData(bytes)),
+            contentHash,
             bytes.LongLength);
 
-        // Strict UTF-8 prevents invalid byte sequences from
-        // being silently replaced during decoding.
-        var encoding = new UTF8Encoding(
-            encoderShouldEmitUTF8Identifier: false,
-            throwOnInvalidBytes: true);
+        // Parse directly into indexed telemetry samples.
+        // No intermediate GUID-keyed dictionaries.
+        using var stream = new MemoryStream(
+            bytes,
+            writable: false);
 
-        using var stream = new MemoryStream(bytes, writable: false);
-        using var textReader = new StreamReader(
+        using var reader = new StreamReader(
             stream,
-            encoding,
+            new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false,
+                throwOnInvalidBytes: true),
             detectEncodingFromByteOrderMarks: true);
 
-        var parsed = _parser.Parse(textReader);
+        var parsed = new IndexedCsvTelemetryParser()
+            .Parse(reader);
 
         var recordingId = Guid.NewGuid();
 
@@ -44,11 +47,13 @@ public sealed class CsvRecordingImporter
             source,
             DateTimeOffset.UtcNow);
 
-        var reader = new CsvTelemetryReader(recordingId, parsed);
+        var telemetryReader = new IndexedTelemetryReader(
+            recordingId,
+            parsed.Samples);
 
         return new ImportedCsvRecording(
             recording,
             parsed.Channels,
-            reader);
+            telemetryReader);
     }
 }
