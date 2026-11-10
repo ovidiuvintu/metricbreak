@@ -1,6 +1,6 @@
 using MetricBreak.Domain.Breakpoints;
 
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Breakpoints;
 
 public static class BreakpointResponseMapper
 {

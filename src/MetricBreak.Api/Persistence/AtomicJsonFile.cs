@@ -1,7 +1,7 @@
 
 using System.Text;
 
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Persistence;
 
 /// <summary>
 /// Publishes a complete UTF-8 JSON document using a same-directory rename.

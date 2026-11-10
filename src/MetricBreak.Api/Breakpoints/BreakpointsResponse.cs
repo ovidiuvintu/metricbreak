@@ -1,4 +1,4 @@
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Breakpoints;
 
 public sealed record BreakpointsResponse(
     IReadOnlyList<BreakpointResponse> Breakpoints);

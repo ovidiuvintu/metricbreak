@@ -1,6 +1,7 @@
 
 using System.Text.Json;
-using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Investigations;
+using MetricBreak.Api.Workspaces;
 
 namespace MetricBreak.Api.Tests.Sessions;
 

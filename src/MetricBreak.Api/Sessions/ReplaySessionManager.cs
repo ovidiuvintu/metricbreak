@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MetricBreak.Api.Investigations;
 using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
 using MetricBreak.Ingestion.Csv;
