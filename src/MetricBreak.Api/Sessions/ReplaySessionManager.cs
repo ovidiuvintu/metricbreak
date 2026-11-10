@@ -20,7 +20,7 @@ public sealed class ReplaySessionManager
 
         var sessionId = Guid.NewGuid();
 
-        if (!_sessions.TryAdd(sessionId, new SessionEntry(controller)))
+        if (!_sessions.TryAdd(sessionId, new SessionEntry(controller, imported)))
         {
             throw new InvalidOperationException(
                 "Unable to create replay session.");
@@ -74,17 +74,116 @@ public sealed class ReplaySessionManager
         }
     }
 
+    private static ReplaySessionSnapshot CreateSnapshot(
+        Guid sessionId,
+        SessionEntry entry)
+    {
+        var controller = entry.Controller;
+        var imported = entry.Imported;
+
+        return new ReplaySessionSnapshot(
+            SessionId: sessionId,
+            RecordingId: imported.Recording.Id,
+            RecordingName: imported.Recording.Name,
+            SampleCount: imported.Reader.SampleCount,
+            ExecutionState: controller.State,
+            Position: controller.Position,
+            CurrentSample: controller.CurrentSample);
+    }
+
+    public bool TryGetSnapshot(
+        Guid sessionId,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
+
+    public bool TryStepForward(
+        Guid sessionId,
+        out bool advanced)
+    {
+        return TryExecute(
+            sessionId,
+            controller => controller.StepForward(),
+            out advanced);
+    }
+
+    public bool TryStepForwardWithSnapshot(
+        Guid sessionId,
+        out bool advanced,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        advanced = false;
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            advanced = entry.Controller.StepForward();
+
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            return true;
+        }
+    }
+
+    public bool TryStepBackwardWithSnapshot(
+        Guid sessionId,
+        out bool movedBackward,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        movedBackward = false;
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            movedBackward = entry.Controller.StepBackward();
+
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            return true;
+        }
+    }
+
     private sealed class SessionEntry
     {
         public ReplayExecutionController Controller { get; }
+
+        public ImportedCsvRecording Imported { get; }
 
         public object SyncRoot { get; } = new();
 
         public bool IsClosed { get; set; }
 
-        public SessionEntry(ReplayExecutionController controller)
+        public SessionEntry(
+            ReplayExecutionController controller,
+            ImportedCsvRecording imported)
         {
             Controller = controller;
+            Imported = imported;
         }
     }
 }
