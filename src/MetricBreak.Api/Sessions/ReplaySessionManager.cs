@@ -201,6 +201,30 @@ public sealed class ReplaySessionManager
         }
     }
 
+
+    public bool TryResetWithSnapshot(
+        Guid sessionId,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            entry.Controller.Reset();
+
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            return true;
+        }
+    }
+
+
     private sealed class SessionEntry
     {
         public ReplayExecutionController Controller { get; }
