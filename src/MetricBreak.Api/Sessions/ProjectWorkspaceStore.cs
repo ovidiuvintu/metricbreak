@@ -248,7 +248,7 @@ public sealed class ProjectWorkspaceStore
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
 
         var json = JsonSerializer.Serialize(investigation, _jsonOptions);
-        File.WriteAllText(fullPath, json);
+        AtomicJsonFile.Write(fullPath, json);
 
         var updatedItems = manifest.Investigations
             .Where(item => item.InvestigationId != investigation.InvestigationId)
@@ -454,7 +454,7 @@ public sealed class ProjectWorkspaceStore
     {
         var manifestPath = GetManifestPath(rootPath);
         var json = JsonSerializer.Serialize(manifest, _jsonOptions);
-        File.WriteAllText(manifestPath, json);
+        AtomicJsonFile.Write(manifestPath, json);
     }
 
     private static string GetProjectDirectory(string rootPath)
@@ -479,7 +479,7 @@ public sealed class ProjectWorkspaceStore
         var state = new WorkspaceState(rootPath);
         var json = JsonSerializer.Serialize(state, _jsonOptions);
 
-        File.WriteAllText(_workspaceStatePath, json);
+        AtomicJsonFile.Write(_workspaceStatePath, json);
     }
 
     private void TryClearWorkspaceState()
