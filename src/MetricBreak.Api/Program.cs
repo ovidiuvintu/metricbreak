@@ -19,6 +19,10 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+_ = app.Services
+    .GetRequiredService<ProjectWorkspaceStore>()
+    .TryRestoreLastOpenedProject(out _);
+
 app.MapProjectEndpoints();
 app.MapSessionEndpoints();
 app.MapReplayEndpoints();

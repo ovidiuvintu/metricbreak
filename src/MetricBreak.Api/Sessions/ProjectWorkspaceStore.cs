@@ -5,6 +5,8 @@ namespace MetricBreak.Api.Sessions;
 
 public sealed class ProjectWorkspaceStore
 {
+    private const int _manifestSchemaVersion = 1;
+
     private static readonly JsonSerializerOptions _jsonOptions =
         new()
         {
@@ -13,24 +15,115 @@ public sealed class ProjectWorkspaceStore
 
     private readonly ConcurrentDictionary<Guid, string> _projectRoots = new();
 
+    private readonly string _workspaceStatePath = Path.Combine(
+        Path.GetTempPath(),
+        "metricbreak",
+        "workspace-state.json");
+
+    public bool TryRestoreLastOpenedProject(
+        out ProjectSummaryResponse? project)
+    {
+        project = null;
+
+        if (!File.Exists(_workspaceStatePath))
+            return false;
+
+        try
+        {
+            var json = File.ReadAllText(_workspaceStatePath);
+            var state = JsonSerializer.Deserialize<WorkspaceState>(json, _jsonOptions);
+
+            if (state is null || string.IsNullOrWhiteSpace(state.LastProjectRootPath))
+                return false;
+
+            return TryOpenProject(
+                state.LastProjectRootPath,
+                out project,
+                out _);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public IReadOnlyList<ProjectSummaryResponse> GetOpenProjects()
+    {
+        var projects = new List<ProjectSummaryResponse>();
+
+        foreach (var pair in _projectRoots)
+        {
+            if (!TryLoadManifest(
+                    pair.Value,
+                    out var manifest,
+                    out _)
+                || manifest is null)
+            {
+                continue;
+            }
+
+            projects.Add(new ProjectSummaryResponse(
+                manifest.ProjectId,
+                manifest.ProjectName,
+                pair.Value,
+                manifest.Investigations.Count));
+        }
+
+        return projects;
+    }
+
+    public bool TryCloseProject(
+        Guid projectId,
+        out ProjectStoreError? error)
+    {
+        error = null;
+
+        if (projectId == Guid.Empty)
+        {
+            error = new ProjectStoreError(
+                "InvalidProjectId",
+                "Project ID cannot be empty.");
+            return false;
+        }
+
+        if (!_projectRoots.TryRemove(projectId, out _))
+        {
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
+            return false;
+        }
+
+        if (_projectRoots.IsEmpty)
+        {
+            TryClearWorkspaceState();
+        }
+
+        return true;
+    }
+
     public bool TryCreateProject(
         string projectName,
         string rootPath,
         out ProjectSummaryResponse? project,
-        out string? error)
+        out ProjectStoreError? error)
     {
         project = null;
         error = null;
 
         if (string.IsNullOrWhiteSpace(projectName))
         {
-            error = "Project name is required.";
+            error = new ProjectStoreError(
+                "InvalidProjectName",
+                "Project name is required.");
             return false;
         }
 
         if (string.IsNullOrWhiteSpace(rootPath))
         {
-            error = "Project root path is required.";
+            error = new ProjectStoreError(
+                "InvalidRootPath",
+                "Project root path is required.");
             return false;
         }
 
@@ -39,7 +132,9 @@ public sealed class ProjectWorkspaceStore
 
         if (File.Exists(manifestPath))
         {
-            error = "A MetricBreak project already exists at this path.";
+            error = new ProjectStoreError(
+                "ProjectAlreadyExists",
+                "A MetricBreak project already exists at this path.");
             return false;
         }
 
@@ -49,7 +144,7 @@ public sealed class ProjectWorkspaceStore
         var now = DateTimeOffset.UtcNow;
 
         var manifest = new ProjectManifest(
-            SchemaVersion: 1,
+            SchemaVersion: _manifestSchemaVersion,
             ProjectId: Guid.NewGuid(),
             ProjectName: projectName,
             CreatedAtUtc: now,
@@ -59,6 +154,7 @@ public sealed class ProjectWorkspaceStore
         SaveManifest(fullRootPath, manifest);
 
         _projectRoots[manifest.ProjectId] = fullRootPath;
+        PersistLastOpenedProject(fullRootPath);
 
         project = new ProjectSummaryResponse(
             manifest.ProjectId,
@@ -72,27 +168,36 @@ public sealed class ProjectWorkspaceStore
     public bool TryOpenProject(
         string rootPath,
         out ProjectSummaryResponse? project,
-        out string? error)
+        out ProjectStoreError? error)
     {
         project = null;
         error = null;
 
         if (string.IsNullOrWhiteSpace(rootPath))
         {
-            error = "Project root path is required.";
+            error = new ProjectStoreError(
+                "InvalidRootPath",
+                "Project root path is required.");
             return false;
         }
 
         var fullRootPath = Path.GetFullPath(rootPath);
 
-        if (!TryLoadManifest(fullRootPath, out var manifest)
+        if (!TryLoadManifest(
+                fullRootPath,
+                out var manifest,
+                out error)
             || manifest is null)
         {
-            error = "No MetricBreak project was found at the provided path.";
+            error ??= new ProjectStoreError(
+                "ProjectNotFound",
+                "No MetricBreak project was found at the provided path.");
+
             return false;
         }
 
         _projectRoots[manifest.ProjectId] = fullRootPath;
+        PersistLastOpenedProject(fullRootPath);
 
         project = new ProjectSummaryResponse(
             manifest.ProjectId,
@@ -107,21 +212,28 @@ public sealed class ProjectWorkspaceStore
         Guid projectId,
         ExportedInvestigation investigation,
         out string? filePath,
-        out string? error)
+        out ProjectStoreError? error)
     {
         filePath = null;
         error = null;
 
         if (!_projectRoots.TryGetValue(projectId, out var rootPath))
         {
-            error = "Project is not open in the current workspace.";
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
             return false;
         }
 
-        if (!TryLoadManifest(rootPath, out var manifest)
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
             || manifest is null)
         {
-            error = "Project manifest could not be loaded.";
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
             return false;
         }
 
@@ -167,21 +279,28 @@ public sealed class ProjectWorkspaceStore
         Guid projectId,
         Guid investigationId,
         out ExportedInvestigation? investigation,
-        out string? error)
+        out ProjectStoreError? error)
     {
         investigation = null;
         error = null;
 
         if (!_projectRoots.TryGetValue(projectId, out var rootPath))
         {
-            error = "Project is not open in the current workspace.";
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
             return false;
         }
 
-        if (!TryLoadManifest(rootPath, out var manifest)
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
             || manifest is null)
         {
-            error = "Project manifest could not be loaded.";
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
             return false;
         }
 
@@ -190,7 +309,9 @@ public sealed class ProjectWorkspaceStore
 
         if (indexItem is null)
         {
-            error = "Investigation was not found in the project.";
+            error = new ProjectStoreError(
+                "InvestigationNotFound",
+                "Investigation was not found in the project.");
             return false;
         }
 
@@ -200,43 +321,64 @@ public sealed class ProjectWorkspaceStore
 
         if (!File.Exists(fullPath))
         {
-            error = "Investigation file is missing from project storage.";
+            error = new ProjectStoreError(
+                "InvestigationFileMissing",
+                "Investigation file is missing from project storage.");
             return false;
         }
 
-        var json = File.ReadAllText(fullPath);
-
-        investigation = JsonSerializer.Deserialize<ExportedInvestigation>(
-            json,
-            _jsonOptions);
-
-        if (investigation is null)
+        try
         {
-            error = "Investigation file could not be parsed.";
+            var json = File.ReadAllText(fullPath);
+
+            investigation = JsonSerializer.Deserialize<ExportedInvestigation>(
+                json,
+                _jsonOptions);
+
+            if (investigation is null)
+            {
+                error = new ProjectStoreError(
+                    "InvestigationParseFailed",
+                    "Investigation file could not be parsed.");
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            error = new ProjectStoreError(
+                "InvestigationParseFailed",
+                "Investigation file contains invalid JSON.");
             return false;
         }
-
-        return true;
     }
 
     public bool TryListInvestigations(
         Guid projectId,
         out IReadOnlyList<ProjectInvestigationItemResponse>? investigations,
-        out string? error)
+        out ProjectStoreError? error)
     {
         investigations = null;
         error = null;
 
         if (!_projectRoots.TryGetValue(projectId, out var rootPath))
         {
-            error = "Project is not open in the current workspace.";
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
             return false;
         }
 
-        if (!TryLoadManifest(rootPath, out var manifest)
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
             || manifest is null)
         {
-            error = "Project manifest could not be loaded.";
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
             return false;
         }
 
@@ -253,24 +395,57 @@ public sealed class ProjectWorkspaceStore
         return true;
     }
 
-    private static bool TryLoadManifest(
+    private bool TryLoadManifest(
         string rootPath,
-        out ProjectManifest? manifest)
+        out ProjectManifest? manifest,
+        out ProjectStoreError? error)
     {
         manifest = null;
+        error = null;
 
         var manifestPath = GetManifestPath(rootPath);
 
         if (!File.Exists(manifestPath))
+        {
+            error = new ProjectStoreError(
+                "ProjectNotFound",
+                "No MetricBreak project was found at the provided path.");
             return false;
+        }
 
         var json = File.ReadAllText(manifestPath);
 
-        manifest = JsonSerializer.Deserialize<ProjectManifest>(
-            json,
-            _jsonOptions);
+        try
+        {
+            manifest = JsonSerializer.Deserialize<ProjectManifest>(
+                json,
+                _jsonOptions);
+        }
+        catch (JsonException)
+        {
+            error = new ProjectStoreError(
+                "ManifestCorrupt",
+                "Project manifest contains invalid JSON.");
+            return false;
+        }
 
-        return manifest is not null;
+        if (manifest is null)
+        {
+            error = new ProjectStoreError(
+                "ManifestCorrupt",
+                "Project manifest could not be parsed.");
+            return false;
+        }
+
+        if (manifest.SchemaVersion != _manifestSchemaVersion)
+        {
+            error = new ProjectStoreError(
+                "UnsupportedManifestSchema",
+                $"Project manifest schema version '{manifest.SchemaVersion}' is not supported.");
+            return false;
+        }
+
+        return true;
     }
 
     private static void SaveManifest(
@@ -296,4 +471,24 @@ public sealed class ProjectWorkspaceStore
     {
         return Path.Combine(GetProjectDirectory(rootPath), "project.mbproj.json");
     }
+
+    private void PersistLastOpenedProject(string rootPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_workspaceStatePath)!);
+
+        var state = new WorkspaceState(rootPath);
+        var json = JsonSerializer.Serialize(state, _jsonOptions);
+
+        File.WriteAllText(_workspaceStatePath, json);
+    }
+
+    private void TryClearWorkspaceState()
+    {
+        if (File.Exists(_workspaceStatePath))
+        {
+            File.Delete(_workspaceStatePath);
+        }
+    }
+
+    private sealed record WorkspaceState(string LastProjectRootPath);
 }
