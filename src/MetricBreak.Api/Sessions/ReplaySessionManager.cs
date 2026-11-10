@@ -56,6 +56,37 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryContinueBackwardWithSnapshot(
+        Guid sessionId,
+        out bool hadActiveBreakpoints,
+        out BreakpointStop? stop,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        hadActiveBreakpoints = false;
+        stop = null;
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            hadActiveBreakpoints = entry.Breakpoints.ActiveCount > 0;
+
+            if (hadActiveBreakpoints)
+            {
+                stop = entry.Controller.ContinueBackward(entry.Breakpoints);
+            }
+
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            return true;
+        }
+    }
+
     public bool TryContinueWithSnapshot(
         Guid sessionId,
         out bool hadActiveBreakpoints,

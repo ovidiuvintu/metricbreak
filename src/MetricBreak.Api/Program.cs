@@ -257,6 +257,56 @@ app.MapPost(
     .Produces(StatusCodes.Status404NotFound);
 
 app.MapPost(
+    "/api/sessions/{sessionId:guid}/continue-backward",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        var found = manager.TryContinueBackwardWithSnapshot(
+            sessionId,
+            out var hadActiveBreakpoints,
+            out var stop,
+            out var snapshot);
+
+        if (!found || snapshot is null)
+            return Results.NotFound();
+
+        var session = SessionStateResponseMapper.Map(snapshot);
+
+        if (!hadActiveBreakpoints)
+        {
+            return Results.Ok(new ContinueResponse(
+                Executed: false,
+                HitBreakpoint: false,
+                ReachedEndOfRecording: false,
+                Stop: null,
+                Session: session,
+                ReachedStartOfRecording: false));
+        }
+
+        var hitBreakpoint = stop is not null;
+
+        var reachedStartOfRecording =
+            stop is null &&
+            snapshot.ExecutionState.PauseReason ==
+            ReplayPauseReason.StartOfRecording;
+
+        return Results.Ok(new ContinueResponse(
+            Executed: true,
+            HitBreakpoint: hitBreakpoint,
+            ReachedEndOfRecording: false,
+            Stop: stop is null
+                ? null
+                : ContinueResponseMapper.Map(stop),
+            Session: session,
+            ReachedStartOfRecording: reachedStartOfRecording));
+    })
+    .WithName("ContinueReplaySessionBackward")
+    .WithTags("Replay Sessions")
+    .Produces<ContinueResponse>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound);
+
+app.MapPost(
     "/api/sessions/{sessionId:guid}/breakpoints",
     (
         Guid sessionId,
