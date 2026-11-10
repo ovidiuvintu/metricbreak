@@ -16,6 +16,15 @@ internal static class ApiTags
 
 internal static class EndpointMappings
 {
+    private static object ToErrorBody(ProjectStoreError error)
+    {
+        return new
+        {
+            ErrorCode = error.Code,
+            Error = error.Message
+        };
+    }
+
     public static WebApplication MapProjectEndpoints(this WebApplication app)
     {
         app.MapPost(
@@ -31,10 +40,10 @@ internal static class EndpointMappings
                         out var error)
                     || project is null)
                 {
-                    return Results.BadRequest(new
-                    {
-                        Error = error ?? "Unable to create project."
-                    });
+                    return Results.BadRequest(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectCreateFailed",
+                            "Unable to create project.")));
                 }
 
                 return Results.Created(
@@ -58,10 +67,10 @@ internal static class EndpointMappings
                         out var error)
                     || project is null)
                 {
-                    return Results.NotFound(new
-                    {
-                        Error = error ?? "Project not found."
-                    });
+                    return Results.NotFound(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectOpenFailed",
+                            "Project not found.")));
                 }
 
                 return Results.Ok(project);
@@ -69,6 +78,39 @@ internal static class EndpointMappings
             .WithName("OpenProject")
             .WithTags(ApiTags.Projects)
             .Produces<ProjectSummaryResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
+        app.MapGet(
+            "/api/projects/open",
+            (ProjectWorkspaceStore projectStore) =>
+            {
+                return Results.Ok(projectStore.GetOpenProjects());
+            })
+            .WithName("GetOpenProjects")
+            .WithTags(ApiTags.Projects)
+            .Produces<IReadOnlyList<ProjectSummaryResponse>>(StatusCodes.Status200OK);
+
+        app.MapPost(
+            "/api/projects/{projectId:guid}/close",
+            (
+                Guid projectId,
+                ProjectWorkspaceStore projectStore) =>
+            {
+                if (!projectStore.TryCloseProject(
+                        projectId,
+                        out var error))
+                {
+                    return Results.NotFound(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectCloseFailed",
+                            "Project was not open.")));
+                }
+
+                return Results.NoContent();
+            })
+            .WithName("CloseProject")
+            .WithTags(ApiTags.Projects)
+            .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status404NotFound);
 
         app.MapGet(
@@ -83,10 +125,10 @@ internal static class EndpointMappings
                         out var error)
                     || investigations is null)
                 {
-                    return Results.NotFound(new
-                    {
-                        Error = error ?? "Project not found."
-                    });
+                    return Results.NotFound(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectNotFound",
+                            "Project not found.")));
                 }
 
                 return Results.Ok(new ProjectInvestigationsResponse(
@@ -410,10 +452,10 @@ internal static class EndpointMappings
                             out var error)
                         || projectPath is null)
                     {
-                        return Results.BadRequest(new
-                        {
-                            Error = error ?? "Unable to save investigation to project."
-                        });
+                        return Results.BadRequest(ToErrorBody(
+                            error ?? new ProjectStoreError(
+                                "InvestigationSaveFailed",
+                                "Unable to save investigation to project.")));
                     }
 
                     filePath = projectPath;
@@ -457,10 +499,10 @@ internal static class EndpointMappings
                             out var error)
                         || investigation is null)
                     {
-                        return Results.NotFound(new
-                        {
-                            Error = error ?? "Investigation not found in project."
-                        });
+                        return Results.NotFound(ToErrorBody(
+                            error ?? new ProjectStoreError(
+                                "InvestigationNotFound",
+                                "Investigation not found in project.")));
                     }
                 }
                 else if (!store.TryLoad(
