@@ -19,6 +19,24 @@ public sealed class CsvSessionImportService
         IFormFile file,
         CancellationToken cancellationToken = default)
     {
+        var imported = await ImportRecordingAsync(
+            file,
+            cancellationToken);
+
+        var sessionId = _manager.Create(imported);
+
+        return new CreateSessionResponse(
+            sessionId,
+            imported.Recording.Id,
+            imported.Recording.Name,
+            imported.Reader.SampleCount,
+            "Ready");
+    }
+
+    public async Task<ImportedCsvRecording> ImportRecordingAsync(
+        IFormFile file,
+        CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(file);
 
         if (file.Length == 0)
@@ -60,16 +78,7 @@ public sealed class CsvSessionImportService
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var imported = _importer.Import(temporaryPath);
-
-            var sessionId = _manager.Create(imported);
-
-            return new CreateSessionResponse(
-                sessionId,
-                imported.Recording.Id,
-                imported.Recording.Name,
-                imported.Reader.SampleCount,
-                "Ready");
+            return _importer.Import(temporaryPath);
         }
         finally
         {
