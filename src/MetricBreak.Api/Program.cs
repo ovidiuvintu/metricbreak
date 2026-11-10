@@ -65,5 +65,89 @@ app.MapPost(
     .Produces(
         StatusCodes.Status400BadRequest);
 
+app.MapGet(
+    "/api/sessions/{sessionId:guid}",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        if (!manager.TryGetSnapshot(sessionId, out var snapshot)
+            || snapshot is null)
+        {
+            return Results.NotFound();
+        }
+
+        // Compiler now knows snapshot is non-null.
+        var sample = snapshot.CurrentSample;
+
+        var response = new SessionStateResponse(
+            SessionId: snapshot.SessionId,
+            RecordingId: snapshot.RecordingId,
+            RecordingName: snapshot.RecordingName,
+            SampleCount: snapshot.SampleCount,
+            ExecutionState:
+                snapshot.ExecutionState.Status.ToString(),
+            PauseReason:
+                snapshot.ExecutionState.PauseReason.ToString(),
+            CurrentSample: new CurrentSampleResponse(
+                Sequence: sample.SequenceNumber,
+                TimestampNanoseconds:
+                    sample.Timestamp.UnixNanoseconds,
+                Channels: sample.Values));
+
+        return Results.Ok(
+            SessionStateResponseMapper.Map(snapshot));
+    });
+
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/step-forward",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        if (!manager.TryStepForwardWithSnapshot(
+                sessionId,
+                out var advanced,
+                out var snapshot) ||
+            snapshot is null)
+        {
+            return Results.NotFound();
+        }
+
+        var response = new StepForwardResponse(
+            Advanced: advanced,
+            Session: SessionStateResponseMapper.Map(snapshot));
+
+        return Results.Ok(response);
+    })
+    .WithName("StepForwardReplaySession")
+    .WithTags("Replay Sessions");
+
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/step-backward",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        if (!manager.TryStepBackwardWithSnapshot(
+                sessionId,
+                out var movedBackward,
+                out var snapshot) ||
+            snapshot is null)
+        {
+            return Results.NotFound();
+        }
+
+        var response = new StepBackwardResponse(
+            MovedBackward: movedBackward,
+            Session: SessionStateResponseMapper.Map(snapshot));
+
+        return Results.Ok(response);
+    })
+    .WithName("StepBackwardReplaySession")
+    .WithTags("Replay Sessions");
+
 app.Run();
+
+public partial class Program { }
 
