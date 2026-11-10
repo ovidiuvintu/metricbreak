@@ -15,10 +15,17 @@ public sealed class ProjectWorkspaceStore
 
     private readonly ConcurrentDictionary<Guid, string> _projectRoots = new();
 
-    private readonly string _workspaceStatePath = Path.Combine(
-        Path.GetTempPath(),
-        "metricbreak",
-        "workspace-state.json");
+    private readonly string _workspaceStatePath;
+
+    public ProjectWorkspaceStore(string? workspaceStatePath = null)
+    {
+        _workspaceStatePath = Path.GetFullPath(
+            workspaceStatePath ?? Path.Combine(
+                Environment.GetFolderPath(
+                    Environment.SpecialFolder.LocalApplicationData),
+                "MetricBreak",
+                "workspace-state.json"));
+    }
 
     public bool TryRestoreLastOpenedProject(
         out ProjectSummaryResponse? project)
@@ -208,6 +215,7 @@ public sealed class ProjectWorkspaceStore
         return true;
     }
 
+
     public bool TrySaveInvestigation(
         Guid projectId,
         ExportedInvestigation investigation,
@@ -216,6 +224,8 @@ public sealed class ProjectWorkspaceStore
     {
         filePath = null;
         error = null;
+
+        ArgumentNullException.ThrowIfNull(investigation);
 
         if (!_projectRoots.TryGetValue(projectId, out var rootPath))
         {
@@ -237,21 +247,43 @@ public sealed class ProjectWorkspaceStore
             return false;
         }
 
-        var relativePath = Path.Combine(
-            "investigations",
-            $"{investigation.InvestigationId:N}.json");
+        // Each save creates a new immutable revision.
+        var relativePath = CreateInvestigationRevisionPath(
+            investigation.InvestigationId);
 
         var fullPath = Path.Combine(
             GetProjectDirectory(rootPath),
             relativePath);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var json = JsonSerializer.Serialize(
+            investigation,
+            _jsonOptions);
 
-        var json = JsonSerializer.Serialize(investigation, _jsonOptions);
-        AtomicJsonFile.Write(fullPath, json);
+        // Step 1: Publish the new investigation revision.
+        // No existing revision is overwritten.
+        try
+        {
+            AtomicJsonFile.Write(fullPath, json);
+        }
+        catch (IOException)
+        {
+            error = new ProjectStoreError(
+                "InvestigationWriteFailed",
+                "Investigation revision could not be written.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = new ProjectStoreError(
+                "InvestigationWriteFailed",
+                "Access to investigation storage was denied.");
+            return false;
+        }
 
+        // Step 2: Prepare the updated manifest.
         var updatedItems = manifest.Investigations
-            .Where(item => item.InvestigationId != investigation.InvestigationId)
+            .Where(item =>
+                item.InvestigationId != investigation.InvestigationId)
             .ToList();
 
         updatedItems.Add(new ProjectInvestigationIndexItem(
@@ -268,12 +300,33 @@ public sealed class ProjectWorkspaceStore
             Investigations = updatedItems
         };
 
-        SaveManifest(rootPath, updatedManifest);
+        // Step 3: Commit by publishing the manifest.
+        // If this fails, the previous manifest remains authoritative.
+        try
+        {
+            SaveManifest(rootPath, updatedManifest);
+        }
+        catch (IOException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Investigation revision was written, but the " +
+                "project manifest could not be updated.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Access to project manifest storage was denied.");
+            return false;
+        }
 
+        // Only report success after manifest publication.
         filePath = fullPath;
-
         return true;
     }
+
 
     public bool TryLoadInvestigation(
         Guid projectId,
@@ -489,6 +542,18 @@ public sealed class ProjectWorkspaceStore
             File.Delete(_workspaceStatePath);
         }
     }
+
+
+    private static string CreateInvestigationRevisionPath(
+        Guid investigationId)
+    {
+        var revisionId = Guid.NewGuid();
+
+        return Path.Combine(
+            "investigations",
+            $"{investigationId:N}-{revisionId:N}.json");
+    }
+
 
     private sealed record WorkspaceState(string LastProjectRootPath);
 }
