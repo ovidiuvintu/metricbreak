@@ -1,6 +1,6 @@
 
 using System.Text.Json;
-using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Persistence;
 
 namespace MetricBreak.Api.Tests.Sessions;
 

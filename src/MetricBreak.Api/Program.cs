@@ -1,5 +1,7 @@
 using MetricBreak.Api;
+using MetricBreak.Api.Investigations;
 using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Workspaces;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);

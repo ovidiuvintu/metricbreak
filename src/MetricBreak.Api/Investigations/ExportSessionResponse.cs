@@ -1,4 +1,4 @@
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Investigations;
 
 public sealed record ExportSessionResponse(
     Guid InvestigationId,

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Investigations;
 
 public sealed class SessionInvestigationStore
 {

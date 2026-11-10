@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using MetricBreak.Api.Investigations;
+using MetricBreak.Api.Persistence;
 
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Workspaces;
 
 public sealed class ProjectWorkspaceStore
 {

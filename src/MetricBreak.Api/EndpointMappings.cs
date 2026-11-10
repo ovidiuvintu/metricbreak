@@ -1,4 +1,7 @@
+using MetricBreak.Api.Breakpoints;
+using MetricBreak.Api.Investigations;
 using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Workspaces;
 using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
 using Microsoft.AspNetCore.Mvc;

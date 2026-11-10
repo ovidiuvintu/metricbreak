@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Workspaces;
 
 namespace MetricBreak.Api.Tests.Sessions;
 

@@ -1,5 +1,4 @@
-
-namespace MetricBreak.Api.Sessions;
+namespace MetricBreak.Api.Investigations;
 
 internal static class InvestigationRevisionInspector
 {
