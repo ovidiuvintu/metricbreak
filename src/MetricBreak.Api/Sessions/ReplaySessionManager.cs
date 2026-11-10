@@ -168,6 +168,39 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TrySeekWithSnapshot(
+        Guid sessionId,
+        long sequenceNumber,
+        out ReplaySessionSnapshot? snapshot,
+        out bool invalidPosition)
+    {
+        snapshot = null;
+        invalidPosition = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            var count = entry.Imported.Reader.SampleCount;
+
+            if (sequenceNumber < 0 || sequenceNumber >= count)
+            {
+                invalidPosition = true;
+                return true;
+            }
+
+            entry.Controller.Seek(sequenceNumber);
+
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            return true;
+        }
+    }
+
     private sealed class SessionEntry
     {
         public ReplayExecutionController Controller { get; }
