@@ -16,8 +16,11 @@ public sealed class ProjectWorkspaceStore
     private readonly ConcurrentDictionary<Guid, string> _projectRoots = new();
 
     private readonly string _workspaceStatePath;
+    private readonly Action? _beforeManifestCommit;
 
-    public ProjectWorkspaceStore(string? workspaceStatePath = null)
+    public ProjectWorkspaceStore(
+        string? workspaceStatePath = null,
+        Action? beforeManifestCommit = null)
     {
         _workspaceStatePath = Path.GetFullPath(
             workspaceStatePath ?? Path.Combine(
@@ -25,6 +28,8 @@ public sealed class ProjectWorkspaceStore
                     Environment.SpecialFolder.LocalApplicationData),
                 "MetricBreak",
                 "workspace-state.json"));
+
+        _beforeManifestCommit = beforeManifestCommit;
     }
 
     public bool TryRestoreLastOpenedProject(
@@ -301,9 +306,12 @@ public sealed class ProjectWorkspaceStore
         };
 
         // Step 3: Commit by publishing the manifest.
-        // If this fails, the previous manifest remains authoritative.
         try
         {
+            // Allows tests to simulate a failure before
+            // the manifest is committed.
+            _beforeManifestCommit?.Invoke();
+
             SaveManifest(rootPath, updatedManifest);
         }
         catch (IOException)
@@ -312,6 +320,7 @@ public sealed class ProjectWorkspaceStore
                 "ManifestWriteFailed",
                 "Investigation revision was written, but the " +
                 "project manifest could not be updated.");
+
             return false;
         }
         catch (UnauthorizedAccessException)
@@ -319,6 +328,7 @@ public sealed class ProjectWorkspaceStore
             error = new ProjectStoreError(
                 "ManifestWriteFailed",
                 "Access to project manifest storage was denied.");
+
             return false;
         }
 
