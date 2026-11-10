@@ -187,6 +187,131 @@ public sealed class ProjectWorkspaceEndpointTests
         }
     }
 
+
+    [Fact]
+    public async Task ExportInvestigation_CreatesRevisionReferencedByManifest()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var rootPath = Path.Combine(
+            Path.GetTempPath(),
+            "metricbreak-project-tests",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(rootPath);
+
+        try
+        {
+            Guid projectId;
+
+            using (var response = await client.PostAsJsonAsync(
+                "/api/projects",
+                new
+                {
+                    projectName = "Revision Test",
+                    rootPath
+                }))
+            {
+                Assert.Equal(
+                    HttpStatusCode.Created,
+                    response.StatusCode);
+
+                using var json = await ReadJsonAsync(response);
+
+                projectId = json.RootElement
+                    .GetProperty("projectId")
+                    .GetGuid();
+            }
+
+            Guid sessionId;
+
+            using (var response = await client.PostAsync(
+                "/api/sessions",
+                CreateCsvUploadContent(
+                    _csvContent,
+                    "recording.csv")))
+            {
+                Assert.Equal(
+                    HttpStatusCode.Created,
+                    response.StatusCode);
+
+                using var json = await ReadJsonAsync(response);
+
+                sessionId = json.RootElement
+                    .GetProperty("sessionId")
+                    .GetGuid();
+            }
+
+            Guid investigationId;
+
+            using (var response = await client.PostAsync(
+                $"/api/sessions/{sessionId}/export?projectId={projectId}",
+                content: null))
+            {
+                Assert.Equal(
+                    HttpStatusCode.Created,
+                    response.StatusCode);
+
+                using var json = await ReadJsonAsync(response);
+
+                investigationId = json.RootElement
+                    .GetProperty("investigationId")
+                    .GetGuid();
+            }
+
+            var manifestPath = Path.Combine(
+                rootPath,
+                ".metricbreak",
+                "project.mbproj.json");
+
+            using var manifest = JsonDocument.Parse(
+                await File.ReadAllTextAsync(manifestPath));
+
+            var investigations = manifest.RootElement
+                .GetProperty("Investigations")
+                .EnumerateArray()
+                .ToArray();
+
+            var indexItem = Assert.Single(investigations);
+
+            Assert.Equal(
+                investigationId,
+                indexItem.GetProperty("InvestigationId").GetGuid());
+
+            var relativePath = indexItem
+                .GetProperty("RelativePath")
+                .GetString();
+
+            Assert.NotNull(relativePath);
+
+            var revisionPath = Path.Combine(
+                rootPath,
+                ".metricbreak",
+                relativePath.Replace(
+                    '/',
+                    Path.DirectorySeparatorChar));
+
+            Assert.True(File.Exists(revisionPath));
+
+            Assert.StartsWith(
+                investigationId.ToString("N") + "-",
+                Path.GetFileName(revisionPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(rootPath))
+            {
+                Directory.Delete(
+                    rootPath,
+                    recursive: true);
+            }
+        }
+    }
+
+
+
     [Fact]
     public async Task Startup_RestoresLastOpenedProject()
     {
@@ -197,57 +322,119 @@ public sealed class ProjectWorkspaceEndpointTests
 
         Directory.CreateDirectory(rootPath);
 
+        // Both application instances must share the same
+        // workspace-state file to simulate an application restart.
+        var workspaceStatePath = Path.Combine(
+            rootPath,
+            "test-workspace-state.json");
+
         Guid projectId;
 
         try
         {
-            using (var firstFactory = new MetricBreakApiFactory())
+            // First application instance:
+            // Create a project and persist its location.
+            using (var firstFactory =
+                       new MetricBreakApiFactory(workspaceStatePath))
             using (var firstClient = firstFactory.CreateClient())
             {
-                using var createProjectResponse = await firstClient.PostAsJsonAsync(
-                    "/api/projects",
-                    new
-                    {
-                        projectName = "Restore Startup Test",
-                        rootPath
-                    });
+                using var createProjectResponse =
+                    await firstClient.PostAsJsonAsync(
+                        "/api/projects",
+                        new
+                        {
+                            projectName = "Restore Startup Test",
+                            rootPath
+                        });
 
-                Assert.Equal(HttpStatusCode.Created, createProjectResponse.StatusCode);
+                Assert.Equal(
+                    HttpStatusCode.Created,
+                    createProjectResponse.StatusCode);
 
-                using var json = await ReadJsonAsync(createProjectResponse);
-                projectId = json.RootElement.GetProperty("projectId").GetGuid();
+                using var json =
+                    await ReadJsonAsync(createProjectResponse);
+
+                projectId = json.RootElement
+                    .GetProperty("projectId")
+                    .GetGuid();
+
+                // Verify that the first application instance
+                // persisted its workspace state.
+                Assert.True(
+                    File.Exists(workspaceStatePath),
+                    $"Workspace state file was not created: " +
+                    workspaceStatePath);
+
+                var stateJson =
+                    await File.ReadAllTextAsync(workspaceStatePath);
+
+                using var stateDocument =
+                    JsonDocument.Parse(stateJson);
+
+                var savedRootPath = stateDocument.RootElement
+                    .GetProperty("LastProjectRootPath")
+                    .GetString();
+
+                Assert.NotNull(savedRootPath);
+
+                Assert.Equal(
+                    Path.GetFullPath(rootPath),
+                    Path.GetFullPath(savedRootPath),
+                    StringComparer.OrdinalIgnoreCase);
             }
 
-            using var secondFactory = new MetricBreakApiFactory();
-            using var secondClient = secondFactory.CreateClient();
+            // Second application instance:
+            // Simulate restarting MetricBreak.
+            using var secondFactory =
+                new MetricBreakApiFactory(workspaceStatePath);
 
-            using var openListResponse = await secondClient.GetAsync("/api/projects/open");
+            using var secondClient =
+                secondFactory.CreateClient();
 
-            Assert.Equal(HttpStatusCode.OK, openListResponse.StatusCode);
+            using var openListResponse =
+                await secondClient.GetAsync("/api/projects/open");
 
-            using var openListJson = await ReadJsonAsync(openListResponse);
+            Assert.Equal(
+                HttpStatusCode.OK,
+                openListResponse.StatusCode);
+
+            using var openListJson =
+                await ReadJsonAsync(openListResponse);
 
             var projectIds = openListJson.RootElement
                 .EnumerateArray()
-                .Select(item => item.GetProperty("projectId").GetGuid())
+                .Select(item =>
+                    item.GetProperty("projectId").GetGuid())
                 .ToArray();
 
+            // The project created by the first instance
+            // must be restored by the second instance.
             Assert.Contains(projectId, projectIds);
 
-            using var closeResponse = await secondClient.PostAsync(
-                $"/api/projects/{projectId}/close",
-                content: null);
+            // Closing the restored project should succeed.
+            using var closeResponse =
+                await secondClient.PostAsync(
+                    $"/api/projects/{projectId}/close",
+                    content: null);
 
-            Assert.Equal(HttpStatusCode.NoContent, closeResponse.StatusCode);
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                closeResponse.StatusCode);
+
+            // Closing the last project clears workspace state.
+            Assert.False(File.Exists(workspaceStatePath));
         }
         finally
         {
             if (Directory.Exists(rootPath))
             {
-                Directory.Delete(rootPath, recursive: true);
+                Directory.Delete(
+                    rootPath,
+                    recursive: true);
             }
         }
     }
+
 
     [Fact]
     public async Task OpenProject_CorruptManifest_ReturnsStructuredErrorCode()
