@@ -1,6 +1,7 @@
 
 using MetricBreak.Api.Sessions;
 using MetricBreak.Domain.Breakpoints;
+using MetricBreak.Domain.Replay;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -206,6 +207,54 @@ app.MapPost(
     })
     .WithName("ResetReplaySession")
     .WithTags("Replay Sessions");
+
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/continue",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        var found = manager.TryContinueWithSnapshot(
+            sessionId,
+            out var hadActiveBreakpoints,
+            out var stop,
+            out var snapshot);
+
+        if (!found || snapshot is null)
+            return Results.NotFound();
+
+        var session = SessionStateResponseMapper.Map(snapshot);
+
+        if (!hadActiveBreakpoints)
+        {
+            return Results.Ok(new ContinueResponse(
+                Executed: false,
+                HitBreakpoint: false,
+                ReachedEndOfRecording: false,
+                Stop: null,
+                Session: session));
+        }
+
+        var hitBreakpoint = stop is not null;
+
+        var reachedEndOfRecording =
+            stop is null &&
+            snapshot.ExecutionState.PauseReason ==
+            ReplayPauseReason.EndOfRecording;
+
+        return Results.Ok(new ContinueResponse(
+            Executed: true,
+            HitBreakpoint: hitBreakpoint,
+            ReachedEndOfRecording: reachedEndOfRecording,
+            Stop: stop is null
+                ? null
+                : ContinueResponseMapper.Map(stop),
+            Session: session));
+    })
+    .WithName("ContinueReplaySession")
+    .WithTags("Replay Sessions")
+    .Produces<ContinueResponse>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound);
 
 app.MapPost(
     "/api/sessions/{sessionId:guid}/breakpoints",
