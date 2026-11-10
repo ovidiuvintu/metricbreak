@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<ReplaySessionManager>();
 builder.Services.AddSingleton<SessionInvestigationStore>();
+builder.Services.AddSingleton<ProjectWorkspaceStore>();
 builder.Services.AddScoped<CsvSessionImportService>();
 
 builder.Services.AddOpenApi();
@@ -20,6 +21,85 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
     app.MapScalarApiReference();
 }
+
+app.MapPost(
+    "/api/projects",
+    (
+        CreateProjectRequest request,
+        ProjectWorkspaceStore projectStore) =>
+    {
+        if (!projectStore.TryCreateProject(
+                request.ProjectName,
+                request.RootPath,
+                out var project,
+                out var error)
+            || project is null)
+        {
+            return Results.BadRequest(new
+            {
+                Error = error ?? "Unable to create project."
+            });
+        }
+
+        return Results.Created(
+            $"/api/projects/{project.ProjectId}",
+            project);
+    })
+    .WithName("CreateProject")
+    .WithTags("Projects")
+    .Produces<ProjectSummaryResponse>(StatusCodes.Status201Created)
+    .Produces(StatusCodes.Status400BadRequest);
+
+app.MapPost(
+    "/api/projects/open",
+    (
+        OpenProjectRequest request,
+        ProjectWorkspaceStore projectStore) =>
+    {
+        if (!projectStore.TryOpenProject(
+                request.RootPath,
+                out var project,
+                out var error)
+            || project is null)
+        {
+            return Results.NotFound(new
+            {
+                Error = error ?? "Project not found."
+            });
+        }
+
+        return Results.Ok(project);
+    })
+    .WithName("OpenProject")
+    .WithTags("Projects")
+    .Produces<ProjectSummaryResponse>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound);
+
+app.MapGet(
+    "/api/projects/{projectId:guid}/investigations",
+    (
+        Guid projectId,
+        ProjectWorkspaceStore projectStore) =>
+    {
+        if (!projectStore.TryListInvestigations(
+                projectId,
+                out var investigations,
+                out var error)
+            || investigations is null)
+        {
+            return Results.NotFound(new
+            {
+                Error = error ?? "Project not found."
+            });
+        }
+
+        return Results.Ok(new ProjectInvestigationsResponse(
+            investigations));
+    })
+    .WithName("ListProjectInvestigations")
+    .WithTags("Projects")
+    .Produces<ProjectInvestigationsResponse>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound);
 
 app.MapPost(
     "/api/sessions",
@@ -312,8 +392,10 @@ app.MapPost(
     "/api/sessions/{sessionId:guid}/export",
     (
         Guid sessionId,
+        [FromQuery] Guid? projectId,
         ReplaySessionManager manager,
-        SessionInvestigationStore store) =>
+        SessionInvestigationStore store,
+        ProjectWorkspaceStore projectStore) =>
     {
         if (!manager.TryExportInvestigation(
                 sessionId,
@@ -323,7 +405,29 @@ app.MapPost(
             return Results.NotFound();
         }
 
-        var filePath = store.Save(investigation);
+        string filePath;
+
+        if (projectId is Guid selectedProjectId)
+        {
+            if (!projectStore.TrySaveInvestigation(
+                    selectedProjectId,
+                    investigation,
+                    out var projectPath,
+                    out var error)
+                || projectPath is null)
+            {
+                return Results.BadRequest(new
+                {
+                    Error = error ?? "Unable to save investigation to project."
+                });
+            }
+
+            filePath = projectPath;
+        }
+        else
+        {
+            filePath = store.Save(investigation);
+        }
 
         return Results.Created(
             $"/api/investigations/{investigation.InvestigationId}",
@@ -339,17 +443,36 @@ app.MapPost(
 app.MapPost(
     "/api/sessions/import",
     async (
+        [FromForm] Guid? projectId,
         [FromForm] Guid investigationId,
         IFormFile file,
         ReplaySessionManager manager,
         SessionInvestigationStore store,
+        ProjectWorkspaceStore projectStore,
         CsvSessionImportService importService,
         CancellationToken cancellationToken) =>
     {
-        if (!store.TryLoad(
-                investigationId,
-                out var investigation)
-            || investigation is null)
+        ExportedInvestigation? investigation;
+
+        if (projectId is Guid selectedProjectId)
+        {
+            if (!projectStore.TryLoadInvestigation(
+                    selectedProjectId,
+                    investigationId,
+                    out investigation,
+                    out var error)
+                || investigation is null)
+            {
+                return Results.NotFound(new
+                {
+                    Error = error ?? "Investigation not found in project."
+                });
+            }
+        }
+        else if (!store.TryLoad(
+                     investigationId,
+                     out investigation)
+                 || investigation is null)
         {
             return Results.NotFound();
         }
