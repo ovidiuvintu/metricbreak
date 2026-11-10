@@ -61,10 +61,11 @@ public sealed record ReplayExecutionState
         }
 
         if (status == ReplayExecutionStatus.Completed &&
-            pauseReason != ReplayPauseReason.EndOfRecording)
+            pauseReason is not ReplayPauseReason.EndOfRecording
+                and not ReplayPauseReason.StartOfRecording)
         {
             throw new ArgumentException(
-                "A completed replay must indicate the end of the recording.");
+                "A completed replay must indicate a recording boundary.");
         }
 
         if (status == ReplayExecutionStatus.Faulted &&

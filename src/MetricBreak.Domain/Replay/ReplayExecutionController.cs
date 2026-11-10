@@ -51,6 +51,14 @@ public sealed class ReplayExecutionController
         return _session.RunToBreakpoints(breakpoints);
     }
 
+    public BreakpointStop? ContinueBackward(
+        BreakpointCollection breakpoints)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        return _session.RunBackwardToBreakpoints(breakpoints);
+    }
+
     public void Reset()
     {
         _session.Reset();

@@ -8,7 +8,7 @@ namespace MetricBreak.Domain.Tests.Replay;
 
 public sealed class ReplaySessionBreakpointTests
 {
-    private static readonly Guid PressureChannelId = Guid.NewGuid();
+    private static readonly Guid s_pressureChannelId = Guid.NewGuid();
 
     private static ReplaySession CreateSession(
         params double?[] pressures)
@@ -32,7 +32,7 @@ public sealed class ReplaySessionBreakpointTests
                         index * 1_000_000_000L),
                     new Dictionary<Guid, double?>
                     {
-                        [PressureChannelId] = pressure
+                        [s_pressureChannelId] = pressure
                     }))
             .ToArray();
 
@@ -48,7 +48,7 @@ public sealed class ReplaySessionBreakpointTests
     {
         return new ConditionalBreakpoint(
             Guid.NewGuid(),
-            PressureChannelId,
+            s_pressureChannelId,
             ComparisonOperator.GreaterThan,
             threshold);
     }
@@ -65,7 +65,7 @@ public sealed class ReplaySessionBreakpointTests
         Assert.True(matched);
         Assert.Equal(2, session.Position.SequenceNumber);
         Assert.Equal(9100d,
-            session.CurrentSample.GetValue(PressureChannelId));
+            session.CurrentSample.GetValue(s_pressureChannelId));
     }
 
     [Fact]
@@ -190,5 +190,52 @@ public sealed class ReplaySessionBreakpointTests
 
         Assert.True(session.RunToBreakpoint(breakpoint));
         Assert.Equal(2, session.Position.SequenceNumber);
+    }
+
+    [Fact]
+    public void RunBackwardToBreakpoints_StopsAtFirstMatchingSample()
+    {
+        var session = CreateSession(
+            8500, 8800, 9100, 9300, 8900);
+
+        session.Seek(4);
+
+        var breakpoints = new BreakpointCollection();
+        breakpoints.Add(new ConditionalBreakpoint(
+            Guid.NewGuid(),
+            s_pressureChannelId,
+            ComparisonOperator.GreaterThan,
+            9000));
+
+        var stop = session.RunBackwardToBreakpoints(breakpoints);
+
+        Assert.NotNull(stop);
+        Assert.Equal(3, session.Position.SequenceNumber);
+        Assert.Equal(9300d,
+            session.CurrentSample.GetValue(s_pressureChannelId));
+    }
+
+    [Fact]
+    public void RunBackwardToBreakpoints_WhenNoMatch_ReachesStart()
+    {
+        var session = CreateSession(
+            8500, 8600, 8700);
+
+        session.Seek(2);
+
+        var breakpoints = new BreakpointCollection();
+        breakpoints.Add(new ConditionalBreakpoint(
+            Guid.NewGuid(),
+            s_pressureChannelId,
+            ComparisonOperator.GreaterThan,
+            9000));
+
+        var stop = session.RunBackwardToBreakpoints(breakpoints);
+
+        Assert.Null(stop);
+        Assert.Equal(0, session.Position.SequenceNumber);
+        Assert.Equal(
+            ReplayPauseReason.StartOfRecording,
+            session.ExecutionState.PauseReason);
     }
 }

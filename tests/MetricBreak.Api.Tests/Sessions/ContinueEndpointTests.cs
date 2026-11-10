@@ -183,6 +183,152 @@ public sealed class ContinueEndpointTests
                 .GetInt64());
     }
 
+    [Fact]
+    public async Task ContinueBackward_UnknownSession_Returns404()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        using var response = await client.PostAsync(
+            $"/api/sessions/{Guid.NewGuid()}/continue-backward",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ContinueBackward_NoActiveBreakpoints_ReturnsExecutedFalse()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var (sessionId, _, _) = CreateSession(factory);
+
+        using (var seekResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/seek",
+                   new { sequenceNumber = 2L }))
+        {
+            Assert.Equal(HttpStatusCode.OK, seekResponse.StatusCode);
+        }
+
+        using var response = await client.PostAsync(
+            $"/api/sessions/{sessionId}/continue-backward",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+        var root = json.RootElement;
+
+        Assert.False(root.GetProperty("executed").GetBoolean());
+        Assert.False(root.GetProperty("hitBreakpoint").GetBoolean());
+        Assert.False(root.GetProperty("reachedEndOfRecording").GetBoolean());
+        Assert.False(root.GetProperty("reachedStartOfRecording").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("stop").ValueKind);
+    }
+
+    [Fact]
+    public async Task ContinueBackward_BreakpointHit_ReturnsStopDetails()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var (sessionId, pressureChannelId, _) = CreateSession(factory);
+
+        using (var seekResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/seek",
+                   new { sequenceNumber = 2L }))
+        {
+            Assert.Equal(HttpStatusCode.OK, seekResponse.StatusCode);
+        }
+
+        using (var createBreakpointResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/breakpoints",
+                   new
+                   {
+                       channelId = pressureChannelId,
+                       @operator = "LessThan",
+                       threshold = 8600d
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.Created, createBreakpointResponse.StatusCode);
+        }
+
+        using var response = await client.PostAsync(
+            $"/api/sessions/{sessionId}/continue-backward",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+        var root = json.RootElement;
+
+        Assert.True(root.GetProperty("executed").GetBoolean());
+        Assert.True(root.GetProperty("hitBreakpoint").GetBoolean());
+        Assert.False(root.GetProperty("reachedStartOfRecording").GetBoolean());
+
+        var stop = root.GetProperty("stop");
+
+        Assert.Equal(0, stop.GetProperty("sequence").GetInt64());
+
+        var session = root.GetProperty("session");
+
+        Assert.Equal("Paused", session.GetProperty("executionState").GetString());
+        Assert.Equal("Breakpoint", session.GetProperty("pauseReason").GetString());
+    }
+
+    [Fact]
+    public async Task ContinueBackward_NoHit_ReachesStartOfRecording()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var (sessionId, pressureChannelId, _) = CreateSession(factory);
+
+        using (var seekResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/seek",
+                   new { sequenceNumber = 2L }))
+        {
+            Assert.Equal(HttpStatusCode.OK, seekResponse.StatusCode);
+        }
+
+        using (var createBreakpointResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/breakpoints",
+                   new
+                   {
+                       channelId = pressureChannelId,
+                       @operator = "GreaterThan",
+                       threshold = 99999d
+                   }))
+        {
+            Assert.Equal(HttpStatusCode.Created, createBreakpointResponse.StatusCode);
+        }
+
+        using var response = await client.PostAsync(
+            $"/api/sessions/{sessionId}/continue-backward",
+            content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+        var root = json.RootElement;
+
+        Assert.True(root.GetProperty("executed").GetBoolean());
+        Assert.False(root.GetProperty("hitBreakpoint").GetBoolean());
+        Assert.True(root.GetProperty("reachedStartOfRecording").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("stop").ValueKind);
+
+        var session = root.GetProperty("session");
+
+        Assert.Equal("Completed", session.GetProperty("executionState").GetString());
+        Assert.Equal("StartOfRecording", session.GetProperty("pauseReason").GetString());
+        Assert.Equal(
+            0,
+            session.GetProperty("currentSample")
+                .GetProperty("sequence")
+                .GetInt64());
+    }
+
     private static async Task<JsonDocument> ReadJsonAsync(
         HttpResponseMessage response)
     {

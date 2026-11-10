@@ -69,6 +69,19 @@ public sealed class ReplayExecutionStateTests
     }
 
     [Fact]
+    public void Completed_RecordsStartOfRecording()
+    {
+        var state = new ReplayExecutionState(
+            ReplayExecutionStatus.Completed,
+            ReplayPauseReason.StartOfRecording,
+            _position,
+            _timestamp);
+
+        Assert.Equal(ReplayExecutionStatus.Completed, state.Status);
+        Assert.Equal(ReplayPauseReason.StartOfRecording, state.PauseReason);
+    }
+
+    [Fact]
     public void Ready_RejectsPosition()
     {
         Assert.Throws<ArgumentException>(() =>

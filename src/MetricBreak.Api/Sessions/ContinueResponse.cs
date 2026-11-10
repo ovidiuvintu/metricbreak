@@ -5,7 +5,8 @@ public sealed record ContinueResponse(
     bool HitBreakpoint,
     bool ReachedEndOfRecording,
     BreakpointStopResponse? Stop,
-    SessionStateResponse Session);
+    SessionStateResponse Session,
+    bool ReachedStartOfRecording = false);
 
 public sealed record BreakpointStopResponse(
     long Sequence,

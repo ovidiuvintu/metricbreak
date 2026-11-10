@@ -5,5 +5,6 @@ public enum ReplayPauseReason
     None,
     User,
     Breakpoint,
-    EndOfRecording
+    EndOfRecording,
+    StartOfRecording
 }
