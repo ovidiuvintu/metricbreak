@@ -181,6 +181,32 @@ app.MapPost(
     .WithName("SeekReplaySession")
     .WithTags("Replay Sessions");
 
+
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/reset",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager) =>
+    {
+        var found = manager.TryResetWithSnapshot(
+            sessionId,
+            out var snapshot);
+
+        if (!found)
+            return Results.NotFound();
+
+        if (snapshot is null)
+            return Results.Problem(
+                "Reset did not produce a snapshot.");
+
+        return Results.Ok(
+            new ResetResponse(
+                SessionStateResponseMapper.Map(snapshot)));
+    })
+    .WithName("ResetReplaySession")
+    .WithTags("Replay Sessions");
+
+
 app.Run();
 
 public partial class Program { }
