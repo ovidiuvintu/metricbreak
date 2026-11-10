@@ -134,6 +134,22 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
+    /// Returns a snapshot of all registered breakpoints
+    /// in registration order, including enabled state.
+    /// </summary>
+    public IReadOnlyList<RegisteredBreakpoint> GetRegistered()
+    {
+        var registered = _registrationOrder
+            .Select(id => _entries[id])
+            .Select(entry => new RegisteredBreakpoint(
+                entry.Breakpoint,
+                entry.IsEnabled))
+            .ToArray();
+
+        return Array.AsReadOnly(registered);
+    }
+
+    /// <summary>
     /// Removes all registered breakpoints.
     /// </summary>
     public void Clear()

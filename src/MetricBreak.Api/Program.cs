@@ -2,11 +2,13 @@
 using MetricBreak.Api.Sessions;
 using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
+using Microsoft.AspNetCore.Mvc;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<ReplaySessionManager>();
+builder.Services.AddSingleton<SessionInvestigationStore>();
 builder.Services.AddScoped<CsvSessionImportService>();
 
 builder.Services.AddOpenApi();
@@ -304,6 +306,117 @@ app.MapPost(
     .WithName("ContinueReplaySessionBackward")
     .WithTags("Replay Sessions")
     .Produces<ContinueResponse>(StatusCodes.Status200OK)
+    .Produces(StatusCodes.Status404NotFound);
+
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/export",
+    (
+        Guid sessionId,
+        ReplaySessionManager manager,
+        SessionInvestigationStore store) =>
+    {
+        if (!manager.TryExportInvestigation(
+                sessionId,
+                out var investigation)
+            || investigation is null)
+        {
+            return Results.NotFound();
+        }
+
+        var filePath = store.Save(investigation);
+
+        return Results.Created(
+            $"/api/investigations/{investigation.InvestigationId}",
+            new ExportSessionResponse(
+                investigation.InvestigationId,
+                filePath));
+    })
+    .WithName("ExportReplaySession")
+    .WithTags("Replay Sessions")
+    .Produces<ExportSessionResponse>(StatusCodes.Status201Created)
+    .Produces(StatusCodes.Status404NotFound);
+
+app.MapPost(
+    "/api/sessions/import",
+    async (
+        [FromForm] Guid investigationId,
+        IFormFile file,
+        ReplaySessionManager manager,
+        SessionInvestigationStore store,
+        CsvSessionImportService importService,
+        CancellationToken cancellationToken) =>
+    {
+        if (!store.TryLoad(
+                investigationId,
+                out var investigation)
+            || investigation is null)
+        {
+            return Results.NotFound();
+        }
+
+        try
+        {
+            var imported = await importService.ImportRecordingAsync(
+                file,
+                cancellationToken);
+
+            if (!manager.TryImportInvestigation(
+                    imported,
+                    investigation,
+                    out var sessionId,
+                    out var error))
+            {
+                return Results.BadRequest(new
+                {
+                    Error = error ?? "Unable to import investigation."
+                });
+            }
+
+            if (!manager.TryGetSnapshot(
+                    sessionId,
+                    out var snapshot)
+                || snapshot is null)
+            {
+                return Results.Problem("Imported session was created but could not be read.");
+            }
+
+            return Results.Created(
+                $"/api/sessions/{sessionId}",
+                new CreateSessionResponse(
+                    SessionId: sessionId,
+                    RecordingId: snapshot.RecordingId,
+                    RecordingName: snapshot.RecordingName,
+                    SampleCount: snapshot.SampleCount,
+                    Status: "Imported"));
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.BadRequest(new
+            {
+                Error = exception.Message
+            });
+        }
+        catch (FormatException exception)
+        {
+            return Results.BadRequest(new
+            {
+                Error = exception.Message
+            });
+        }
+        catch (InvalidDataException exception)
+        {
+            return Results.BadRequest(new
+            {
+                Error = exception.Message
+            });
+        }
+    })
+    .DisableAntiforgery()
+    .WithName("ImportReplaySession")
+    .WithTags("Replay Sessions")
+    .Accepts<IFormFile>("multipart/form-data")
+    .Produces<CreateSessionResponse>(StatusCodes.Status201Created)
+    .Produces(StatusCodes.Status400BadRequest)
     .Produces(StatusCodes.Status404NotFound);
 
 app.MapPost(
