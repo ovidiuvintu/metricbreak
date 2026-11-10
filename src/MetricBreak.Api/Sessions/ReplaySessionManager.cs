@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
 using MetricBreak.Ingestion.Csv;
 
@@ -51,6 +52,112 @@ public sealed class ReplaySessionManager
             }
 
             result = operation(entry.Controller);
+            return true;
+        }
+    }
+
+    public bool TrySetBreakpointEnabled(
+        Guid sessionId,
+        Guid breakpointId,
+        bool isEnabled,
+        out bool updated)
+    {
+        updated = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (breakpointId == Guid.Empty)
+                return true;
+
+            updated = isEnabled
+                ? entry.Breakpoints.Enable(breakpointId)
+                : entry.Breakpoints.Disable(breakpointId);
+
+            return true;
+        }
+    }
+
+    public bool TryAddBreakpoint(
+        Guid sessionId,
+        Guid channelId,
+        ComparisonOperator comparisonOperator,
+        double threshold,
+        out ConditionalBreakpoint? breakpoint,
+        out bool unknownChannel)
+    {
+        breakpoint = null;
+        unknownChannel = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (!entry.Imported.Channels.Any(channel => channel.Id == channelId))
+            {
+                unknownChannel = true;
+                return true;
+            }
+
+            breakpoint = new ConditionalBreakpoint(
+                Guid.NewGuid(),
+                channelId,
+                comparisonOperator,
+                threshold);
+
+            entry.Breakpoints.Add(breakpoint);
+
+            return true;
+        }
+    }
+
+    public bool TryGetBreakpoints(
+        Guid sessionId,
+        out IReadOnlyList<ConditionalBreakpoint>? breakpoints)
+    {
+        breakpoints = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            breakpoints = entry.Breakpoints.GetActive();
+
+            return true;
+        }
+    }
+
+    public bool TryRemoveBreakpoint(
+        Guid sessionId,
+        Guid breakpointId,
+        out bool removed)
+    {
+        removed = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            removed = breakpointId != Guid.Empty
+                      && entry.Breakpoints.Remove(breakpointId);
+
             return true;
         }
     }
@@ -230,6 +337,8 @@ public sealed class ReplaySessionManager
         public ReplayExecutionController Controller { get; }
 
         public ImportedCsvRecording Imported { get; }
+
+        public BreakpointCollection Breakpoints { get; } = new();
 
         public object SyncRoot { get; } = new();
 
