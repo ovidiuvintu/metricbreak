@@ -147,6 +147,40 @@ app.MapPost(
     .WithName("StepBackwardReplaySession")
     .WithTags("Replay Sessions");
 
+app.MapPost(
+    "/api/sessions/{sessionId:guid}/seek",
+    (
+        Guid sessionId,
+        SeekRequest request,
+        ReplaySessionManager manager) =>
+    {
+        var found = manager.TrySeekWithSnapshot(
+            sessionId,
+            request.SequenceNumber,
+            out var snapshot,
+            out var invalidPosition);
+
+        if (!found)
+            return Results.NotFound();
+
+        if (invalidPosition)
+        {
+            return Results.BadRequest(new
+            {
+                Error = "InvalidSequenceNumber",
+                Message = "Sequence number is outside the recording."
+            });
+        }
+
+        if (snapshot is null)
+            return Results.Problem("Seek did not produce a snapshot.");
+
+        return Results.Ok(new SeekResponse(
+            SessionStateResponseMapper.Map(snapshot)));
+    })
+    .WithName("SeekReplaySession")
+    .WithTags("Replay Sessions");
+
 app.Run();
 
 public partial class Program { }
