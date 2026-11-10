@@ -8,7 +8,7 @@ namespace MetricBreak.Domain.Tests.Replay;
 
 public sealed class ReplaySessionBreakpointTests
 {
-    private static readonly Guid s_pressureChannelId = Guid.NewGuid();
+    private static readonly Guid _pressureChannelId = Guid.NewGuid();
 
     private static ReplaySession CreateSession(
         params double?[] pressures)
@@ -32,7 +32,7 @@ public sealed class ReplaySessionBreakpointTests
                         index * 1_000_000_000L),
                     new Dictionary<Guid, double?>
                     {
-                        [s_pressureChannelId] = pressure
+                        [_pressureChannelId] = pressure
                     }))
             .ToArray();
 
@@ -48,7 +48,7 @@ public sealed class ReplaySessionBreakpointTests
     {
         return new ConditionalBreakpoint(
             Guid.NewGuid(),
-            s_pressureChannelId,
+            _pressureChannelId,
             ComparisonOperator.GreaterThan,
             threshold);
     }
@@ -65,7 +65,7 @@ public sealed class ReplaySessionBreakpointTests
         Assert.True(matched);
         Assert.Equal(2, session.Position.SequenceNumber);
         Assert.Equal(9100d,
-            session.CurrentSample.GetValue(s_pressureChannelId));
+            session.CurrentSample.GetValue(_pressureChannelId));
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public sealed class ReplaySessionBreakpointTests
         var breakpoints = new BreakpointCollection();
         breakpoints.Add(new ConditionalBreakpoint(
             Guid.NewGuid(),
-            s_pressureChannelId,
+            _pressureChannelId,
             ComparisonOperator.GreaterThan,
             9000));
 
@@ -212,7 +212,7 @@ public sealed class ReplaySessionBreakpointTests
         Assert.NotNull(stop);
         Assert.Equal(3, session.Position.SequenceNumber);
         Assert.Equal(9300d,
-            session.CurrentSample.GetValue(s_pressureChannelId));
+            session.CurrentSample.GetValue(_pressureChannelId));
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class ReplaySessionBreakpointTests
         var breakpoints = new BreakpointCollection();
         breakpoints.Add(new ConditionalBreakpoint(
             Guid.NewGuid(),
-            s_pressureChannelId,
+            _pressureChannelId,
             ComparisonOperator.GreaterThan,
             9000));
 
