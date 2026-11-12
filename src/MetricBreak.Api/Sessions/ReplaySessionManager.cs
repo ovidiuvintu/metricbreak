@@ -600,5 +600,65 @@ public sealed class ReplaySessionManager
             return true;
         }
     }
+    public bool TryGetSampleRange(
+        Guid sessionId,
+        long start,
+        int count,
+        out SampleRangeResponse? response)
+    {
+        const int maxCount = 5000;
+
+        response = null;
+
+        if (start < 0)
+            throw new ArgumentOutOfRangeException(nameof(start));
+
+        if (count < 1 || count > maxCount)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            var reader = entry.Imported.Reader;
+            var totalSamples = reader.SampleCount;
+
+            var available = start >= totalSamples
+                ? 0L
+                : Math.Min((long)count, totalSamples - start);
+
+            var samples = new List<SampleRangeItemResponse>(
+                checked((int)available));
+
+            for (long offset = 0; offset < available; offset++)
+            {
+                var sample = reader.Read(start + offset);
+
+                samples.Add(new SampleRangeItemResponse(
+                    Sequence: sample.SequenceNumber,
+                    TimestampNanoseconds:
+                        sample.Timestamp.UnixNanoseconds.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture),
+                    Channels: sample.Values.ToDictionary(
+                        pair => pair.Key,
+                        pair => pair.Value)));
+            }
+
+            response = new SampleRangeResponse(
+                SessionId: sessionId,
+                Start: start,
+                Count: samples.Count,
+                TotalSamples: totalSamples,
+                Samples: samples);
+
+            return true;
+        }
+    }
+
+
 
 }

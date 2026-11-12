@@ -4,7 +4,6 @@ using MetricBreak.Api.Sessions;
 using MetricBreak.Api.Workspaces;
 using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
-using Microsoft.AspNetCore.Mvc;
 
 namespace MetricBreak.Api;
 
@@ -93,50 +92,6 @@ internal static class EndpointMappings
             .WithTags(ApiTags.Projects)
             .Produces<IReadOnlyList<ProjectSummaryResponse>>(StatusCodes.Status200OK);
 
-
-        app.MapGet(
-            "/api/sessions/{sessionId:guid}/channels",
-            (
-                Guid sessionId,
-                ReplaySessionManager manager
-            ) =>
-            {
-                if (!manager.TryGetChannels(
-                        sessionId,
-                        out var channels))
-                {
-                    return Results.NotFound(new
-                    {
-                        Error = "Replay session not found."
-                    });
-                }
-
-                return Results.Ok(channels);
-            });
-
-        app.MapPost(
-            "/api/projects/{projectId:guid}/close",
-            (
-                Guid projectId,
-                ProjectWorkspaceStore projectStore) =>
-            {
-                if (!projectStore.TryCloseProject(
-                        projectId,
-                        out var error))
-                {
-                    return Results.NotFound(ToErrorBody(
-                        error ?? new ProjectStoreError(
-                            "ProjectCloseFailed",
-                            "Project was not open.")));
-                }
-
-                return Results.NoContent();
-            })
-            .WithName("CloseProject")
-            .WithTags(ApiTags.Projects)
-            .Produces(StatusCodes.Status204NoContent)
-            .Produces(StatusCodes.Status404NotFound);
-
         app.MapGet(
             "/api/projects/{projectId:guid}/investigations",
             (
@@ -168,6 +123,54 @@ internal static class EndpointMappings
 
     public static WebApplication MapSessionEndpoints(this WebApplication app)
     {
+
+        app.MapGet(
+            "/api/sessions/{sessionId:guid}/samples",
+            (
+                Guid sessionId,
+                long start,
+                int count,
+                ReplaySessionManager manager
+            ) =>
+            {
+                const int maxCount = 5000;
+
+                if (start < 0)
+                    return Results.BadRequest(new
+                    {
+                        Error = "Start must be non-negative."
+                    });
+
+                if (count < 1 || count > maxCount)
+                    return Results.BadRequest(new
+                    {
+                        Error = $"Count must be between 1 and {maxCount}."
+                    });
+
+                if (!manager.TryGetSampleRange(
+                        sessionId,
+                        start,
+                        count,
+                        out var response))
+                {
+                    return Results.NotFound(new
+                    {
+                        Error = "Replay session not found."
+                    });
+                }
+
+                return Results.Ok(response);
+            })
+            .WithName("GetSessionSamples")
+            .WithTags(ApiTags.Sessions)
+            .WithSummary("Retrieve a range of recording samples")
+            .WithDescription(
+                "Returns up to 5,000 samples starting at the specified zero-based sequence number.")
+            .Produces<SampleRangeResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
+
         app.MapPost(
             "/api/sessions",
             async (
@@ -234,6 +237,49 @@ internal static class EndpointMappings
             .Produces<SessionStateResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);
 
+        
+        app.MapGet(
+            "/api/sessions/{sessionId:guid}/channels",
+            (
+                Guid sessionId,
+                ReplaySessionManager manager
+            ) =>
+            {
+                if (!manager.TryGetChannels(
+                        sessionId,
+                        out var channels))
+                {
+                    return Results.NotFound(new
+                    {
+                        Error = "Replay session not found."
+                    });
+                }
+
+                return Results.Ok(channels);
+            });
+
+        app.MapPost(
+            "/api/projects/{projectId:guid}/close",
+            (
+                Guid projectId,
+                ProjectWorkspaceStore projectStore) =>
+            {
+                if (!projectStore.TryCloseProject(
+                        projectId,
+                        out var error))
+                {
+                    return Results.NotFound(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectCloseFailed",
+                            "Project was not open.")));
+                }
+
+                return Results.NoContent();
+            })
+            .WithName("CloseProject")
+            .WithTags(ApiTags.Projects)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound);        
         return app;
     }
 
@@ -452,7 +498,7 @@ internal static class EndpointMappings
             "/api/sessions/{sessionId:guid}/export",
             (
                 Guid sessionId,
-                [FromQuery] Guid? projectId,
+                [Microsoft.AspNetCore.Mvc.FromQuery] Guid? projectId,
                 ReplaySessionManager manager,
                 SessionInvestigationStore store,
                 ProjectWorkspaceStore projectStore) =>
@@ -503,8 +549,8 @@ internal static class EndpointMappings
         app.MapPost(
             "/api/sessions/import",
             async (
-                [FromForm] Guid? projectId,
-                [FromForm] Guid investigationId,
+                [Microsoft.AspNetCore.Mvc.FromForm] Guid? projectId,
+                [Microsoft.AspNetCore.Mvc.FromForm] Guid investigationId,
                 IFormFile file,
                 ReplaySessionManager manager,
                 SessionInvestigationStore store,
