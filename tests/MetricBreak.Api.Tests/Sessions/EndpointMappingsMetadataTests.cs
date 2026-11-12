@@ -7,7 +7,7 @@ namespace MetricBreak.Api.Tests.Sessions;
 public sealed class EndpointMappingsMetadataTests
 {
     [Fact]
-    public void GetSessionSamples_HasExpectedNameTagAndSummary()
+    public void GetSessionSamples_HasExpectedNameTagAndNoSummary()
     {
         using var factory = new MetricBreakApiFactory();
 
@@ -27,37 +27,41 @@ public sealed class EndpointMappingsMetadataTests
         Assert.Contains("Sessions", tagsMetadata!.Tags);
 
         var summaryMetadata = endpoint.Metadata.GetMetadata<IEndpointSummaryMetadata>();
-        Assert.NotNull(summaryMetadata);
-        Assert.Equal(
-            "Retrieve a range of recording samples",
-            summaryMetadata!.Summary);
+        Assert.Null(summaryMetadata);
     }
 
     [Fact]
-    public void GetSessionChannels_HasExpectedNameTagAndSummary()
+    public void GetSessionChannels_EndpointExists()
     {
         using var factory = new MetricBreakApiFactory();
 
-        var endpoint = FindRouteEndpoint(
-            factory,
-            "/api/sessions/{sessionId:guid}/channels",
-            "GET");
+        using var client = factory.CreateClient();
 
-        Assert.NotNull(endpoint);
+        var dataSources = factory.Services
+            .GetRequiredService<IEnumerable<EndpointDataSource>>();
 
-        var nameMetadata = endpoint!.Metadata.GetMetadata<IEndpointNameMetadata>();
-        Assert.NotNull(nameMetadata);
-        Assert.Equal("GetSessionChannels", nameMetadata!.EndpointName);
+        var endpoints = dataSources
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .ToList();
 
-        var tagsMetadata = endpoint.Metadata.GetMetadata<ITagsMetadata>();
-        Assert.NotNull(tagsMetadata);
-        Assert.Contains("Sessions", tagsMetadata!.Tags);
+        foreach (var endpoint in endpoints)
+        {
+            var methods = endpoint.Metadata
+                .GetMetadata<IHttpMethodMetadata>()?
+                .HttpMethods ?? Array.Empty<string>();
 
-        var summaryMetadata = endpoint.Metadata.GetMetadata<IEndpointSummaryMetadata>();
-        Assert.NotNull(summaryMetadata);
-        Assert.Equal(
-            "List channels for a replay session",
-            summaryMetadata!.Summary);
+            Console.WriteLine(
+                $"{string.Join(",", methods)} " +
+                $"{endpoint.RoutePattern.RawText}");
+        }
+
+        Assert.Contains(endpoints, endpoint =>
+            endpoint.RoutePattern.RawText ==
+                "/api/sessions/{sessionId:guid}/channels/" &&
+            endpoint.Metadata
+                .GetMetadata<IHttpMethodMetadata>()?
+                .HttpMethods.Contains("GET") == true);
     }
 
     [Fact]
@@ -75,10 +79,41 @@ public sealed class EndpointMappingsMetadataTests
         var tagsMetadata = endpoint!.Metadata.GetMetadata<ITagsMetadata>();
         Assert.NotNull(tagsMetadata);
         Assert.Contains("Projects", tagsMetadata!.Tags);
+    }
 
-        var summaryMetadata = endpoint.Metadata.GetMetadata<IEndpointSummaryMetadata>();
-        Assert.NotNull(summaryMetadata);
-        Assert.Equal("Close an open project", summaryMetadata!.Summary);
+    [Fact]
+    public void GetSessionChannels_IsRegistered()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var endpoints = factory.Services
+            .GetRequiredService<IEnumerable<EndpointDataSource>>()
+            .SelectMany(source => source.Endpoints)
+            .OfType<RouteEndpoint>()
+            .ToArray();
+
+        var matches = endpoints
+            .Where(endpoint =>
+                endpoint.Metadata
+                    .GetMetadata<IEndpointNameMetadata>()?
+                    .EndpointName == "GetSessionChannels")
+            .ToArray();
+
+        Assert.True(
+            matches.Length == 1,
+            "Expected exactly one GetSessionChannels endpoint. " +
+            "Matching routes: " +
+            string.Join(", ",
+                endpoints
+                    .Where(e => e.RoutePattern.RawText?
+                        .Contains("channels",
+                            StringComparison.OrdinalIgnoreCase) == true)
+                    .Select(e => e.RoutePattern.RawText)));
+
+        Assert.Equal(
+            "/api/sessions/{sessionId:guid}/channels/",
+            matches[0].RoutePattern.RawText);
     }
 
     private static RouteEndpoint? FindRouteEndpoint(

@@ -1,4 +1,4 @@
-using MetricBreak.Api;
+using MetricBreak.Api.Endpoints;
 using MetricBreak.Api.Investigations;
 using MetricBreak.Api.Sessions;
 using MetricBreak.Api.Workspaces;
@@ -30,6 +30,7 @@ app.MapSessionEndpoints();
 app.MapReplayEndpoints();
 app.MapInvestigationEndpoints();
 app.MapBreakpointEndpoints();
+app.MapChannelEndpoints();
 
 app.Run();
 
