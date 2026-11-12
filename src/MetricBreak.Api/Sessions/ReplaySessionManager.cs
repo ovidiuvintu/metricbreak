@@ -574,4 +574,31 @@ public sealed class ReplaySessionManager
             Imported = imported;
         }
     }
+
+
+    public bool TryGetChannels(
+        Guid sessionId,
+        out IReadOnlyList<ChannelMetadataResponse>? channels)
+    {
+        channels = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            channels = entry.Imported.Channels
+                .Select(channel => new ChannelMetadataResponse(
+                    ChannelId: channel.Id,
+                    Name: channel.Name,
+                    Unit: channel.Unit))
+                .ToArray();
+
+            return true;
+        }
+    }
+
 }

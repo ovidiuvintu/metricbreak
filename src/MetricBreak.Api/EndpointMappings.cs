@@ -93,6 +93,27 @@ internal static class EndpointMappings
             .WithTags(ApiTags.Projects)
             .Produces<IReadOnlyList<ProjectSummaryResponse>>(StatusCodes.Status200OK);
 
+
+        app.MapGet(
+            "/api/sessions/{sessionId:guid}/channels",
+            (
+                Guid sessionId,
+                ReplaySessionManager manager
+            ) =>
+            {
+                if (!manager.TryGetChannels(
+                        sessionId,
+                        out var channels))
+                {
+                    return Results.NotFound(new
+                    {
+                        Error = "Replay session not found."
+                    });
+                }
+
+                return Results.Ok(channels);
+            });
+
         app.MapPost(
             "/api/projects/{projectId:guid}/close",
             (
