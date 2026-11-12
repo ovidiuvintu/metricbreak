@@ -118,6 +118,30 @@ internal static class EndpointMappings
             .Produces<ProjectInvestigationsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapPost(
+            "/api/projects/{projectId:guid}/close",
+            (
+                Guid projectId,
+                ProjectWorkspaceStore projectStore) =>
+            {
+                if (!projectStore.TryCloseProject(
+                        projectId,
+                        out var error))
+                {
+                    return Results.NotFound(ToErrorBody(
+                        error ?? new ProjectStoreError(
+                            "ProjectCloseFailed",
+                            "Project was not open.")));
+                }
+
+                return Results.NoContent();
+            })
+            .WithName("CloseProject")
+            .WithTags(ApiTags.Projects)
+            .WithSummary("Close an open project")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound);
+
         return app;
     }
 
@@ -213,6 +237,7 @@ internal static class EndpointMappings
             .DisableAntiforgery()
             .WithName("CreateReplaySession")
             .WithTags(ApiTags.Sessions)
+            .WithSummary("Create a replay session from CSV")
             .Accepts<IFormFile>("multipart/form-data")
             .Produces<CreateSessionResponse>(StatusCodes.Status201Created)
             .Produces(StatusCodes.Status400BadRequest);
@@ -234,6 +259,7 @@ internal static class EndpointMappings
             })
             .WithName("GetReplaySessionState")
             .WithTags(ApiTags.Sessions)
+            .WithSummary("Get the current replay session state")
             .Produces<SessionStateResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);
 
@@ -256,29 +282,11 @@ internal static class EndpointMappings
                 }
 
                 return Results.Ok(channels);
-            });
-
-        app.MapPost(
-            "/api/projects/{projectId:guid}/close",
-            (
-                Guid projectId,
-                ProjectWorkspaceStore projectStore) =>
-            {
-                if (!projectStore.TryCloseProject(
-                        projectId,
-                        out var error))
-                {
-                    return Results.NotFound(ToErrorBody(
-                        error ?? new ProjectStoreError(
-                            "ProjectCloseFailed",
-                            "Project was not open.")));
-                }
-
-                return Results.NoContent();
             })
-            .WithName("CloseProject")
-            .WithTags(ApiTags.Projects)
-            .Produces(StatusCodes.Status204NoContent)
+            .WithName("GetSessionChannels")
+            .WithTags(ApiTags.Sessions)
+            .WithSummary("List channels for a replay session")
+            .Produces<IReadOnlyList<ChannelMetadataResponse>>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);        
         return app;
     }
