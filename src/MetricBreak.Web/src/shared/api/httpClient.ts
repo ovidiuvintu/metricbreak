@@ -1,12 +1,18 @@
 
 export class ApiError extends Error {
+    public readonly status: number;
+    public readonly code: string;
+
     constructor(
-        public readonly status: number,
-        public readonly code: string,
+        status: number,
+        code: string,
         message: string,
     ) {
         super(message);
+
         this.name = "ApiError";
+        this.status = status;
+        this.code = code;
     }
 }
 
@@ -20,7 +26,10 @@ export async function apiRequest<T>(
         response = await fetch(path, {
             ...options,
             headers: {
-                ...(options?.body ? { "Content-Type": "application/json" } : {}),
+                ...(options?.body &&
+                typeof options.body === "string"
+                    ? { "Content-Type": "application/json" }
+                    : {}),
                 ...options?.headers,
             },
         });
@@ -33,16 +42,22 @@ export async function apiRequest<T>(
     }
 
     if (!response.ok) {
-        const body: unknown = await response.json().catch(() => null);
+        const body: unknown = await response
+            .json()
+            .catch(() => null);
 
         const error =
-            body !== null && typeof body === "object"
+            body !== null &&
+            typeof body === "object" &&
+            !Array.isArray(body)
                 ? (body as Record<string, unknown>)
                 : {};
 
         throw new ApiError(
             response.status,
-            typeof error.code === "string" ? error.code : "RequestFailed",
+            typeof error.code === "string"
+                ? error.code
+                : "RequestFailed",
             typeof error.message === "string"
                 ? error.message
                 : `Request failed (${response.status}).`,
