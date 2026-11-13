@@ -1,5 +1,6 @@
 
 import { useEffect, useState } from "react";
+import { RecordingChart } from "./RecordingChart";
 import {
   Alert,
   Box,
@@ -27,6 +28,7 @@ export function RecordingDashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [session, setSession] =
     useState<CreateSessionResponse | null>(null);
+    
 
   const [sessionState, setSessionState] =
     useState<SessionState | null>(null);
@@ -44,6 +46,8 @@ export function RecordingDashboard() {
       setSessionState(null);
       return;
     }
+
+    
 
     let cancelled = false;
 
@@ -84,10 +88,11 @@ export function RecordingDashboard() {
   function handleImported(importedSession: CreateSessionResponse) {
     setSession(importedSession);
     setSessionState(null);
+    setChannels([]);
     setLoadError("");
     setImportSuccess(true);
     setLoading(true);
-  }
+}
 
   // Manually reload the current session state.
   async function refreshSession() {
@@ -236,16 +241,21 @@ export function RecordingDashboard() {
       )}
 
       {/* Recording overview and channel values */}
-      {sessionState && !loading && (
-        <Stack spacing={3}>
+     {session !== null && sessionState !== null && !loading && (
+      <Stack spacing={3}>
           <RecordingOverview session={sessionState} />
 
-          <ChannelList
-            sample={sessionState.currentSample}
-            channels={channels}
+          <RecordingChart
+              sessionId={session.sessionId}
+              sampleCount={session.sampleCount}
+              channels={channels}
           />
-        </Stack>
-      )}
+
+          <ChannelList
+              sample={sessionState.currentSample}
+              channels={channels}
+          />
+      </Stack>)}
 
       {/* CSV import dialog */}
       <ImportRecordingDialog
