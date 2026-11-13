@@ -3,6 +3,7 @@ import { ApiError, apiRequest } from "../../shared/api/httpClient";
 import type { CreateSessionResponse } from "./recordingTypes";
 import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
+import type { SampleRangeResponse } from "./sampleTypes";
 
 export const recordingApi = {
   /**
@@ -53,6 +54,28 @@ export const recordingApi = {
 
     return (await response.json()) as CreateSessionResponse;
   },
+
+  getSamples(
+    sessionId: string,
+    start: number,
+    count: number,
+): Promise<SampleRangeResponse> {
+    if (
+        !Number.isSafeInteger(start) ||
+        start < 0 ||
+        !Number.isInteger(count) ||
+        count < 1 ||
+        count > 5000
+    ) {
+        throw new Error("Invalid sample range.");
+    }
+
+    return apiRequest<SampleRangeResponse>(
+        `/api/sessions/${encodeURIComponent(sessionId)}/samples` +
+        `?start=${start}&count=${count}`,
+    );
+},
+
 
   /**
    * Retrieves the current state of an existing replay session.
