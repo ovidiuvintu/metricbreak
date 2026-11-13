@@ -1,3 +1,4 @@
+
 import type { ReactNode } from "react";
 import {
     AppBar,
@@ -37,7 +38,10 @@ export function AppShell({ children }: AppShellProps) {
                 }}
             >
                 <Toolbar>
-                    <Typography variant="h6" fontWeight={700}>
+                    <Typography
+                        variant="h6"
+                        sx={{ fontWeight: 700 }}
+                    >
                         MetricBreak
                     </Typography>
 
