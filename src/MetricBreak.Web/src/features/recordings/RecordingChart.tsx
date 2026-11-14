@@ -262,13 +262,34 @@ export function RecordingChart({
       },
 
       legend: {
-        show: false,
+        show: true,
+        type: "scroll" as const,
+        orient: "horizontal" as const,
+
+        top: 8,
+        left: "center",
+        right: 10,
+
+        itemWidth: 18,
+        itemHeight: 3,
+        itemGap: 14,
+
+        textStyle: {
+          color: chartTheme.axisTextColor,
+          fontSize: 11,
+        },
+
+        pageTextStyle: {
+          color: chartTheme.axisTextColor,
+        },
+
+        selectedMode: false,
       },
 
       grid: {
         left: 20,
         right: 35,
-        top: 20,
+        top: 55,
         bottom: 45,
         containLabel: true,
       },
