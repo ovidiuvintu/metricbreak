@@ -1,6 +1,14 @@
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
 import ReactECharts from "echarts-for-react";
+import type { EChartsType } from "echarts/core";
 
 import {
   Alert,
@@ -21,15 +29,26 @@ interface RecordingChartProps {
   sampleCount: number;
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
+  currentSequence: number | null;
+  onSeek: (sequence: number) => void;
 }
 
 const MAX_SAMPLES = 5000;
+
+function getLineWidth(sampleCount: number): number {
+  if (sampleCount <= 100) return 2.5;
+  if (sampleCount <= 500) return 2;
+  if (sampleCount <= 2000) return 1.5;
+  return 1;
+}
 
 export function RecordingChart({
   sessionId,
   sampleCount,
   channels,
   selectedChannelIds,
+  currentSequence,
+  onSeek,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -45,11 +64,15 @@ export function RecordingChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const lineWidth = getLineWidth(samples.length);
+  // Keep the latest callback and sample range accessible
+  // without re-registering chart listeners on each render.
+  const onSeekRef = useRef(onSeek);
+  const samplesRef = useRef(samples);
+  const currentSequenceRef = useRef(currentSequence);
 
-  // Keep diagnostics during development.
-  console.debug("MUI theme mode:", theme.palette.mode);
-  console.debug("ECharts palette:", chartTheme.color);
+  onSeekRef.current = onSeek;
+  samplesRef.current = samples;
+  currentSequenceRef.current = currentSequence;
 
   useEffect(() => {
     let cancelled = false;
@@ -71,14 +94,13 @@ export function RecordingChart({
           sessionId,
           0,
           Math.min(sampleCount, MAX_SAMPLES),
-        );
-
-        console.debug("Sample API response:", {
-          sessionId,
-          sampleCount,
-          requestedCount: Math.min(sampleCount, MAX_SAMPLES),
-          samplesLength: result.samples?.length,
-        });
+          );
+          console.debug("Sample API response:", {
+              sessionId,
+              sampleCount,
+              requestedCount: Math.min(sampleCount, MAX_SAMPLES),
+              samplesLength: result.samples?.length,
+          });
 
         if (!cancelled) {
           setSamples(result.samples);
@@ -113,18 +135,38 @@ export function RecordingChart({
   useEffect(() => {
     const container = containerRef.current;
 
-    if (!container) {
-      return;
-    }
+    if (!container) return;
+
+    let frameId: number | null = null;
 
     const observer = new ResizeObserver(() => {
-      chartRef.current?.getEchartsInstance().resize();
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+
+      frameId = requestAnimationFrame(() => {
+        frameId = null;
+
+        const chart = chartRef.current?.getEchartsInstance();
+
+        if (chart && !chart.isDisposed()) {
+          chart.resize();
+        }
+      });
     });
 
     observer.observe(container);
 
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
   }, []);
+
+  const lineWidth = getLineWidth(samples.length);
 
   const option = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
@@ -138,8 +180,6 @@ export function RecordingChart({
         selectedIds.has(channel.channelId),
       )
       .map(({ channel, channelIndex }) => {
-        // Assign color based on the full channel list.
-        // Hiding other channels will not change this color.
         const seriesColor =
           chartTheme.color[
             channelIndex % chartTheme.color.length
@@ -153,11 +193,11 @@ export function RecordingChart({
             : channel.name,
 
           type: "line" as const,
-
           showSymbol: false,
           connectNulls: false,
           smooth: false,
           silent: false,
+          cursor: 'default',
 
           itemStyle: {
             color: seriesColor,
@@ -182,6 +222,32 @@ export function RecordingChart({
           ]),
         };
       });
+
+    // The cursor position comes from backend replay state.
+    // Attach it to the first visible telemetry series.
+    const replayCursor =
+      currentSequence === null || series.length === 0
+        ? undefined
+        : {
+            silent: true,
+            symbol: "none",
+            animation: false,
+            label: {
+              show: false,
+            },
+            lineStyle: {
+              color: chartTheme.cursorColor,
+              width: 2,
+              type: "dashed" as const,
+            },
+            data: [{ xAxis: currentSequence }],
+          };
+
+    const chartSeries = series.map((item, index) =>
+      index === 0 && replayCursor
+        ? { ...item, markLine: replayCursor }
+        : item,
+    );
 
     return {
       animation: false,
@@ -249,8 +315,15 @@ export function RecordingChart({
           show: true,
           lineStyle: {
             color: chartTheme.gridLineColor,
-            width: 1,
-            opacity: 0.65,
+          },
+        },
+
+        axisPointer: {
+          show: true,
+          snap: false,
+          lineStyle: {
+            color: chartTheme.cursorColor,
+            type: "dashed" as const,
           },
         },
       },
@@ -297,50 +370,13 @@ export function RecordingChart({
           show: true,
           lineStyle: {
             color: chartTheme.gridLineColor,
-            width: 1,
-            opacity: 0.65,
           },
         },
       },
 
-      // dataZoom: [
-      //   // Y-axis: interactive zoom
-      //   {
-      //     type: "inside",
-      //     yAxisIndex: 0,
-      //   },
-
-      //   // Y-axis: right-side slider
-      //   {
-      //     type: "slider",
-      //     yAxisIndex: 0,
-      //     right: 8,
-      //     width: 18,
-      //   },
-      //   {
-      //     type: "inside" as const,
-      //     xAxisIndex: 0,
-      //   },
-      //   {
-      //     type: "slider" as const,
-      //     xAxisIndex: 0,
-      //     bottom: 12,
-      //     height: 20,
-
-      //     textStyle: {
-      //       color: chartTheme.axisTextColor,
-      //     },
-
-      //     borderColor: chartTheme.gridLineColor,
-      //     fillerColor:
-      //       theme.palette.mode === "dark"
-      //         ? "rgba(96, 165, 250, 0.12)"
-      //         : "rgba(37, 99, 235, 0.10)",
-      //   },
-      // ],
       dataZoom: [
         {
-          type: "inside",
+          type: "inside" as const,
           xAxisIndex: 0,
           zoomOnMouseWheel: true,
           moveOnMouseMove: true,
@@ -348,35 +384,104 @@ export function RecordingChart({
         },
       ],
 
-      series,
+      series: chartSeries,
     };
   }, [
     channels,
     samples,
     selectedChannelIds,
     chartTheme,
-    theme.palette.mode,
+    currentSequence,
+    lineWidth,
   ]);
 
-  console.debug(
-    "CHART DIAGNOSTICS",
-    JSON.stringify(
-      {
-        loadedSamples: samples.length,
-        selectedChannels: selectedChannelIds,
-        seriesCount: option.series.length,
-        seriesColors: option.series.map((series) => ({
-          name: series.name,
-          color: series.lineStyle.color,
-        })),
-        firstSeriesData: option.series[0]?.data.slice(0, 5),
-        chartWidth: containerRef.current?.clientWidth,
-        chartHeight: containerRef.current?.clientHeight,
-      },
-      null,
-      2,
-    ),
+  // Register click-to-seek when ECharts is initialized.
+  // This also handles clicks on empty areas of the plot.
+  const handleChartReady = useCallback(
+    (chart: EChartsType) => {
+      console.debug("Replay chart ready");
+
+      const renderer = chart.getZr();
+
+      const handleClick = (event: {
+        offsetX: number;
+        offsetY: number;
+      }) => {
+        const pixel: [number, number] = [
+          event.offsetX,
+          event.offsetY,
+        ];
+
+        if (
+          !chart.containPixel(
+            { gridIndex: 0 },
+            pixel,
+          )
+        ) {
+          return;
+        }
+
+        const coordinates = chart.convertFromPixel(
+          { gridIndex: 0 },
+          pixel,
+        ) as number[];
+
+        const rawSequence = coordinates[0];
+
+        if (!Number.isFinite(rawSequence)) {
+          return;
+        }
+
+        const loadedSamples = samplesRef.current;
+
+        if (loadedSamples.length === 0) {
+          return;
+        }
+
+        const firstSequence =
+          loadedSamples[0].sequence;
+
+        const lastSequence =
+          loadedSamples[loadedSamples.length - 1]
+            .sequence;
+
+        const sequence = Math.max(
+          firstSequence,
+          Math.min(
+            lastSequence,
+            Math.round(rawSequence),
+          ),
+        );
+
+        if (sequence === currentSequenceRef.current) {
+          return;
+        }
+
+        console.debug("Chart clicked:", sequence);
+
+        onSeekRef.current(sequence);
+      };
+
+      renderer.on("click", handleClick);
+
+      // Remove only our listener when this chart is
+      // disposed. Avoid renderer.off("click"), which
+      // would remove other registered listeners.
+      chart.on("finished", () => {
+        // Intentionally no option updates here.
+      });
+    },
+    [],
   );
+
+  console.debug("CHART DIAGNOSTICS", {
+    loadedSamples: samples.length,
+    selectedChannels: selectedChannelIds,
+    currentSequence,
+    seriesCount: option.series.length,
+    chartWidth: containerRef.current?.clientWidth,
+    chartHeight: containerRef.current?.clientHeight,
+  });
 
   return (
     <Box
@@ -442,9 +547,11 @@ export function RecordingChart({
             ref={chartRef}
             option={option}
             notMerge
+            onChartReady={handleChartReady}
             style={{
               height: "100%",
               width: "100%",
+              cursor: "crosshair",
             }}
           />
         ) : (
@@ -464,12 +571,4 @@ export function RecordingChart({
       </Box>
     </Box>
   );
-}
-
-function getLineWidth(visibleSampleCount: number): number {
-  if (visibleSampleCount <= 100) return 2.5;
-  if (visibleSampleCount <= 500) return 2;
-  if (visibleSampleCount <= 2000) return 1.5;
-
-  return 1;
 }
