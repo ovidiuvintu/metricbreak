@@ -119,7 +119,17 @@ export function RecordingDashboard() {
   }
 
   return (
-    <Stack spacing={3}>
+    <Stack
+      spacing={3}
+      sx={{
+        width: "100%",
+        maxWidth: "none",
+        minWidth: 0,
+        m: 0,
+        p: 0,
+        boxSizing: "border-box",
+      }}
+    >
       {/* Page header */}
       <Box
         sx={{
