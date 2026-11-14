@@ -13,6 +13,7 @@ import {
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
+import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
 
 import type { CreateSessionResponse } from "./recordingTypes";
 
@@ -28,6 +29,9 @@ import { ImportRecordingDialog } from "./ImportRecordingDialog";
 export function RecordingDashboard() {
   const [session, setSession] =
     useState<SessionState | null>(null);
+
+  const [selectedChannelIds, setSelectedChannelIds] =
+    useState<string[]>([]);
 
   const [channels, setChannels] =
     useState<ChannelMetadata[]>([]);
@@ -54,16 +58,22 @@ export function RecordingDashboard() {
 
       setSession(loadedSession);
       setChannels(loadedChannels);
-    } catch (error) {
-      setLoadError(
-        error instanceof Error
-          ? error.message
-          : "Unable to load recording.",
+
+      setSelectedChannelIds(
+        loadedChannels
+          .slice(0, 3)
+          .map((channel) => channel.channelId)
       );
-    } finally {
-      setLoading(false);
-    }
-  };
+          } catch (error) {
+            setLoadError(
+              error instanceof Error
+                ? error.message
+                : "Unable to load recording.",
+            );
+          } finally {
+            setLoading(false);
+          }
+        };
 
   const handleImportSuccess = async (
     result: CreateSessionResponse
@@ -182,6 +192,7 @@ export function RecordingDashboard() {
             sessionId={session.sessionId}
             sampleCount={session.sampleCount}
             channels={channels}
+            selectedChannelIds={selectedChannelIds}
           />
         </Box>
       ) : (
@@ -229,22 +240,12 @@ export function RecordingDashboard() {
     </Box>
   );
 
-  const channelPanel =
-    session?.currentSample ? (
-      <ChannelList
-        sample={session.currentSample}
-        channels={channels}
-      />
-    ) : (
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{ p: 1 }}
-      >
-        {session
-          ? "No current sample available."
-          : "Import a recording to inspect its channels."}
-      </Typography>
+  const channelPanel = (
+    <ChannelSelectionPanel
+      channels={channels}
+      selectedChannelIds={selectedChannelIds}
+      onSelectionChange={setSelectedChannelIds}
+    />
   );
 
   const details = (
@@ -326,6 +327,9 @@ export function RecordingDashboard() {
         onClose={() => setDialogOpen(false)}
         onImported={handleImportSuccess}
       />
+
+      {console.debug("Selected channel IDs:", selectedChannelIds)}
+      {console.debug("Available channels:", channels.length)}
     </>
   );
 }
