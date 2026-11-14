@@ -8,6 +8,8 @@ import {
   Typography,
 } from "@mui/material";
 
+import MenuIcon from "@mui/icons-material/Menu";
+
 import { useTheme } from "@mui/material/styles";
 
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
@@ -15,10 +17,12 @@ import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 
 interface AppToolbarProps {
   onToggleTheme: () => void;
+  onOpenSidebar: () => void;
 }
 
 export function AppToolbar({
   onToggleTheme,
+  onOpenSidebar,
 }: AppToolbarProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
@@ -34,6 +38,14 @@ export function AppToolbar({
         borderColor: "divider",
       }}
     >
+      <IconButton
+            onClick={onOpenSidebar}
+            aria-label="Open navigation"
+            edge="start"
+            sx={{ display: { xs: "inline-flex", md: "none" }, mr: 1 }}
+            >
+            <MenuIcon />
+      </IconButton>
       <Toolbar sx={{ minHeight: 64 }}>
         <Typography
           variant="h6"
