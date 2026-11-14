@@ -15,7 +15,7 @@ import type { ChannelMetadata } from "./channelMetadata";
 
 
 interface ChannelListProps {
-  sample: CurrentSample;
+  sample?: CurrentSample | null;
   channels: ChannelMetadata[];
 }
 
@@ -42,7 +42,7 @@ export function ChannelList({
           <TableBody>
             {channels.map((channel) => {
               const value =
-                sample.channels[channel.channelId];
+                sample?.channels?.[channel.channelId];;
 
               return (
                 <TableRow key={channel.channelId}>

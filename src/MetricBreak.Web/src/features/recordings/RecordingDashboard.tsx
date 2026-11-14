@@ -1,279 +1,331 @@
 
-import { useEffect, useState } from "react";
-import { RecordingChart } from "./RecordingChart";
+import { useState } from "react";
+
 import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   CircularProgress,
   Stack,
   Typography,
 } from "@mui/material";
-import UploadFileIcon from "@mui/icons-material/UploadFile";
 
-import { recordingApi } from "./recordingApi";
-import { ImportRecordingDialog } from "./ImportRecordingDialog";
-import { RecordingOverview } from "./RecordingOverview";
-import { ChannelList } from "./ChannelList";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import ShowChartIcon from "@mui/icons-material/ShowChart";
 
 import type { CreateSessionResponse } from "./recordingTypes";
-import type { SessionState } from "./sessionTypes";
 
+import { recordingApi } from "./recordingApi";
+import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 
+import { RecordingWorkspace } from "./RecordingWorkspace";
+import { RecordingChart } from "./RecordingChart";
+import { ChannelList } from "./ChannelList";
+import { ImportRecordingDialog } from "./ImportRecordingDialog";
 
 export function RecordingDashboard() {
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [session, setSession] =
-    useState<CreateSessionResponse | null>(null);
-    
-
-  const [sessionState, setSessionState] =
     useState<SessionState | null>(null);
 
-  // Correct: hook inside the component
   const [channels, setChannels] =
     useState<ChannelMetadata[]>([]);
 
   const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState("");
-  const [importSuccess, setImportSuccess] = useState(false);
-  // Retrieve the session state after a successful CSV import.
-  useEffect(() => {
-    if (!session) {
-      setSessionState(null);
-      return;
-    }
+  const [loadError, setLoadError] =
+    useState<string | null>(null);
 
-    
+  const [importSuccess, setImportSuccess] =
+    useState<string | null>(null);
 
-    let cancelled = false;
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-   
-  Promise.all([
-    recordingApi.getSession(session.sessionId),
-    recordingApi.getChannels(session.sessionId),
-  ])
-    .then(([result, metadata]) => {
-      if (cancelled) return;
-
-      setSessionState(result);
-      setChannels(metadata);
-      setLoadError("");
-    })
-    .catch((error: unknown) => {
-      if (cancelled) return;
-
-      setLoadError(
-        error instanceof Error
-          ? error.message
-          : "Unable to load recording session.",
-      );
-    })
-    .finally(() => {
-      if (!cancelled) {
-        setLoading(false);
-      }
-    });
-
-  return () => {
-    cancelled = true;
-  };
-}, [session]);
-
-
-  // Called when the CSV import completes successfully.
-  function handleImported(importedSession: CreateSessionResponse) {
-    setSession(importedSession);
-    setSessionState(null);
-    setChannels([]);
-    setLoadError("");
-    setImportSuccess(true);
+  const loadRecording = async (sessionId: string) => {
     setLoading(true);
-}
-
-  // Manually reload the current session state.
-  async function refreshSession() {
-    if (!session) return;
-
-    setLoading(true);
-    setLoadError("");
+    setLoadError(null);
 
     try {
-      const result = await recordingApi.getSession(
-        session.sessionId,
-      );
+      const [loadedSession, loadedChannels] =
+        await Promise.all([
+          recordingApi.getSession(sessionId),
+          recordingApi.getChannels(sessionId),
+        ]);
 
-      setSessionState(result);
+      setSession(loadedSession);
+      setChannels(loadedChannels);
     } catch (error) {
       setLoadError(
         error instanceof Error
           ? error.message
-          : "Unable to refresh recording session.",
+          : "Unable to load recording.",
       );
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  return (
-    <Stack
-      spacing={3}
+  const handleImportSuccess = async (
+    result: CreateSessionResponse
+  ) => {
+    setDialogOpen(false);
+    setImportSuccess(null);
+
+    await loadRecording(result.sessionId);
+
+    setImportSuccess("Recording imported successfully.");
+};
+
+  const handleRefresh = async () => {
+    if (!session) return;
+    await loadRecording(session.sessionId);
+  };
+
+  const toolbar = (
+    <Box
       sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
         width: "100%",
-        maxWidth: "none",
         minWidth: 0,
-        m: 0,
-        p: 0,
-        boxSizing: "border-box",
+        gap: 1,
       }}
     >
-      {/* Page header */}
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 2,
-        }}
-      >
-        <Box>
-          <Typography variant="h4">
-            Recordings
-          </Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography
+          variant="body2"
+          fontWeight={600}
+          noWrap
+        >
+          {session
+            ? session.recordingName
+            : "Recording Workspace"}
+        </Typography>
 
-          <Typography color="text.secondary">
-            Import and inspect recorded time-series data.
+        {session && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            component="div"
+            noWrap
+          >
+            {session.sampleCount.toLocaleString()} samples
           </Typography>
-        </Box>
+        )}
+      </Box>
 
-        <Stack direction="row" spacing={1}>
+      <Stack direction="row" spacing={1} flexShrink={0}>
+        {session && (
           <Button
+            size="small"
             variant="outlined"
-            disabled={!session || loading}
-            onClick={() => void refreshSession()}
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={loading}
           >
             Refresh
           </Button>
+        )}
 
-          <Button
-            variant="contained"
-            startIcon={<UploadFileIcon />}
-            onClick={() => setDialogOpen(true)}
-          >
-            Import CSV
-          </Button>
-        </Stack>
-      </Box>
-
-      {/* Import confirmation */}
-      {importSuccess && session && (
-        <Alert
-          severity="success"
-          onClose={() => setImportSuccess(false)}
+        <Button
+          size="small"
+          variant="contained"
+          startIcon={<UploadFileIcon />}
+          onClick={() => setDialogOpen(true)}
         >
-          Recording "{session.recordingName}" imported successfully.
-        </Alert>
-      )}
+          Import CSV
+        </Button>
+      </Stack>
+    </Box>
+  );
 
-      {/* Session retrieval error */}
-      {loadError && (
-        <Alert severity="error">
-          {loadError}
-        </Alert>
-      )}
-
-      {/* Loading indicator */}
+  const chart = (
+    <Box
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        minWidth: 0,
+        minHeight: 0,
+        position: "relative",
+      }}
+    >
       {loading && (
-        <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
-          <CircularProgress />
+        <Box
+          sx={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            bgcolor: "background.paper",
+            opacity: 0.85,
+          }}
+        >
+          <CircularProgress size={30} />
         </Box>
       )}
 
-      {/* Empty state */}
-      {!session && !loading && (
-        <Card variant="outlined">
-          <CardContent sx={{ py: 5, textAlign: "center" }}>
-            <Typography variant="h6">
-              No recording selected
-            </Typography>
-
-            <Typography color="text.secondary" sx={{ mt: 1 }}>
-              Import a CSV file to create a replay session.
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Imported recording metadata */}
-      {session && !loading && (
-        <Card variant="outlined">
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Imported Recording
-            </Typography>
-
-            <Stack spacing={1}>
-              <Typography>
-                <strong>Name:</strong> {session.recordingName}
-              </Typography>
-
-              <Typography>
-                <strong>Samples:</strong>{" "}
-                {session.sampleCount.toLocaleString()}
-              </Typography>
-
-              <Typography>
-                <strong>Status:</strong> {session.status}
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ overflowWrap: "anywhere" }}
-              >
-                <strong>Session ID:</strong> {session.sessionId}
-              </Typography>
-
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{ overflowWrap: "anywhere" }}
-              >
-                <strong>Recording ID:</strong> {session.recordingId}
-              </Typography>
-            </Stack>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Recording overview and channel values */}
-     {session !== null && sessionState !== null && !loading && (
-      <Stack spacing={3}>
-          <RecordingOverview session={sessionState} />
-
+      {session ? (
+        <Box
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            overflow: "hidden",
+          }}
+        >
           <RecordingChart
-              sessionId={session.sessionId}
-              sampleCount={session.sampleCount}
-              channels={channels}
+            sessionId={session.sessionId}
+            sampleCount={session.sampleCount}
+            channels={channels}
+          />
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            display: "flex",
+            flex: 1,
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 1.5,
+            textAlign: "center",
+            px: 2,
+          }}
+        >
+          <ShowChartIcon
+            sx={{
+              fontSize: 56,
+              color: "text.disabled",
+            }}
           />
 
-          <ChannelList
-              sample={sessionState.currentSample}
-              channels={channels}
-          />
-      </Stack>)}
+          <Typography variant="h6" fontWeight={600}>
+            No recording loaded
+          </Typography>
 
-      {/* CSV import dialog */}
+          <Typography
+            variant="body2"
+            color="text.secondary"
+          >
+            Import a CSV recording to begin exploring
+            and debugging time-series data.
+          </Typography>
+
+          <Button
+            variant="outlined"
+            startIcon={<UploadFileIcon />}
+            onClick={() => setDialogOpen(true)}
+            sx={{ mt: 1 }}
+          >
+            Import CSV
+          </Button>
+        </Box>
+      )}
+    </Box>
+  );
+
+  const channelPanel =
+    session?.currentSample ? (
+      <ChannelList
+        sample={session.currentSample}
+        channels={channels}
+      />
+    ) : (
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ p: 1 }}
+      >
+        {session
+          ? "No current sample available."
+          : "Import a recording to inspect its channels."}
+      </Typography>
+  );
+
+  const details = (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 2,
+        minHeight: 28,
+        px: 0.5,
+      }}
+    >
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        noWrap
+      >
+        {session
+          ? `Session: ${session.sessionId}`
+          : "Ready"}
+      </Typography>
+
+      <Typography
+        variant="caption"
+        color="text.secondary"
+      >
+        {channels.length} channels
+      </Typography>
+    </Box>
+  );
+
+  return (
+    <>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          width: "100%",
+          height: "100%",
+          minWidth: 0,
+          minHeight: 0,
+          overflow: "hidden",
+        }}
+      >
+        {(loadError || importSuccess) && (
+          <Box sx={{ flexShrink: 0, mb: 1 }}>
+            {loadError && (
+              <Alert
+                severity="error"
+                onClose={() => setLoadError(null)}
+              >
+                {loadError}
+              </Alert>
+            )}
+
+            {importSuccess && (
+              <Alert
+                severity="success"
+                onClose={() => setImportSuccess(null)}
+              >
+                {importSuccess}
+              </Alert>
+            )}
+          </Box>
+        )}
+
+        <RecordingWorkspace
+          toolbar={toolbar}
+          chart={chart}
+          channels={channelPanel}
+          details={details}
+        />
+      </Box>
+
       <ImportRecordingDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        onImported={handleImported}
+        onImported={handleImportSuccess}
       />
-    </Stack>
+    </>
   );
 }
-
