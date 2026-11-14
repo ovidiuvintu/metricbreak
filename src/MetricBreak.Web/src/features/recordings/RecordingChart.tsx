@@ -1,309 +1,316 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactECharts from "echarts-for-react";
 
 import {
-    Alert,
-    Box,
-    Card,
-    CardContent,
-    Checkbox,
-    CircularProgress,
-    FormControlLabel,
-    Stack,
-    Typography,
+  Alert,
+  Box,
+  CircularProgress,
+  Typography,
 } from "@mui/material";
+
 import { useTheme } from "@mui/material/styles";
 
-
 import { recordingApi } from "./recordingApi";
-
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 import { createChartTheme } from "../../theme/chartTheme";
 
-
 interface RecordingChartProps {
-    sessionId: string;
-    sampleCount: number;
-    channels: ChannelMetadata[];
+  sessionId: string;
+  sampleCount: number;
+  channels: ChannelMetadata[];
+  selectedChannelIds: string[];
 }
 
 const MAX_SAMPLES = 5000;
-const DEFAULT_VISIBLE_CHANNELS = 3;
 
 export function RecordingChart({
-    sessionId,
-    sampleCount,
-    channels,
+  sessionId,
+  sampleCount,
+  channels,
+  selectedChannelIds,
 }: RecordingChartProps) {
-    const theme = useTheme();
+  const theme = useTheme();
 
-    const chartTheme = useMemo(
-        () => createChartTheme(theme.palette.mode),
-        [theme.palette.mode]
-    );
-    
-    const [samples, setSamples] =
-        useState<SampleRangeItem[]>([]);
+  const chartTheme = useMemo(
+    () => createChartTheme(theme.palette.mode),
+    [theme.palette.mode],
+  );
 
-    const [selectedChannels, setSelectedChannels] =
-        useState<string[]>([]);
+  const chartRef = useRef<ReactECharts>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
+  const [samples, setSamples] =
+    useState<SampleRangeItem[]>([]);
 
-    
-    useEffect(() => {
-        setSelectedChannels(
-            channels
-                .slice(0, DEFAULT_VISIBLE_CHANNELS)
-                .map((channel) => channel.channelId),
-        );
-    }, [channels]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
 
-    useEffect(() => {
-        let cancelled = false;
+    setSamples([]);
 
-        if (sampleCount <= 0) {
-            return;
-        }
-
-        async function loadSamples() {
-            setLoading(true);
-            setError("");
-            setSamples([]);
-
-            try {
-                const result = await recordingApi.getSamples(
-                    sessionId,
-                    0,
-                    Math.min(sampleCount, MAX_SAMPLES),
-                );
-
-                if (!cancelled) {
-                    setSamples(result.samples);
-                }
-            } catch (caught) {
-                if (!cancelled) {
-                    setError(
-                        caught instanceof Error
-                            ? caught.message
-                            : "Unable to load recording samples.",
-                    );
-                }
-            } finally {
-                if (!cancelled) {
-                    setLoading(false);
-                }
-            }
-        }
-
-        void loadSamples();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [sessionId, sampleCount]);
-
-    function toggleChannel(channelId: string) {
-        setSelectedChannels((current) =>
-            current.includes(channelId)
-                ? current.filter((id) => id !== channelId)
-                : [...current, channelId],
-        );
+    if (sampleCount <= 0) {
+      setLoading(false);
+      setError("");
+      return;
     }
 
-    const option = useMemo(() => {
-        const series = channels
-            .filter((channel) =>
-                selectedChannels.includes(channel.channelId),
-            )
-            .map((channel) => ({
-                name: channel.unit
-                    ? `${channel.name} (${channel.unit})`
-                    : channel.name,
-                type: "line" as const,
-                showSymbol: false,
-                connectNulls: false,
-                data: samples.map((sample) => [
-                    sample.sequence,
-                    sample.channels[channel.channelId] ?? null,
-                ]),
-            }));
+    async function loadSamples() {
+      setLoading(true);
+      setError("");
 
-        return {
-            animation: false,
-             textStyle: {
-                fontFamily: '"Source Sans Pro", Arial, sans-serif',
-            },
+      try {
+        const result = await recordingApi.getSamples(
+          sessionId,
+          0,
+          Math.min(sampleCount, MAX_SAMPLES),
+        );
 
-            tooltip: {
-                trigger: "axis",
-            },
+        console.debug("Sample API response:", {
+          sessionId,
+          sampleCount,
+          requestedCount: Math.min(sampleCount, MAX_SAMPLES),
+          response: result,
+          samplesLength: result.samples?.length,
+        });
 
-            legend: {
-                show: false,
-            },
+        if (!cancelled) {
+          setSamples(result.samples);
+        }
+      } catch (caught) {
+        console.error("Failed to load recording samples:", caught);
 
-            grid: {
-                left: 20,
-                right: 35,
-                top: 25,
-                bottom: 90,
-                containLabel: true,
-            },
+        if (!cancelled) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Unable to load recording samples.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
 
-            xAxis: {
-                type: "value",
-                name: "Sequence",
-                nameLocation: "middle",
-                nameGap: 30,
-                minInterval: 1,
-                axisLabel: {
-                    hideOverlap: true,
-                    formatter: (value: number) =>
-                        Math.round(value).toLocaleString(),
-                },
-            },
+    void loadSamples();
 
-            yAxis: {
-                type: "value",
-                scale: true,
-                axisLabel: {
-                    formatter: (value: number) => {
-                        const absolute = Math.abs(value);
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, sampleCount]);
 
-                        if (absolute >= 1_000_000_000) {
-                            return `${(value / 1_000_000_000).toFixed(1)}G`;
-                        }
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-                        if (absolute >= 1_000_000) {
-                            return `${(value / 1_000_000).toFixed(1)}M`;
-                        }
+    const observer = new ResizeObserver(() => {
+      chartRef.current?.getEchartsInstance().resize();
+    });
 
-                        if (absolute >= 1_000) {
-                            return `${(value / 1_000).toFixed(1)}K`;
-                        }
+    observer.observe(container);
 
-                        return value.toLocaleString();
-                    },
-                },
-            },
+    return () => observer.disconnect();
+  }, []);
 
-            dataZoom: [
-                {
-                    type: "inside",
-                    xAxisIndex: 0,
-                },
-                {
-                    type: "slider",
-                    xAxisIndex: 0,
-                    bottom: 15,
-                },
-            ],
+  const option = useMemo(() => {
+    const series = channels
+      .filter((channel) =>
+        selectedChannelIds.includes(channel.channelId),
+      )
+      .map((channel) => ({
+        name: channel.unit
+          ? `${channel.name} (${channel.unit})`
+          : channel.name,
+        type: "line" as const,
+        showSymbol: false,
+        connectNulls: false,
+        data: samples.map((sample) => [
+          sample.sequence,
+          sample.channels[channel.channelId] ?? null,
+        ]),
+      }));
 
-            series,
-        };
-    }, [channels, samples, selectedChannels]);
+    return {
+      animation: false,
 
-    return (
-        <Card variant="outlined">
-            <CardContent>
-                <Stack spacing={2}>
-                    <Box>
-                        <Typography variant="h6">
-                            Recording Visualization
-                        </Typography>
+      color: chartTheme.color,
 
-                        <Typography
-                            variant="body2"
-                            color="text.secondary"
-                        >
-                            Inspect recorded signals by sample sequence.
-                        </Typography>
-                    </Box>
+      textStyle: {
+        fontFamily: '"Source Sans Pro", Arial, sans-serif',
+        color: theme.palette.text.primary,
+      },
 
-                    <Box
-                        sx={{
-                            display: "grid",
-                            gridTemplateColumns: {
-                                xs: "1fr",
-                                sm: "repeat(2, minmax(0, 1fr))",
-                                lg: "repeat(3, minmax(0, 1fr))",
-                            },
-                            gap: 1,
-                        }}
-                    >
-                        {channels.map((channel) => (
-                            <FormControlLabel
-                                key={channel.channelId}
-                                sx={{
-                                    m: 0,
-                                    minWidth: 0,
-                                    "& .MuiFormControlLabel-label": {
-                                        overflowWrap: "anywhere",
-                                        fontSize: "0.875rem",
-                                    },
-                                }}
-                                control={
-                                    <Checkbox
-                                        checked={selectedChannels.includes(
-                                            channel.channelId,
-                                        )}
-                                        onChange={() =>
-                                            toggleChannel(channel.channelId)
-                                        }
-                                        size="small"
-                                    />
-                                }
-                                label={channel.name}
-                            />
-                        ))}
-                    </Box>
+      tooltip: {
+        trigger: "axis",
+      },
 
-                    {error && (
-                        <Alert severity="error">
-                            {error}
-                        </Alert>
-                    )}
+      legend: {
+        show: false,
+      },
 
-                    {loading ? (
-                        <Box
-                            sx={{
-                                display: "flex",
-                                justifyContent: "center",
-                                py: 6,
-                            }}
-                        >
-                            <CircularProgress />
-                        </Box>
-                    ) : samples.length > 0 ? (
-                        <ReactECharts
-                            option={option}
-                            style={{
-                                height: 420,
-                                width: "100%",
-                            }}
-                            notMerge
-                        />
-                    ) : (
-                        <Typography color="text.secondary">
-                            No samples available for visualization.
-                        </Typography>
-                    )}
+      grid: {
+        left: 20,
+        right: 35,
+        top: 20,
+        bottom: 75,
+        containLabel: true,
+      },
 
-                    {sampleCount > MAX_SAMPLES && (
-                        <Alert severity="info">
-                            Displaying the first {MAX_SAMPLES.toLocaleString()}
-                            {" "}of {sampleCount.toLocaleString()} samples.
-                            Windowed loading will be added in a subsequent
-                            milestone.
-                        </Alert>
-                    )}
-                </Stack>
-            </CardContent>
-        </Card>
-    );
+      xAxis: {
+        type: "value",
+        name: "Sequence",
+        nameLocation: "middle",
+        nameGap: 30,
+        minInterval: 1,
+        axisLabel: {
+          hideOverlap: true,
+          formatter: (value: number) =>
+            Math.round(value).toLocaleString(),
+        },
+      },
+
+      yAxis: {
+        type: "value",
+        scale: true,
+        axisLabel: {
+          formatter: (value: number) => {
+            const absolute = Math.abs(value);
+
+            if (absolute >= 1_000_000_000) {
+              return `${(value / 1_000_000_000).toFixed(1)}G`;
+            }
+
+            if (absolute >= 1_000_000) {
+              return `${(value / 1_000_000).toFixed(1)}M`;
+            }
+
+            if (absolute >= 1_000) {
+              return `${(value / 1_000).toFixed(1)}K`;
+            }
+
+            return value.toLocaleString();
+          },
+        },
+      },
+
+      dataZoom: [
+        {
+          type: "inside",
+          xAxisIndex: 0,
+        },
+        {
+          type: "slider",
+          xAxisIndex: 0,
+          bottom: 12,
+          height: 20,
+        },
+      ],
+
+      series,
+    };
+  }, [
+    channels,
+    samples,
+    selectedChannelIds,
+    chartTheme,
+    theme.palette.text.primary,
+  ]);
+
+  console.log(
+    "CHART DIAGNOSTICS",
+    JSON.stringify(
+      {
+        loadedSamples: samples.length,
+        selectedChannels: selectedChannelIds,
+        seriesCount: option.series.length,
+        firstSeriesData: option.series[0]?.data.slice(0, 5),
+        chartWidth: containerRef.current?.clientWidth,
+chartHeight: containerRef.current?.clientHeight,
+      },
+      null,
+      2,
+  ),
+);
+
+  return (
+    <Box
+      ref={containerRef}
+      sx={{
+        display: "flex",
+        flexDirection: "column",
+        width: "100%",
+        height: "100%",
+        minWidth: 0,
+        minHeight: 0,
+        overflow: "hidden",
+      }}
+    >
+      {error && (
+        <Alert severity="error" sx={{ flexShrink: 0, mb: 1 }}>
+          {error}
+        </Alert>
+      )}
+
+      {sampleCount > MAX_SAMPLES && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ flexShrink: 0, px: 1 }}
+        >
+          Displaying the first {MAX_SAMPLES.toLocaleString()} of{" "}
+          {sampleCount.toLocaleString()} samples.
+        </Typography>
+      )}
+
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          position: "relative",
+        }}
+      >
+        {loading ? (
+          <Box
+            sx={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <CircularProgress />
+          </Box>
+        ) : samples.length > 0 ? (
+          <ReactECharts
+            ref={chartRef}
+            option={option}
+            style={{
+              height: "100%",
+              width: "100%",
+            }}
+            notMerge
+          />
+        ) : (
+          <Box
+            sx={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Typography color="text.secondary">
+              No samples available for visualization.
+            </Typography>
+          </Box>
+        )}
+      </Box>
+    </Box>
+  );
 }
