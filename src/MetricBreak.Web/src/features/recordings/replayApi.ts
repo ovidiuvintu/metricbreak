@@ -68,4 +68,19 @@ export const replayApi = {
       { method: "POST" },
     );
   },
+
+  continue(sessionId: string): Promise<ContinueResponse> {
+    return apiRequest<ContinueResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/continue`,
+      { method: "POST" },
+    );
+  },
 };
+
+export interface ContinueResponse {
+  executed: boolean;
+  hitBreakpoint: boolean;
+  reachedEndOfRecording: boolean;
+  stop: unknown | null;
+  session: SessionState;
+}

@@ -12,12 +12,15 @@ import {
 
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 interface RecordingWorkspaceProps {
   toolbar: ReactNode;
   chart: ReactNode;
   channels: ReactNode;
   replayControls?: ReactNode;
+  currentValues?: ReactNode;
   details?: ReactNode;
 }
 
@@ -26,10 +29,14 @@ export function RecordingWorkspace({
   chart,
   channels,
   replayControls,
+  currentValues,
   details,
 }: RecordingWorkspaceProps) {
   const [channelsCollapsed, setChannelsCollapsed] =
     useState(false);
+
+  const [valuesCollapsed, setValuesCollapsed] =
+    useState(true);
 
   return (
     <Box
@@ -44,7 +51,7 @@ export function RecordingWorkspace({
         gap: 1,
       }}
     >
-      {/* Compact toolbar */}
+      {/* Toolbar */}
       <Box
         sx={{
           flexShrink: 0,
@@ -56,7 +63,7 @@ export function RecordingWorkspace({
         {toolbar}
       </Box>
 
-      {/* Main visualization workspace */}
+      {/* Main workspace */}
       <Paper
         variant="outlined"
         sx={{
@@ -68,7 +75,7 @@ export function RecordingWorkspace({
           borderRadius: 1,
         }}
       >
-        {/* Chart and replay controls */}
+        {/* Chart, replay controls and values */}
         <Box
           sx={{
             display: "flex",
@@ -79,6 +86,7 @@ export function RecordingWorkspace({
             overflow: "hidden",
           }}
         >
+          {/* Chart */}
           <Box
             sx={{
               flex: 1,
@@ -91,10 +99,10 @@ export function RecordingWorkspace({
             {chart}
           </Box>
 
+          {/* Replay controls */}
           {replayControls && (
             <>
               <Divider />
-
               <Box
                 sx={{
                   flexShrink: 0,
@@ -106,9 +114,78 @@ export function RecordingWorkspace({
               </Box>
             </>
           )}
+
+          {/* Current Values */}
+          {currentValues && (
+            <>
+              <Divider />
+
+              <Box
+                sx={{
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  px: 2,
+                  minHeight: 40,
+                  bgcolor: "background.paper",
+                }}
+              >
+                <Typography
+                  variant="subtitle2"
+                  fontWeight={600}
+                >
+                  Current Values
+                </Typography>
+
+                <Tooltip
+                  title={
+                    valuesCollapsed
+                      ? "Expand current values"
+                      : "Collapse current values"
+                  }
+                >
+                  <IconButton
+                    size="small"
+                    aria-label={
+                      valuesCollapsed
+                        ? "Expand current values"
+                        : "Collapse current values"
+                    }
+                    onClick={() =>
+                      setValuesCollapsed((value) => !value)
+                    }
+                  >
+                    {valuesCollapsed ? (
+                      <ExpandLessIcon fontSize="small" />
+                    ) : (
+                      <ExpandMoreIcon fontSize="small" />
+                    )}
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              {!valuesCollapsed && (
+                <Box
+                  sx={{
+                    height: 220,
+                    minHeight: 100,
+                    maxHeight: "60%",
+                    resize: "vertical",
+                    overflow: "auto",
+                    borderTop: 1,
+                    borderColor: "divider",
+                    p: 1,
+                  }}
+                >
+                  {currentValues}
+                </Box>
+              )}
+            </>
+          )}
         </Box>
 
-        {/* Collapsible channels panel */}
+        {/* Inspector sidebar */}
         <Box
           component="aside"
           sx={{
@@ -147,15 +224,15 @@ export function RecordingWorkspace({
                 variant="subtitle2"
                 fontWeight={600}
               >
-                Channels
+                Inspector
               </Typography>
             )}
 
             <Tooltip
               title={
                 channelsCollapsed
-                  ? "Expand channels"
-                  : "Collapse channels"
+                  ? "Expand inspector"
+                  : "Collapse inspector"
               }
             >
               <IconButton
@@ -165,8 +242,8 @@ export function RecordingWorkspace({
                 }
                 aria-label={
                   channelsCollapsed
-                    ? "Expand channels"
-                    : "Collapse channels"
+                    ? "Expand inspector"
+                    : "Collapse inspector"
                 }
               >
                 {channelsCollapsed ? (
@@ -198,7 +275,7 @@ export function RecordingWorkspace({
         </Box>
       </Paper>
 
-      {/* Optional compact details/status bar */}
+      {/* Status bar */}
       {details && (
         <Box
           sx={{

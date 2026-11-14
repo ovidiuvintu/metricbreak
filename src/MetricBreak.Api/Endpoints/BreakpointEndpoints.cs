@@ -57,8 +57,9 @@ internal static class BreakpointEndpoints
                         return Results.Problem(
                             "Breakpoint was not created.");
 
-                    var response =
-                        BreakpointResponseMapper.Map(breakpoint);
+                    var response = BreakpointResponseMapper.Map(
+                        breakpoint,
+                        isEnabled: true);
 
                     return Results.Created(
                         $"/api/sessions/{sessionId}/breakpoints/{response.BreakpointId}",
@@ -101,7 +102,10 @@ internal static class BreakpointEndpoints
 
                 var response = new BreakpointsResponse(
                     breakpoints
-                        .Select(BreakpointResponseMapper.Map)
+                        .Select(registered =>
+                            BreakpointResponseMapper.Map(
+                                registered.Breakpoint,
+                                registered.IsEnabled))
                         .ToArray());
 
                 return Results.Ok(response);
