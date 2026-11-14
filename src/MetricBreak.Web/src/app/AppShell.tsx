@@ -1,93 +1,41 @@
 
 import type { ReactNode } from "react";
-import {
-    AppBar,
-    Box,
-    CssBaseline,
-    Divider,
-    Drawer,
-    List,
-    ListItemButton,
-    ListItemText,
-    Toolbar,
-    Typography,
-} from "@mui/material";
 
-const drawerWidth = 230;
+import { Box, Container } from "@mui/material";
 
-const navigation = [
-    "Workspace",
-    "Recordings",
-    "Breakpoints",
-    "Investigations",
-];
+import { AppToolbar } from "./AppToolbar";
 
 interface AppShellProps {
-    children: ReactNode;
+  children: ReactNode;
+  onToggleTheme: () => void;
 }
 
-export function AppShell({ children }: AppShellProps) {
-    return (
-        <Box sx={{ display: "flex", minHeight: "100vh" }}>
-            <CssBaseline />
+export function AppShell({
+  children,
+  onToggleTheme,
+}: AppShellProps) {
+  return (
+    <Box
+      sx={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: "background.default",
+      }}
+    >
+      <AppToolbar onToggleTheme={onToggleTheme} />
 
-            <AppBar
-                position="fixed"
-                sx={{
-                    zIndex: (theme) => theme.zIndex.drawer + 1,
-                }}
-            >
-                <Toolbar>
-                    <Typography
-                        variant="h6"
-                        sx={{ fontWeight: 700 }}
-                    >
-                        MetricBreak
-                    </Typography>
-
-                    <Typography sx={{ ml: 2, opacity: 0.75 }}>
-                        Time-Series Debugger
-                    </Typography>
-                </Toolbar>
-            </AppBar>
-
-            <Drawer
-                variant="permanent"
-                sx={{
-                    width: drawerWidth,
-                    flexShrink: 0,
-                    "& .MuiDrawer-paper": {
-                        width: drawerWidth,
-                        boxSizing: "border-box",
-                    },
-                }}
-            >
-                <Toolbar />
-                <Divider />
-
-                <List>
-                    {navigation.map((item, index) => (
-                        <ListItemButton
-                            key={item}
-                            selected={index === 0}
-                            disabled={index !== 0}
-                        >
-                            <ListItemText primary={item} />
-                        </ListItemButton>
-                    ))}
-                </List>
-            </Drawer>
-
-            <Box
-                component="main"
-                sx={{
-                    flexGrow: 1,
-                    p: 3,
-                }}
-            >
-                <Toolbar />
-                {children}
-            </Box>
-        </Box>
-    );
+      <Container
+        component="main"
+        maxWidth={false}
+        sx={{
+          flexGrow: 1,
+          py: 3,
+          px: { xs: 2, md: 3 },
+        }}
+      >
+        {children}
+      </Container>
+    </Box>
+  );
 }
