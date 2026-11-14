@@ -13,11 +13,15 @@ import {
     Stack,
     Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+
 
 import { recordingApi } from "./recordingApi";
 
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
+import { createChartTheme } from "../../theme/chartTheme";
+
 
 interface RecordingChartProps {
     sessionId: string;
@@ -26,12 +30,20 @@ interface RecordingChartProps {
 }
 
 const MAX_SAMPLES = 5000;
+const DEFAULT_VISIBLE_CHANNELS = 3;
 
 export function RecordingChart({
     sessionId,
     sampleCount,
     channels,
 }: RecordingChartProps) {
+    const theme = useTheme();
+
+    const chartTheme = useMemo(
+        () => createChartTheme(theme.palette.mode),
+        [theme.palette.mode]
+    );
+    
     const [samples, setSamples] =
         useState<SampleRangeItem[]>([]);
 
@@ -41,11 +53,15 @@ export function RecordingChart({
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
+    
     useEffect(() => {
-        setSelectedChannels(channels.map(
-            (channel) => channel.channelId,
-        ));
+        setSelectedChannels(
+            channels
+                .slice(0, DEFAULT_VISIBLE_CHANNELS)
+                .map((channel) => channel.channelId),
+        );
     }, [channels]);
+
 
     useEffect(() => {
         let cancelled = false;
@@ -119,20 +135,24 @@ export function RecordingChart({
 
         return {
             animation: false,
+             textStyle: {
+                fontFamily: '"Source Sans Pro", Arial, sans-serif',
+            },
 
             tooltip: {
                 trigger: "axis",
             },
 
             legend: {
-                top: 0,
+                show: false,
             },
 
             grid: {
-                left: 65,
-                right: 30,
-                top: 65,
-                bottom: 75,
+                left: 20,
+                right: 35,
+                top: 25,
+                bottom: 90,
+                containLabel: true,
             },
 
             xAxis: {
@@ -141,11 +161,35 @@ export function RecordingChart({
                 nameLocation: "middle",
                 nameGap: 30,
                 minInterval: 1,
+                axisLabel: {
+                    hideOverlap: true,
+                    formatter: (value: number) =>
+                        Math.round(value).toLocaleString(),
+                },
             },
 
             yAxis: {
                 type: "value",
                 scale: true,
+                axisLabel: {
+                    formatter: (value: number) => {
+                        const absolute = Math.abs(value);
+
+                        if (absolute >= 1_000_000_000) {
+                            return `${(value / 1_000_000_000).toFixed(1)}G`;
+                        }
+
+                        if (absolute >= 1_000_000) {
+                            return `${(value / 1_000_000).toFixed(1)}M`;
+                        }
+
+                        if (absolute >= 1_000) {
+                            return `${(value / 1_000).toFixed(1)}K`;
+                        }
+
+                        return value.toLocaleString();
+                    },
+                },
             },
 
             dataZoom: [
@@ -181,16 +225,28 @@ export function RecordingChart({
                         </Typography>
                     </Box>
 
-                    <Stack
-                        direction="row"
-                        spacing={1}
+                    <Box
                         sx={{
-                            flexWrap: "wrap",
+                            display: "grid",
+                            gridTemplateColumns: {
+                                xs: "1fr",
+                                sm: "repeat(2, minmax(0, 1fr))",
+                                lg: "repeat(3, minmax(0, 1fr))",
+                            },
+                            gap: 1,
                         }}
                     >
                         {channels.map((channel) => (
                             <FormControlLabel
                                 key={channel.channelId}
+                                sx={{
+                                    m: 0,
+                                    minWidth: 0,
+                                    "& .MuiFormControlLabel-label": {
+                                        overflowWrap: "anywhere",
+                                        fontSize: "0.875rem",
+                                    },
+                                }}
                                 control={
                                     <Checkbox
                                         checked={selectedChannels.includes(
@@ -205,7 +261,7 @@ export function RecordingChart({
                                 label={channel.name}
                             />
                         ))}
-                    </Stack>
+                    </Box>
 
                     {error && (
                         <Alert severity="error">
