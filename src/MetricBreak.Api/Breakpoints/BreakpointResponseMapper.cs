@@ -1,3 +1,4 @@
+
 using MetricBreak.Domain.Breakpoints;
 
 namespace MetricBreak.Api.Breakpoints;
@@ -5,7 +6,8 @@ namespace MetricBreak.Api.Breakpoints;
 public static class BreakpointResponseMapper
 {
     public static BreakpointResponse Map(
-        ConditionalBreakpoint breakpoint)
+        ConditionalBreakpoint breakpoint,
+        bool isEnabled)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
@@ -13,6 +15,8 @@ public static class BreakpointResponseMapper
             BreakpointId: breakpoint.Id,
             ChannelId: breakpoint.ChannelId,
             Operator: breakpoint.Operator.ToString(),
-            Threshold: breakpoint.Threshold);
+            Threshold: breakpoint.Threshold,
+            IsEnabled: isEnabled);
     }
 }
+

@@ -11,6 +11,8 @@ public sealed class ConditionalBreakpoint
 
     public double Threshold { get; }
 
+    public bool IsEnabled { get; private set; } = true;
+
     public ConditionalBreakpoint(
         Guid id,
         Guid channelId,
@@ -40,5 +42,10 @@ public sealed class ConditionalBreakpoint
         ChannelId = channelId;
         Operator = comparisonOperator;
         Threshold = threshold;
+    }
+
+    public void SetEnabled(bool isEnabled)
+    {
+        IsEnabled = isEnabled;
     }
 }

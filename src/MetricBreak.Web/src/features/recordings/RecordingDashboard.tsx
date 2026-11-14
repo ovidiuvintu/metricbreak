@@ -1,4 +1,3 @@
-
 import { useRef, useState } from "react";
 
 import {
@@ -6,6 +5,8 @@ import {
   Box,
   Button,
   CircularProgress,
+  Tab,
+  Tabs,
   Stack,
   Typography,
 } from "@mui/material";
@@ -26,6 +27,11 @@ import type { ChannelMetadata } from "./channelMetadata";
 import { RecordingWorkspace } from "./RecordingWorkspace";
 import { RecordingChart } from "./RecordingChart";
 import { ImportRecordingDialog } from "./ImportRecordingDialog";
+import { ReplayControls } from "./ReplayControls";
+import { breakpointApi } from "./breakpointApi";
+import type { Breakpoint, CreateBreakpointRequest } from "./breakpointApi";
+import { BreakpointPanel } from "./BreakpointPanel";
+import { BreakpointDialog } from "./BreakpointDialog";
 
 export function RecordingDashboard() {
   const [session, setSession] =
@@ -36,6 +42,14 @@ export function RecordingDashboard() {
 
   const [channels, setChannels] =
     useState<ChannelMetadata[]>([]);
+
+  const [breakpoints, setBreakpoints] = useState<Breakpoint[]>([]);
+  const [breakpointError, setBreakpointError] = useState<string | null>(null);
+  const [breakpointBusy, setBreakpointBusy] = useState(false);
+  const [breakpointDialogOpen, setBreakpointDialogOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"channels" | "breakpoints">("channels");
+  const breakpointMutationRef = useRef(false);
+  const loadVersionRef = useRef(0);
 
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -55,16 +69,20 @@ export function RecordingDashboard() {
   // Prevent overlapping seek requests.
   const seekInProgressRef = useRef(false);
 
-  const loadRecording = async (sessionId: string) => {
+  const loadRecording = async (sessionId: string): Promise<boolean> => {
+    const version = ++loadVersionRef.current;
     setLoading(true);
     setLoadError(null);
 
     try {
-      const [loadedSession, loadedChannels] =
+      const [loadedSession, loadedChannels, loadedBreakpoints] =
         await Promise.all([
           recordingApi.getSession(sessionId),
           recordingApi.getChannels(sessionId),
+          breakpointApi.list(sessionId),
         ]);
+
+      if (version !== loadVersionRef.current) return false;
 
       const isSameSession =
         loadedSessionIdRef.current ===
@@ -72,6 +90,12 @@ export function RecordingDashboard() {
 
       setSession(loadedSession);
       setChannels(loadedChannels);
+      setBreakpoints(loadedBreakpoints.breakpoints);
+      setBreakpointError(null);
+      if (!isSameSession) {
+        setSidebarTab("channels");
+        setBreakpointDialogOpen(false);
+      }
 
       setSelectedChannelIds((current) => {
         const defaultSelection = loadedChannels
@@ -105,7 +129,9 @@ export function RecordingDashboard() {
         currentSequence:
           loadedSession.currentSample?.sequence ?? null,
       });
+      return true;
     } catch (error) {
+      if (version !== loadVersionRef.current) return false;
       console.error("Failed to load recording:", error);
 
       setLoadError(
@@ -113,8 +139,9 @@ export function RecordingDashboard() {
           ? error.message
           : "Unable to load recording.",
       );
+      return false;
     } finally {
-      setLoading(false);
+      if (version === loadVersionRef.current) setLoading(false);
     }
   };
 
@@ -124,21 +151,156 @@ export function RecordingDashboard() {
     setDialogOpen(false);
     setImportSuccess(null);
 
-    await loadRecording(result.sessionId);
-
-    setImportSuccess("Recording imported successfully.");
+    if (await loadRecording(result.sessionId)) {
+      setImportSuccess("Recording imported successfully.");
+    }
   };
 
   const handleRefresh = async () => {
-    if (!session || seeking) {
+    if (!session || seeking || breakpointMutationRef.current || loading) {
       return;
     }
 
     await loadRecording(session.sessionId);
   };
 
+
+  const handleStepForward = async () => {
+    if (!session || seekInProgressRef.current || loading || breakpointMutationRef.current) {
+      return;
+    }
+
+    seekInProgressRef.current = true;
+    setSeeking(true);
+    setLoadError(null);
+
+    try {
+      const response = await replayApi.stepForward(
+        session.sessionId,
+      );
+
+      setSession((current) =>
+        current?.sessionId === response.session.sessionId
+          ? response.session
+          : current,
+      );
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to step forward.",
+      );
+    } finally {
+      seekInProgressRef.current = false;
+      setSeeking(false);
+    }
+  };
+
+  const handleStepBackward = async () => {
+    if (!session || seekInProgressRef.current || loading || breakpointMutationRef.current) {
+      return;
+    }
+
+    seekInProgressRef.current = true;
+    setSeeking(true);
+    setLoadError(null);
+
+    try {
+      const response = await replayApi.stepBackward(
+        session.sessionId,
+      );
+
+      setSession((current) =>
+        current?.sessionId === response.session.sessionId
+          ? response.session
+          : current,
+      );
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to step backward.",
+      );
+    } finally {
+      seekInProgressRef.current = false;
+      setSeeking(false);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!session || seekInProgressRef.current || loading || breakpointMutationRef.current) {
+      return;
+    }
+
+    const sessionId = session.sessionId;
+
+    seekInProgressRef.current = true;
+    setSeeking(true);
+    setLoadError(null);
+
+    try {
+      const response = await replayApi.continue(sessionId);
+
+      setSession((current) =>
+        current?.sessionId === sessionId
+          ? response.session
+          : current,
+      );
+
+      if (!response.executed) {
+        console.debug(
+          "Continue did not execute: no active breakpoints.",
+        );
+      } else if (response.hitBreakpoint) {
+        console.debug("Replay stopped at breakpoint:", response.stop);
+      } else if (response.reachedEndOfRecording) {
+        console.debug("Replay reached end of recording.");
+      }
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to continue replay.",
+      );
+    } finally {
+      seekInProgressRef.current = false;
+      setSeeking(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!session || seekInProgressRef.current || loading || breakpointMutationRef.current) {
+      return;
+    }
+
+    seekInProgressRef.current = true;
+    setSeeking(true);
+    setLoadError(null);
+
+    try {
+      const response = await replayApi.reset(
+        session.sessionId,
+      );
+
+      setSession((current) =>
+        current?.sessionId === response.session.sessionId
+          ? response.session
+          : current,
+      );
+    } catch (error) {
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to reset replay.",
+      );
+    } finally {
+      seekInProgressRef.current = false;
+      setSeeking(false);
+    }
+  };
+
   const handleSeek = async (sequence: number) => {
-    if (!session || seekInProgressRef.current || loading) {
+    if (!session || seekInProgressRef.current || loading || breakpointMutationRef.current) {
       return;
     }
 
@@ -192,6 +354,79 @@ export function RecordingDashboard() {
     }
   };
 
+  const runBreakpointMutation = async (
+    operation: (sessionId: string) => Promise<void>,
+  ): Promise<boolean> => {
+    if (!session || loading || seeking || breakpointMutationRef.current) {
+      return false;
+    }
+
+    const sessionId = session.sessionId;
+    breakpointMutationRef.current = true;
+    setBreakpointBusy(true);
+    setBreakpointError(null);
+
+    try {
+      await operation(sessionId);
+      const result = await breakpointApi.list(sessionId);
+      // Ignore stale results if a different recording was loaded.
+      setBreakpoints((current) =>
+        loadedSessionIdRef.current === sessionId
+          ? result.breakpoints
+          : current,
+      );
+      return true;
+    } catch (error) {
+      if (loadedSessionIdRef.current === sessionId) {
+        setBreakpointError(
+          error instanceof Error ? error.message : "Breakpoint operation failed.",
+        );
+      }
+      return false;
+    } finally {
+      breakpointMutationRef.current = false;
+      setBreakpointBusy(false);
+    }
+  };
+
+  const handleCreateBreakpoint = async (
+    request: CreateBreakpointRequest,
+  ): Promise<void> => {
+    const succeeded = await runBreakpointMutation(async (sessionId) => {
+      await breakpointApi.create(sessionId, request);
+    });
+    if (succeeded) setBreakpointDialogOpen(false);
+  };
+
+  const handleSetBreakpointEnabled = (
+    breakpointId: string,
+    isEnabled: boolean,
+  ) => {
+    void runBreakpointMutation((sessionId) =>
+      breakpointApi.setEnabled(sessionId, breakpointId, isEnabled),
+    );
+  };
+
+  const handleDeleteBreakpoint = (breakpointId: string) => {
+    void runBreakpointMutation((sessionId) =>
+      breakpointApi.delete(sessionId, breakpointId),
+    );
+  };
+
+  const replayControls = session ? (
+  <ReplayControls
+    currentSequence={
+      session.currentSample?.sequence ?? 0
+    }
+    sampleCount={session.sampleCount}
+    busy={loading || seeking}
+    onStepForward={handleStepForward}
+    onStepBackward={handleStepBackward}
+    onReset={handleReset}
+    onContinue={handleContinue}
+  />
+) : null;
+
   const toolbar = (
     <Box
       sx={{
@@ -241,7 +476,7 @@ export function RecordingDashboard() {
             variant="outlined"
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
-            disabled={loading || seeking}
+            disabled={loading || seeking || breakpointBusy}
           >
             Refresh
           </Button>
@@ -252,7 +487,7 @@ export function RecordingDashboard() {
           variant="contained"
           startIcon={<UploadFileIcon />}
           onClick={() => setDialogOpen(true)}
-          disabled={loading || seeking}
+          disabled={loading || seeking || breakpointBusy}
         >
           Import CSV
         </Button>
@@ -358,11 +593,35 @@ export function RecordingDashboard() {
   );
 
   const channelPanel = (
-    <ChannelSelectionPanel
-      channels={channels}
-      selectedChannelIds={selectedChannelIds}
-      onSelectionChange={setSelectedChannelIds}
-    />
+    <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <Tabs
+        value={sidebarTab}
+        onChange={(_, value: "channels" | "breakpoints") => setSidebarTab(value)}
+        variant="fullWidth"
+        sx={{ minHeight: 40, mb: 1, "& .MuiTab-root": { minHeight: 40, px: 0.5 } }}
+      >
+        <Tab value="channels" label="Channels" />
+        <Tab value="breakpoints" label={`Breakpoints (${breakpoints.length})`} />
+      </Tabs>
+      {sidebarTab === "channels" ? (
+        <ChannelSelectionPanel
+          channels={channels}
+          selectedChannelIds={selectedChannelIds}
+          onSelectionChange={setSelectedChannelIds}
+        />
+      ) : (
+        <BreakpointPanel
+          breakpoints={breakpoints}
+          channels={channels}
+          loading={loading}
+          busy={breakpointBusy || seeking}
+          error={breakpointError}
+          onAdd={() => { if (session) setBreakpointDialogOpen(true); }}
+          onSetEnabled={handleSetBreakpointEnabled}
+          onDelete={handleDeleteBreakpoint}
+        />
+      )}
+    </Box>
   );
 
   const details = (
@@ -447,9 +706,19 @@ export function RecordingDashboard() {
           toolbar={toolbar}
           chart={chart}
           channels={channelPanel}
+          replayControls={replayControls}
           details={details}
         />
       </Box>
+
+      <BreakpointDialog
+        key={session?.sessionId ?? "no-session"}
+        open={breakpointDialogOpen && session !== null}
+        channels={channels}
+        busy={breakpointBusy}
+        onClose={() => setBreakpointDialogOpen(false)}
+        onCreate={handleCreateBreakpoint}
+      />
 
       <ImportRecordingDialog
         open={dialogOpen}

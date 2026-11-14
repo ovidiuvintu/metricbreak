@@ -343,8 +343,8 @@ public sealed class ReplaySessionManager
     }
 
     public bool TryGetBreakpoints(
-        Guid sessionId,
-        out IReadOnlyList<ConditionalBreakpoint>? breakpoints)
+    Guid sessionId,
+    out IReadOnlyList<RegisteredBreakpointSnapshot>? breakpoints)
     {
         breakpoints = null;
 
@@ -356,7 +356,12 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
-            breakpoints = entry.Breakpoints.GetActive();
+            breakpoints = entry.Breakpoints
+                .GetRegistered()
+                .Select(registered => new RegisteredBreakpointSnapshot(
+                    Breakpoint: registered.Breakpoint,
+                    IsEnabled: registered.IsEnabled))
+                .ToArray();
 
             return true;
         }

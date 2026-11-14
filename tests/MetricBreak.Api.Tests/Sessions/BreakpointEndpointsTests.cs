@@ -214,8 +214,9 @@ public sealed class BreakpointEndpointsTests
         Assert.Empty(breakpoints);
     }
 
+
     [Fact]
-    public async Task PatchBreakpoint_DisableAndEnable_TogglesVisibilityInGet()
+    public async Task PatchBreakpoint_DisableAndEnable_UpdatesEnabledStateInGet()
     {
         using var factory = new MetricBreakApiFactory();
         using var client = factory.CreateClient();
@@ -236,9 +237,14 @@ public sealed class BreakpointEndpointsTests
             Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
 
             using var json = await ReadJsonAsync(createResponse);
+
             breakpointId = json.RootElement
                 .GetProperty("breakpointId")
                 .GetGuid();
+
+            Assert.True(json.RootElement
+                .GetProperty("isEnabled")
+                .GetBoolean());
         }
 
         using (var disableResponse = await client.PatchAsJsonAsync(
@@ -260,7 +266,15 @@ public sealed class BreakpointEndpointsTests
                 .EnumerateArray()
                 .ToArray();
 
-            Assert.Empty(breakpoints);
+            // Disabled breakpoints remain visible.
+            var breakpoint = Assert.Single(breakpoints);
+
+            Assert.Equal(
+                breakpointId,
+                breakpoint.GetProperty("breakpointId").GetGuid());
+
+            Assert.False(
+                breakpoint.GetProperty("isEnabled").GetBoolean());
         }
 
         using (var enableResponse = await client.PatchAsJsonAsync(
@@ -282,8 +296,16 @@ public sealed class BreakpointEndpointsTests
             .EnumerateArray()
             .ToArray();
 
-        Assert.Single(afterEnableBreakpoints);
+        var enabledBreakpoint = Assert.Single(afterEnableBreakpoints);
+
+        Assert.Equal(
+            breakpointId,
+            enabledBreakpoint.GetProperty("breakpointId").GetGuid());
+
+        Assert.True(
+            enabledBreakpoint.GetProperty("isEnabled").GetBoolean());
     }
+
 
     [Fact]
     public async Task PatchBreakpoint_UnknownSession_Returns404()

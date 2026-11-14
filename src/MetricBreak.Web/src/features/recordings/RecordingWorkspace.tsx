@@ -143,11 +143,8 @@ export function RecordingWorkspace({
             }}
           >
             {!channelsCollapsed && (
-              <Typography
-                variant="subtitle2"
-                fontWeight={600}
-              >
-                Channels
+              <Typography variant="subtitle2" fontWeight={600}>
+                Inspector
               </Typography>
             )}
 
