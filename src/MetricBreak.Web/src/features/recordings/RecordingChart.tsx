@@ -257,16 +257,8 @@ export function RecordingChart({
       textStyle: chartTheme.textStyle,
 
       tooltip: {
-        trigger: "axis" as const,
-        confine: true,
-        axisPointer: {
-          type: "cross" as const,
-          lineStyle: {
-            color: chartTheme.cursorColor,
-            width: 1,
-            type: "dashed" as const,
-          },
-        },
+        show: false,
+        trigger: "none",
       },
 
       legend: {
