@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   Alert,
@@ -13,17 +13,18 @@ import {
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
-import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
 
+import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
 import type { CreateSessionResponse } from "./recordingTypes";
 
 import { recordingApi } from "./recordingApi";
+import { replayApi } from "./replayApi";
+
 import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 
 import { RecordingWorkspace } from "./RecordingWorkspace";
 import { RecordingChart } from "./RecordingChart";
-import { ChannelList } from "./ChannelList";
 import { ImportRecordingDialog } from "./ImportRecordingDialog";
 
 export function RecordingDashboard() {
@@ -37,6 +38,8 @@ export function RecordingDashboard() {
     useState<ChannelMetadata[]>([]);
 
   const [loading, setLoading] = useState(false);
+  const [seeking, setSeeking] = useState(false);
+
   const [loadError, setLoadError] =
     useState<string | null>(null);
 
@@ -44,6 +47,13 @@ export function RecordingDashboard() {
     useState<string | null>(null);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // Track the loaded recording so selections can be
+  // preserved on refresh but reset for new recordings.
+  const loadedSessionIdRef = useRef<string | null>(null);
+
+  // Prevent overlapping seek requests.
+  const seekInProgressRef = useRef(false);
 
   const loadRecording = async (sessionId: string) => {
     setLoading(true);
@@ -56,27 +66,60 @@ export function RecordingDashboard() {
           recordingApi.getChannels(sessionId),
         ]);
 
+      const isSameSession =
+        loadedSessionIdRef.current ===
+        loadedSession.sessionId;
+
       setSession(loadedSession);
       setChannels(loadedChannels);
 
-      setSelectedChannelIds(
-        loadedChannels
+      setSelectedChannelIds((current) => {
+        const defaultSelection = loadedChannels
           .slice(0, 3)
-          .map((channel) => channel.channelId)
+          .map((channel) => channel.channelId);
+
+        if (!isSameSession) {
+          return defaultSelection;
+        }
+
+        const availableIds = new Set(
+          loadedChannels.map(
+            (channel) => channel.channelId,
+          ),
+        );
+
+        // Preserve the user's selection on refresh,
+        // including an intentionally empty selection.
+        return current.filter((id) =>
+          availableIds.has(id),
+        );
+      });
+
+      loadedSessionIdRef.current =
+        loadedSession.sessionId;
+
+      console.debug("Recording loaded:", {
+        sessionId: loadedSession.sessionId,
+        sampleCount: loadedSession.sampleCount,
+        channelCount: loadedChannels.length,
+        currentSequence:
+          loadedSession.currentSample?.sequence ?? null,
+      });
+    } catch (error) {
+      console.error("Failed to load recording:", error);
+
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load recording.",
       );
-          } catch (error) {
-            setLoadError(
-              error instanceof Error
-                ? error.message
-                : "Unable to load recording.",
-            );
-          } finally {
-            setLoading(false);
-          }
-        };
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleImportSuccess = async (
-    result: CreateSessionResponse
+    result: CreateSessionResponse,
   ) => {
     setDialogOpen(false);
     setImportSuccess(null);
@@ -84,11 +127,69 @@ export function RecordingDashboard() {
     await loadRecording(result.sessionId);
 
     setImportSuccess("Recording imported successfully.");
-};
+  };
 
   const handleRefresh = async () => {
-    if (!session) return;
+    if (!session || seeking) {
+      return;
+    }
+
     await loadRecording(session.sessionId);
+  };
+
+  const handleSeek = async (sequence: number) => {
+    if (!session || seekInProgressRef.current || loading) {
+      return;
+    }
+
+    const targetSessionId = session.sessionId;
+
+    seekInProgressRef.current = true;
+    setSeeking(true);
+    setLoadError(null);
+
+    try {
+      console.debug("Replay seek requested:", {
+        sessionId: targetSessionId,
+        sequence,
+      });
+
+      const response = await replayApi.seek(
+        targetSessionId,
+        sequence,
+      );
+
+      // Ignore a response if a different recording
+      // became active while the request was in flight.
+      setSession((current) => {
+        if (
+          !current ||
+          current.sessionId !== targetSessionId
+        ) {
+          return current;
+        }
+
+        return response.session;
+      });
+
+      console.debug("Replay seek completed:", {
+        sessionId: targetSessionId,
+        sequence:
+          response.session.currentSample?.sequence ??
+          null,
+      });
+    } catch (error) {
+      console.error("Replay seek failed:", error);
+
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Unable to seek replay.",
+      );
+    } finally {
+      seekInProgressRef.current = false;
+      setSeeking(false);
+    }
   };
 
   const toolbar = (
@@ -121,18 +222,26 @@ export function RecordingDashboard() {
             noWrap
           >
             {session.sampleCount.toLocaleString()} samples
+            {" · "}
+            Sequence{" "}
+            {session.currentSample?.sequence ?? "—"}
+            {seeking ? " · Seeking..." : ""}
           </Typography>
         )}
       </Box>
 
-      <Stack direction="row" spacing={1} flexShrink={0}>
+      <Stack
+        direction="row"
+        spacing={1}
+        flexShrink={0}
+      >
         {session && (
           <Button
             size="small"
             variant="outlined"
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
-            disabled={loading}
+            disabled={loading || seeking}
           >
             Refresh
           </Button>
@@ -143,6 +252,7 @@ export function RecordingDashboard() {
           variant="contained"
           startIcon={<UploadFileIcon />}
           onClick={() => setDialogOpen(true)}
+          disabled={loading || seeking}
         >
           Import CSV
         </Button>
@@ -193,6 +303,10 @@ export function RecordingDashboard() {
             sampleCount={session.sampleCount}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
+            currentSequence={
+              session.currentSample?.sequence ?? null
+            }
+            onSeek={handleSeek}
           />
         </Box>
       ) : (
@@ -215,7 +329,10 @@ export function RecordingDashboard() {
             }}
           />
 
-          <Typography variant="h6" fontWeight={600}>
+          <Typography
+            variant="h6"
+            fontWeight={600}
+          >
             No recording loaded
           </Typography>
 
@@ -278,6 +395,16 @@ export function RecordingDashboard() {
     </Box>
   );
 
+  console.debug(
+    "Selected channel IDs:",
+    selectedChannelIds,
+  );
+
+  console.debug(
+    "Available channels:",
+    channels.length,
+  );
+
   return (
     <>
       <Box
@@ -306,7 +433,9 @@ export function RecordingDashboard() {
             {importSuccess && (
               <Alert
                 severity="success"
-                onClose={() => setImportSuccess(null)}
+                onClose={() =>
+                  setImportSuccess(null)
+                }
               >
                 {importSuccess}
               </Alert>
@@ -327,9 +456,6 @@ export function RecordingDashboard() {
         onClose={() => setDialogOpen(false)}
         onImported={handleImportSuccess}
       />
-
-      {console.debug("Selected channel IDs:", selectedChannelIds)}
-      {console.debug("Available channels:", channels.length)}
     </>
   );
 }
