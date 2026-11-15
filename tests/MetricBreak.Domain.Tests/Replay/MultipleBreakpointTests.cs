@@ -249,4 +249,33 @@ public sealed class MultipleBreakpointTests
                 new TelemetryTimestamp(100),
                 Array.Empty<BreakpointHit>()));
     }
+
+    [Fact]
+    public void RunToBreakpoints_AfterReset_ProducesEqualStops()
+    {
+        var session = CreateSession(
+            (8500, 72),
+            (9300, 55));
+
+        var breakpoints = new[]
+        {
+            PressureAbove9000(),
+            RateBelow60()
+        };
+
+        var first = session.RunToBreakpoints(breakpoints);
+
+        session.Reset();
+
+        var second = session.RunToBreakpoints(breakpoints);
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+
+        // Compare the entire stop using structural equality.
+        Assert.Equal(first, second);
+
+        // Equal values must produce equal hash codes.
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+    }
 }

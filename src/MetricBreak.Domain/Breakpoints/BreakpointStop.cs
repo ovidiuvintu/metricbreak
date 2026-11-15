@@ -8,7 +8,7 @@ namespace MetricBreak.Domain.Breakpoints;
 /// Represents a replay stop caused by one or more
 /// matching breakpoints at the same sample.
 /// </summary>
-public sealed class BreakpointStop
+public sealed class BreakpointStop : IEquatable<BreakpointStop>
 {
     public SamplePosition Position { get; }
 
@@ -64,5 +64,38 @@ public sealed class BreakpointStop
         // Defensive copy with no mutable array exposure.
         Hits = new ReadOnlyCollection<BreakpointHit>(
             materialized);
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return obj is BreakpointStop other && Equals(other);
+    }
+
+    public bool Equals(BreakpointStop? other)
+    {
+        if (ReferenceEquals(this, other))
+            return true;
+
+        if (other is null)
+            return false;
+
+        return Position == other.Position
+            && Timestamp == other.Timestamp
+            && Hits.SequenceEqual(other.Hits);
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+
+        hash.Add(Position);
+        hash.Add(Timestamp);
+
+        foreach (var hit in Hits)
+        {
+            hash.Add(hit);
+        }
+
+        return hash.ToHashCode();
     }
 }

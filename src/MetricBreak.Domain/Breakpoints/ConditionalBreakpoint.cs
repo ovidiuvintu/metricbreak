@@ -1,7 +1,7 @@
 
 namespace MetricBreak.Domain.Breakpoints;
 
-public sealed class ConditionalBreakpoint
+public sealed class ConditionalBreakpoint : IBreakpoint
 {
     public Guid Id { get; }
 
