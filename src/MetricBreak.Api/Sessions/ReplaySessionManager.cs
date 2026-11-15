@@ -694,7 +694,10 @@ public sealed class ReplaySessionManager
                 .Select(channel => new ChannelMetadataResponse(
                     ChannelId: channel.Id,
                     Name: channel.Name,
-                    Unit: channel.Unit))
+                    Unit: channel.Unit)
+                {
+                    ValueType = channel.ValueType.ToString()
+                })
                 .ToArray();
 
             return true;
@@ -745,7 +748,10 @@ public sealed class ReplaySessionManager
                             System.Globalization.CultureInfo.InvariantCulture),
                     Channels: sample.Values.ToDictionary(
                         pair => pair.Key,
-                        pair => pair.Value)));
+                        pair => pair.Value))
+                {
+                    TypedChannels = TypedChannelResponseMapper.Map(sample)
+                });
             }
 
             response = new SampleRangeResponse(

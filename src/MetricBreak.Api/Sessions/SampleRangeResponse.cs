@@ -1,4 +1,3 @@
-
 namespace MetricBreak.Api.Sessions;
 
 public sealed record SampleRangeResponse(
@@ -11,5 +10,8 @@ public sealed record SampleRangeResponse(
 public sealed record SampleRangeItemResponse(
     long Sequence,
     string TimestampNanoseconds,
-    IReadOnlyDictionary<Guid, double?> Channels);
-
+    IReadOnlyDictionary<Guid, double?> Channels)
+{
+    public IReadOnlyDictionary<Guid, TypedChannelValueResponse> TypedChannels { get; init; } =
+        new Dictionary<Guid, TypedChannelValueResponse>();
+}

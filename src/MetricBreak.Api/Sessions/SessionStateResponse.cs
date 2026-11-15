@@ -12,4 +12,8 @@ public sealed record SessionStateResponse(
 public sealed record CurrentSampleResponse(
     long Sequence,
     long TimestampNanoseconds,
-    IReadOnlyDictionary<Guid, double?> Channels);
+    IReadOnlyDictionary<Guid, double?> Channels)
+{
+    public IReadOnlyDictionary<Guid, TypedChannelValueResponse> TypedChannels { get; init; } =
+        new Dictionary<Guid, TypedChannelValueResponse>();
+}
