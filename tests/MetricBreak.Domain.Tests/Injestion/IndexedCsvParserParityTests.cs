@@ -1,10 +1,35 @@
 
+using MetricBreak.Domain.Recordings;
 using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Domain.Tests.Ingestion;
 
 public sealed class IndexedCsvParserParityTests
 {
+    public static TheoryData<string> CommonInvalidCsvCases => new()
+    {
+        // Empty CSV
+        { "" },
+
+        // Missing Timestamp column
+        { "Pressure\n1200" },
+
+        // No telemetry channels
+        { "Timestamp\n2026-11-15T10:00:00Z" },
+
+        // Duplicate channel names
+        { "Timestamp,Pressure,Pressure\n2026-11-15T10:00:00Z,1200,1300" },
+
+        // Invalid timestamp
+        { "Timestamp,Pressure\ninvalid-date,1200" },
+
+        // Incorrect column count
+        { "Timestamp,Pressure,Flow\n2026-11-15T10:00:00Z,1200" },
+
+        // No telemetry samples
+        { "Timestamp,Pressure" }
+    };
+
     [Theory]
     [MemberData(nameof(ValidCsvCases))]
     public void Parsers_ProduceEquivalentTelemetry(string csv)
@@ -62,14 +87,31 @@ public sealed class IndexedCsvParserParityTests
     }
 
     [Theory]
-    [MemberData(nameof(InvalidCsvCases))]
-    public void Parsers_RejectSameInvalidInput(string csv)
+    [MemberData(nameof(CommonInvalidCsvCases))]
+    public void Parsers_RejectSameStructurallyInvalidInput(string csv)
     {
         Assert.Throws<FormatException>(() =>
             new CsvTelemetryParser().Parse(new StringReader(csv)));
 
         Assert.Throws<FormatException>(() =>
             new IndexedCsvTelemetryParser().Parse(new StringReader(csv)));
+    }
+
+    [Fact]
+    public void IndexedParser_AcceptsCategoricalValues()
+    {
+        const string csv = """
+        Timestamp,Pressure
+        2026-11-15T10:00:00Z,not-a-number
+        """;
+
+        var result = new IndexedCsvTelemetryParser()
+            .Parse(new StringReader(csv));
+
+        Assert.Single(result.Samples);
+        Assert.Equal(
+            ChannelValueType.Categorical,
+            result.Channels[0].ValueType);
     }
 
     public static TheoryData<string> ValidCsvCases => new()
