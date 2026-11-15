@@ -1,8 +1,10 @@
+import type { TypedChannelValues } from "./typedChannelTypes";
 
 export interface CurrentSample {
   sequence: number;
   timestampNanoseconds: number;
   channels: Record<string, number | null>;
+  typedChannels?: TypedChannelValues;
 }
 
 export interface SessionState {
