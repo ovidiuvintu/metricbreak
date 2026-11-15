@@ -228,9 +228,27 @@ public sealed class BreakpointEvaluatorTests
     {
         Assert.Throws<ArgumentNullException>(() =>
             BreakpointEvaluator.Evaluate(
-                null!,
+                (ConditionalBreakpoint)null!,
                 CreateSample(9000)));
     }
+    [Fact]
+    public void Evaluate_WithNullCompositeBreakpoint_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            BreakpointEvaluator.Evaluate(
+                (CompositeBreakpoint)null!,
+                CreateSample(9000)));
+    }
+
+    [Fact]
+    public void Evaluate_WithNullInterfaceBreakpoint_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            BreakpointEvaluator.Evaluate(
+                (IBreakpoint)null!,
+                CreateSample(9000)));
+    }
+
 
     [Fact]
     public void Evaluate_WithNullSample_Throws()

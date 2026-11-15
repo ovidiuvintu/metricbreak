@@ -54,7 +54,16 @@ public sealed class BreakpointCollectionTests
         var collection = new BreakpointCollection();
 
         Assert.Throws<ArgumentNullException>(() =>
-            collection.Add(null!));
+            collection.Add((ConditionalBreakpoint)null!));
+    }
+
+    [Fact]
+    public void Add_NullCompositeBreakpoint_Throws()
+    {
+        var collection = new BreakpointCollection();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            collection.Add((CompositeBreakpoint)null!));
     }
 
     [Fact]

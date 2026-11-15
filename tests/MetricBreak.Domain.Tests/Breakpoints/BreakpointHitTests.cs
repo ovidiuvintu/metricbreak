@@ -179,4 +179,46 @@ public sealed class BreakpointHitTests
         Assert.NotNull(first);
         Assert.Equal(first, second);
     }
+
+    [Fact]
+    public void CompositeHits_WithIdenticalValues_AreEqual()
+    {
+        var breakpointId = Guid.NewGuid();
+        var recordingId = Guid.NewGuid();
+        var pressureId = Guid.NewGuid();
+        var rateId = Guid.NewGuid();
+
+        var position = new SamplePosition(recordingId, 5);
+        var timestamp = new TelemetryTimestamp(1_000_000_000);
+
+        BreakpointHit CreateHit() =>
+            new(
+                breakpointId,
+                position,
+                timestamp,
+                LogicalOperator.And,
+                new[]
+                {
+                new BreakpointConditionHit(
+                    pressureId,
+                    9500,
+                    ComparisonOperator.GreaterThan,
+                    9000,
+                    true),
+
+                new BreakpointConditionHit(
+                    rateId,
+                    55,
+                    ComparisonOperator.LessThan,
+                    60,
+                    true)
+                });
+
+        var first = CreateHit();
+        var second = CreateHit();
+
+        Assert.NotSame(first, second);
+        Assert.Equal(first, second);
+        Assert.Equal(first.GetHashCode(), second.GetHashCode());
+    }
 }

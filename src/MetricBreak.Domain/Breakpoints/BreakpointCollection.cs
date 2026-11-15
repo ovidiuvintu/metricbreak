@@ -1,19 +1,18 @@
-
 namespace MetricBreak.Domain.Breakpoints;
 
 /// <summary>
-/// Manages registered conditional breakpoints and their
-/// enabled state while preserving registration order.
+/// Manages registered conditional and composite breakpoints,
+/// their enabled state, and registration order.
 /// </summary>
 public sealed class BreakpointCollection
 {
     private sealed class Entry
     {
-        public ConditionalBreakpoint Breakpoint { get; }
+        public IBreakpoint Breakpoint { get; }
 
         public bool IsEnabled { get; set; }
 
-        public Entry(ConditionalBreakpoint breakpoint)
+        public Entry(IBreakpoint breakpoint)
         {
             Breakpoint = breakpoint;
             IsEnabled = true;
@@ -30,12 +29,30 @@ public sealed class BreakpointCollection
         _entries.Values.Count(entry => entry.IsEnabled);
 
     /// <summary>
-    /// Registers a breakpoint, enabled by default.
+    /// Registers a conditional breakpoint, enabled by default.
     /// </summary>
     public void Add(ConditionalBreakpoint breakpoint)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
+        AddCore(breakpoint);
+    }
+
+    /// <summary>
+    /// Registers a composite breakpoint, enabled by default.
+    /// </summary>
+    public void Add(CompositeBreakpoint breakpoint)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        AddCore(breakpoint);
+    }
+
+    /// <summary>
+    /// Registers a breakpoint while enforcing unique IDs.
+    /// </summary>
+    private void AddCore(IBreakpoint breakpoint)
+    {
         if (!_entries.TryAdd(
                 breakpoint.Id,
                 new Entry(breakpoint)))
@@ -119,10 +136,49 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
-    /// Returns a snapshot of enabled breakpoints
+    /// Returns enabled conditional breakpoints
     /// in registration order.
+    ///
+    /// Preserved for compatibility with existing consumers.
     /// </summary>
     public IReadOnlyList<ConditionalBreakpoint> GetActive()
+    {
+        var active = _registrationOrder
+            .Select(id => _entries[id])
+            .Where(entry => entry.IsEnabled)
+            .Select(entry => entry.Breakpoint)
+            .OfType<ConditionalBreakpoint>()
+            .ToArray();
+
+        return Array.AsReadOnly(active);
+    }
+
+    /// <summary>
+    /// Returns all registered conditional breakpoints
+    /// with their enabled state.
+    ///
+    /// Preserved for compatibility with existing consumers.
+    /// </summary>
+    public IReadOnlyList<RegisteredBreakpoint> GetRegistered()
+    {
+        var registered = _registrationOrder
+            .Select(id => _entries[id])
+            .Where(entry =>
+                entry.Breakpoint is ConditionalBreakpoint)
+            .Select(entry => new RegisteredBreakpoint(
+                (ConditionalBreakpoint)entry.Breakpoint,
+                entry.IsEnabled))
+            .ToArray();
+
+        return Array.AsReadOnly(registered);
+    }
+
+    /// <summary>
+    /// Returns all enabled breakpoints, including
+    /// conditional and composite breakpoints,
+    /// in registration order.
+    /// </summary>
+    public IReadOnlyList<IBreakpoint> GetAllActive()
     {
         var active = _registrationOrder
             .Select(id => _entries[id])
@@ -134,14 +190,15 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
-    /// Returns a snapshot of all registered breakpoints
-    /// in registration order, including enabled state.
+    /// Returns all registered breakpoints, including
+    /// disabled breakpoints, in registration order.
     /// </summary>
-    public IReadOnlyList<RegisteredBreakpoint> GetRegistered()
+    public IReadOnlyList<RegisteredBreakpointSnapshot>
+        GetAllRegistered()
     {
         var registered = _registrationOrder
             .Select(id => _entries[id])
-            .Select(entry => new RegisteredBreakpoint(
+            .Select(entry => new RegisteredBreakpointSnapshot(
                 entry.Breakpoint,
                 entry.IsEnabled))
             .ToArray();
