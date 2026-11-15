@@ -1,358 +1,588 @@
-
-using MetricBreak.Api.Sessions;
-using MetricBreak.Domain.Breakpoints;
-using MetricBreak.Domain.Recordings;
-using MetricBreak.Ingestion.Csv;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 
 namespace MetricBreak.Api.Tests.Sessions;
 
-public sealed class CompositeBreakpointManagerTests
+public sealed class CompositeBreakpointEndpointTests
 {
-    private const string CsvContent =
-        "Timestamp,Pressure,Rate\n" +
-        "2026-11-08T10:00:00Z,8500,40\n" +
-        "2026-11-08T10:00:01Z,8700,42\n" +
-        "2026-11-08T10:00:02Z,9500,15\n" +
-        "2026-11-08T10:00:03Z,9700,12\n";
-
-    [Fact]
-    public void AddComposite_ValidConditions_Succeeds()
+    [Theory]
+    [InlineData("And")]
+    [InlineData("Or")]
+    public async Task CreateComposite_ValidRequest_ReturnsCreated(
+        string logicalOperator)
     {
-        var fixture = CreateSession();
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
 
-        var found = fixture.Manager.TryAddCompositeBreakpoint(
-            fixture.SessionId,
-            LogicalOperator.And,
-            CreateConditions(fixture),
-            out var breakpoint,
-            out var unknownChannel);
+        var session = await CreateTestSessionAsync(client);
 
-        Assert.True(found);
-        Assert.False(unknownChannel);
-        Assert.NotNull(breakpoint);
-        Assert.NotEqual(Guid.Empty, breakpoint.Id);
-        Assert.Equal(LogicalOperator.And, breakpoint.LogicalOperator);
-        Assert.Equal(2, breakpoint.Conditions.Count);
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            CreateRequest(session, logicalOperator));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+        var root = json.RootElement;
+
+        Assert.NotEqual(
+            Guid.Empty,
+            root.GetProperty("breakpointId").GetGuid());
+
+        Assert.Equal(
+            logicalOperator,
+            root.GetProperty("logicalOperator").GetString());
+
+        Assert.Equal(
+            2,
+            root.GetProperty("conditions").GetArrayLength());
+
+        Assert.True(root.GetProperty("isEnabled").GetBoolean());
+
+        Assert.NotNull(response.Headers.Location);
     }
 
     [Fact]
-    public void AddComposite_UnknownChannel_IsRejected()
+    public async Task CreateComposite_InvalidLogicalOperator_ReturnsBadRequest()
     {
-        var fixture = CreateSession();
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
 
-        var conditions = new[]
+        var session = await CreateTestSessionAsync(client);
+
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            CreateRequest(session, "Xor"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateComposite_OneCondition_ReturnsBadRequest()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            CreateRequest(session, conditionCount: 1));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateComposite_InvalidComparisonOperator_ReturnsBadRequest()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+
+        var request = new
         {
-            new BreakpointCondition(
-                Guid.NewGuid(),
-                ComparisonOperator.GreaterThan,
-                9000),
-            new BreakpointCondition(
-                fixture.RateChannelId,
-                ComparisonOperator.LessThan,
-                20)
+            logicalOperator = "And",
+            conditions = new object[]
+            {
+                new
+                {
+                    channelId = session.PressureId,
+                    @operator = "InvalidOperator",
+                    threshold = 25.0
+                },
+                new
+                {
+                    channelId = session.RateId,
+                    @operator = "LessThan",
+                    threshold = 20.0
+                }
+            }
         };
 
-        var found = fixture.Manager.TryAddCompositeBreakpoint(
-            fixture.SessionId,
-            LogicalOperator.And,
-            conditions,
-            out var breakpoint,
-            out var unknownChannel);
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            request);
 
-        Assert.True(found);
-        Assert.True(unknownChannel);
-        Assert.Null(breakpoint);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public void AddComposite_UnknownSession_ReturnsFalse()
+    public async Task CreateComposite_UnknownChannel_ReturnsBadRequest()
     {
-        var fixture = CreateSession();
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
 
-        var found = fixture.Manager.TryAddCompositeBreakpoint(
-            Guid.NewGuid(),
-            LogicalOperator.And,
-            CreateConditions(fixture),
-            out var breakpoint,
-            out var unknownChannel);
+        var session = await CreateTestSessionAsync(client);
 
-        Assert.False(found);
-        Assert.False(unknownChannel);
-        Assert.Null(breakpoint);
-    }
-
-    [Fact]
-    public void AddComposite_OneCondition_Throws()
-    {
-        var fixture = CreateSession();
-
-        var conditions = new[]
+        var request = new
         {
-            new BreakpointCondition(
-                fixture.PressureChannelId,
-                ComparisonOperator.GreaterThan,
-                9000)
+            logicalOperator = "And",
+            conditions = new object[]
+            {
+                new
+                {
+                    channelId = Guid.NewGuid(),
+                    @operator = "GreaterThan",
+                    threshold = 25.0
+                },
+                new
+                {
+                    channelId = session.RateId,
+                    @operator = "LessThan",
+                    threshold = 20.0
+                }
+            }
         };
 
-        Assert.Throws<ArgumentException>(() =>
-            fixture.Manager.TryAddCompositeBreakpoint(
-                fixture.SessionId,
-                LogicalOperator.And,
-                conditions,
-                out _,
-                out _));
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public void AddComposite_InvalidLogicalOperator_Throws()
+    public async Task CreateComposite_UnknownSession_ReturnsNotFound()
     {
-        var fixture = CreateSession();
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
 
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            fixture.Manager.TryAddCompositeBreakpoint(
-                fixture.SessionId,
-                (LogicalOperator)999,
-                CreateConditions(fixture),
-                out _,
-                out _));
+        var session = await CreateTestSessionAsync(client);
+
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(Guid.NewGuid()),
+            CreateRequest(session));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public void AddComposite_DoesNotRegisterPartialBreakpoint()
+    public async Task GetBreakpoints_IncludesComposite()
     {
-        var fixture = CreateSession();
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
 
-        var conditions = new[]
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        using var response = await client.GetAsync(
+            BreakpointsUrl(session.SessionId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+
+        var composites = json.RootElement
+            .GetProperty("compositeBreakpoints");
+
+        var composite = Assert.Single(composites.EnumerateArray());
+
+        Assert.Equal(
+            breakpointId,
+            composite.GetProperty("breakpointId").GetGuid());
+
+        Assert.Equal(
+            "And",
+            composite.GetProperty("logicalOperator").GetString());
+
+        Assert.Equal(
+            2,
+            composite.GetProperty("conditions").GetArrayLength());
+
+        Assert.True(composite.GetProperty("isEnabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetBreakpoints_ConditionalAndComposite_ReturnsBoth()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+
+        using var conditionalResponse = await client.PostAsJsonAsync(
+            BreakpointsUrl(session.SessionId),
+            new
+            {
+                channelId = session.PressureId,
+                @operator = "GreaterThan",
+                threshold = 25.0
+            });
+
+        Assert.Equal(
+            HttpStatusCode.Created,
+            conditionalResponse.StatusCode);
+
+        var compositeId = await AddCompositeAsync(client, session);
+
+        using var response = await client.GetAsync(
+            BreakpointsUrl(session.SessionId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+
+        Assert.Single(
+            json.RootElement
+                .GetProperty("breakpoints")
+                .EnumerateArray());
+
+        var composites = json.RootElement
+            .GetProperty("compositeBreakpoints");
+
+        var composite = Assert.Single(composites.EnumerateArray());
+
+        Assert.Equal(
+            compositeId,
+            composite.GetProperty("breakpointId").GetGuid());
+    }
+
+    [Fact]
+    public async Task DisableComposite_UpdatesEnabledState()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        using var patchResponse = await client.PatchAsJsonAsync(
+            $"{BreakpointsUrl(session.SessionId)}/{breakpointId}",
+            new { isEnabled = false });
+
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            patchResponse.StatusCode);
+
+        using var getResponse = await client.GetAsync(
+            BreakpointsUrl(session.SessionId));
+
+        using var json = await ReadJsonAsync(getResponse);
+
+        var composite = Assert.Single(
+            json.RootElement
+                .GetProperty("compositeBreakpoints")
+                .EnumerateArray());
+
+        Assert.False(composite.GetProperty("isEnabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task EnableComposite_UpdatesEnabledState()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        var url = $"{BreakpointsUrl(session.SessionId)}/{breakpointId}";
+
+        using var disableResponse = await client.PatchAsJsonAsync(
+            url,
+            new { isEnabled = false });
+
+        Assert.Equal(HttpStatusCode.NoContent, disableResponse.StatusCode);
+
+        using var enableResponse = await client.PatchAsJsonAsync(
+            url,
+            new { isEnabled = true });
+
+        Assert.Equal(HttpStatusCode.NoContent, enableResponse.StatusCode);
+
+        using var getResponse = await client.GetAsync(
+            BreakpointsUrl(session.SessionId));
+
+        using var json = await ReadJsonAsync(getResponse);
+
+        var composite = Assert.Single(
+            json.RootElement
+                .GetProperty("compositeBreakpoints")
+                .EnumerateArray());
+
+        Assert.True(composite.GetProperty("isEnabled").GetBoolean());
+    }
+
+    [Fact]
+    public async Task DeleteComposite_RemovesBreakpoint()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        using var deleteResponse = await client.DeleteAsync(
+            $"{BreakpointsUrl(session.SessionId)}/{breakpointId}");
+
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        using var getResponse = await client.GetAsync(
+            BreakpointsUrl(session.SessionId));
+
+        using var json = await ReadJsonAsync(getResponse);
+
+        Assert.Empty(
+            json.RootElement
+                .GetProperty("compositeBreakpoints")
+                .EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Continue_AndComposite_StopsAtMatchingSample()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        var url = $"/api/sessions/{session.SessionId}/continue";
+
+        using var response = await client.PostAsync(url, null);
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        var allowedMethods = response.Headers.TryGetValues(
+            "Allow", out var methods)
+            ? string.Join(", ", methods)
+            : "Not provided";
+
+        Assert.True(
+            response.StatusCode == HttpStatusCode.OK,
+            $"Request: POST {url}\n" +
+            $"Status: {(int)response.StatusCode} {response.StatusCode}\n" +
+            $"Final URI: {response.RequestMessage?.RequestUri}\n" +
+            $"Allowed methods: {allowedMethods}\n" +
+            $"Response: {responseBody}");
+
+        //using var response = await client.PostAsync(
+        //    $"/api/sessions/{session.SessionId}/continue",
+        //    null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var json = await ReadJsonAsync(response);
+        var root = json.RootElement;
+
+        Assert.True(root.GetProperty("hitBreakpoint").GetBoolean());
+
+        var stop = root.GetProperty("stop");
+
+        Assert.Equal(
+            3,
+            stop.GetProperty("sequence").GetInt64());
+
+        var hit = Assert.Single(
+            stop.GetProperty("hits").EnumerateArray());
+
+        Assert.Equal(
+            breakpointId,
+            hit.GetProperty("breakpointId").GetGuid());
+    }
+
+
+    [Fact]
+    public async Task Continue_CompositeBreakpoint_SerializesWithoutNonFiniteNumbers()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var session = await CreateTestSessionAsync(client);
+        var breakpointId = await AddCompositeAsync(client, session);
+
+        using var response = await client.PostAsync(
+            $"/api/sessions/{session.SessionId}/continue",
+            null);
+
+        // Regression: composite breakpoint hits previously contained
+        // NaN values that System.Text.Json could not serialize.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        using var json = JsonDocument.Parse(responseBody);
+        var root = json.RootElement;
+
+        Assert.True(root.GetProperty("hitBreakpoint").GetBoolean());
+
+        var stop = root.GetProperty("stop");
+        Assert.Equal(3, stop.GetProperty("sequence").GetInt64());
+
+        var hit = Assert.Single(
+            stop.GetProperty("hits").EnumerateArray());
+
+        Assert.Equal(
+            breakpointId,
+            hit.GetProperty("breakpointId").GetGuid());
+
+        // Reject nonstandard JSON number literals and their
+        // string-encoded equivalents anywhere in the response.
+        AssertNoNonFiniteNumbers(root);
+    }
+
+    private static void AssertNoNonFiniteNumbers(JsonElement element)
+    {
+        switch (element.ValueKind)
         {
-            new BreakpointCondition(
-                fixture.PressureChannelId,
-                ComparisonOperator.GreaterThan,
-                9000),
-            new BreakpointCondition(
-                Guid.NewGuid(),
-                ComparisonOperator.LessThan,
-                20)
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    AssertNoNonFiniteNumbers(property.Value);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    AssertNoNonFiniteNumbers(item);
+                }
+                break;
+
+            case JsonValueKind.Number:
+                Assert.True(
+                    double.IsFinite(element.GetDouble()),
+                    $"Non-finite JSON number: {element.GetRawText()}");
+                break;
+
+            case JsonValueKind.String:
+                var value = element.GetString();
+
+                Assert.DoesNotContain(
+                    value,
+                    new[] { "NaN", "Infinity", "-Infinity" });
+                break;
+        }
+    }
+
+
+    private static string BreakpointsUrl(Guid sessionId) =>
+        $"/api/sessions/{sessionId}/breakpoints";
+
+    private static string CompositeUrl(Guid sessionId) =>
+        $"{BreakpointsUrl(sessionId)}/composite";
+
+    private static object CreateRequest(
+        SessionFixture session,
+        string logicalOperator = "And",
+        int conditionCount = 2)
+    {
+        var conditions = new object[]
+        {
+            new
+            {
+                channelId = session.PressureId,
+                @operator = "GreaterThan",
+                threshold = 25.0
+            },
+            new
+            {
+                channelId = session.RateId,
+                @operator = "LessThan",
+                threshold = 20.0
+            }
         };
 
-        fixture.Manager.TryAddCompositeBreakpoint(
-            fixture.SessionId,
-            LogicalOperator.And,
-            conditions,
-            out _,
-            out var unknownChannel);
-
-        Assert.True(unknownChannel);
-
-        Assert.True(fixture.Manager.TryGetCompositeBreakpoints(
-            fixture.SessionId,
-            out var registered));
-
-        Assert.NotNull(registered);
-        Assert.Empty(registered);
+        return new
+        {
+            logicalOperator,
+            conditions = conditions.Take(conditionCount).ToArray()
+        };
     }
 
-    [Fact]
-    public void GetComposite_ReturnsRegisteredBreakpoint()
+    private static async Task<Guid> AddCompositeAsync(
+        HttpClient client,
+        SessionFixture session)
     {
-        var fixture = CreateSession();
-        var breakpointId = AddComposite(fixture);
+        using var response = await client.PostAsJsonAsync(
+            CompositeUrl(session.SessionId),
+            CreateRequest(session));
 
-        Assert.True(fixture.Manager.TryGetCompositeBreakpoints(
-            fixture.SessionId,
-            out var registered));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        Assert.NotNull(registered);
+        using var json = await ReadJsonAsync(response);
 
-        var item = Assert.Single(registered);
-
-        Assert.Equal(breakpointId, item.Breakpoint.Id);
-        Assert.True(item.IsEnabled);
-        Assert.Equal(2, item.Breakpoint.Conditions.Count);
+        return json.RootElement
+            .GetProperty("breakpointId")
+            .GetGuid();
     }
 
-    [Fact]
-    public void DisableComposite_UpdatesEnabledState()
+    private static async Task<JsonDocument> ReadJsonAsync(
+        HttpResponseMessage response)
     {
-        var fixture = CreateSession();
-        var breakpointId = AddComposite(fixture);
+        response.EnsureSuccessStatusCode();
 
-        Assert.True(fixture.Manager.TrySetBreakpointEnabled(
-            fixture.SessionId,
-            breakpointId,
-            false,
-            out var updated));
+        var stream = await response.Content.ReadAsStreamAsync();
 
-        Assert.True(updated);
-
-        Assert.True(fixture.Manager.TryGetCompositeBreakpoints(
-            fixture.SessionId,
-            out var registered));
-
-        Assert.NotNull(registered);
-        Assert.False(Assert.Single(registered).IsEnabled);
+        return await JsonDocument.ParseAsync(stream);
     }
 
-    [Fact]
-    public void EnableComposite_UpdatesEnabledState()
+    private static async Task<SessionFixture> CreateTestSessionAsync(
+        HttpClient client)
     {
-        var fixture = CreateSession();
-        var breakpointId = AddComposite(fixture);
+        const string csv = """
+        Timestamp,Pressure,Rate
+        2026-01-01T00:00:00Z,10,40
+        2026-01-01T00:00:01Z,15,35
+        2026-01-01T00:00:02Z,25,30
+        2026-01-01T00:00:03Z,30,15
+        2026-01-01T00:00:04Z,35,10
+        2026-01-01T00:00:05Z,20,25
+        """;
 
-        Assert.True(fixture.Manager.TrySetBreakpointEnabled(
-            fixture.SessionId,
-            breakpointId,
-            false,
-            out var disabled));
+        using var content = new MultipartFormDataContent();
 
-        Assert.True(disabled);
+        var fileContent = new ByteArrayContent(
+            Encoding.UTF8.GetBytes(csv));
 
-        Assert.True(fixture.Manager.TrySetBreakpointEnabled(
-            fixture.SessionId,
-            breakpointId,
-            true,
-            out var enabled));
+        content.Add(fileContent, "file", "composite-test.csv");
 
-        Assert.True(enabled);
+        using var response = await client.PostAsync(
+            "/api/sessions",
+            content);
 
-        Assert.True(fixture.Manager.TryGetCompositeBreakpoints(
-            fixture.SessionId,
-            out var registered));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
 
-        Assert.NotNull(registered);
-        Assert.True(Assert.Single(registered).IsEnabled);
-    }
+        using var sessionJson = await ReadJsonAsync(response);
 
-    [Fact]
-    public void RemoveComposite_RemovesRegistration()
-    {
-        var fixture = CreateSession();
-        var breakpointId = AddComposite(fixture);
+        var sessionId = sessionJson.RootElement
+            .GetProperty("sessionId")
+            .GetGuid();
 
-        Assert.True(fixture.Manager.TryRemoveBreakpoint(
-            fixture.SessionId,
-            breakpointId,
-            out var removed));
+        using var channelsResponse = await client.GetAsync(
+            $"/api/sessions/{sessionId}/channels");
 
-        Assert.True(removed);
+        Assert.Equal(HttpStatusCode.OK, channelsResponse.StatusCode);
 
-        Assert.True(fixture.Manager.TryGetCompositeBreakpoints(
-            fixture.SessionId,
-            out var registered));
+        using var channelsJson = await ReadJsonAsync(channelsResponse);
 
-        Assert.NotNull(registered);
-        Assert.Empty(registered);
-    }
+        var channels = channelsJson.RootElement
+            .EnumerateArray()
+            .ToArray();
 
-    [Fact]
-    public void Continue_AndComposite_StopsWhenBothConditionsMatch()
-    {
-        var fixture = CreateSession();
-        var breakpointId = AddComposite(fixture);
+        var pressureId = channels
+            .Single(channel =>
+                channel.GetProperty("name").GetString() == "Pressure")
+            .GetProperty("channelId")
+            .GetGuid();
 
-        var found = fixture.Manager.TryContinueWithSnapshot(
-            fixture.SessionId,
-            out var hadActiveBreakpoints,
-            out var stop,
-            out var snapshot);
-
-        Assert.True(found);
-        Assert.True(hadActiveBreakpoints);
-        Assert.NotNull(stop);
-        Assert.NotNull(snapshot);
-
-        Assert.Equal(2, stop.Position.SequenceNumber);
-
-        var hit = Assert.Single(stop.Hits);
-
-        Assert.Equal(breakpointId, hit.BreakpointId);
-        Assert.True(hit.IsComposite);
-        Assert.Equal(LogicalOperator.And, hit.LogicalOperator);
-
-        Assert.Equal(2, hit.Conditions.Count);
-        Assert.All(hit.Conditions, condition =>
-            Assert.True(condition.Matched));
-    }
-
-    private static Guid AddComposite(SessionFixture fixture)
-    {
-        var found = fixture.Manager.TryAddCompositeBreakpoint(
-            fixture.SessionId,
-            LogicalOperator.And,
-            CreateConditions(fixture),
-            out var breakpoint,
-            out var unknownChannel);
-
-        Assert.True(found);
-        Assert.False(unknownChannel);
-        Assert.NotNull(breakpoint);
-
-        return breakpoint.Id;
-    }
-
-    private static BreakpointCondition[] CreateConditions(
-        SessionFixture fixture)
-    {
-        return
-        [
-            new BreakpointCondition(
-                fixture.PressureChannelId,
-                ComparisonOperator.GreaterThan,
-                9000),
-            new BreakpointCondition(
-                fixture.RateChannelId,
-                ComparisonOperator.LessThan,
-                20)
-        ];
-    }
-
-    private static SessionFixture CreateSession()
-    {
-        var parser = new CsvTelemetryParser();
-
-        using var reader = new StringReader(CsvContent);
-        var parsed = parser.Parse(reader);
-
-        var recordingId = Guid.NewGuid();
-
-        var recording = new Recording(
-            recordingId,
-            "Composite Breakpoint Test",
-            new RecordingSource(
-                "composite-test.csv",
-                "composite-test-hash",
-                CsvContent.Length),
-            DateTimeOffset.UtcNow);
-
-        var telemetryReader = new CsvTelemetryReader(
-            recordingId,
-            parsed);
-
-        var imported = new ImportedCsvRecording(
-            recording,
-            parsed.Channels,
-            telemetryReader);
-
-        var manager = new ReplaySessionManager();
-        var sessionId = manager.Create(imported);
-
-        var pressureId = parsed.Channels
-            .Single(channel => channel.Name == "Pressure")
-            .Id;
-
-        var rateId = parsed.Channels
-            .Single(channel => channel.Name == "Rate")
-            .Id;
+        var rateId = channels
+            .Single(channel =>
+                channel.GetProperty("name").GetString() == "Rate")
+            .GetProperty("channelId")
+            .GetGuid();
 
         return new SessionFixture(
-            manager,
             sessionId,
             pressureId,
             rateId);
     }
 
     private sealed record SessionFixture(
-        ReplaySessionManager Manager,
         Guid SessionId,
-        Guid PressureChannelId,
-        Guid RateChannelId);
+        Guid PressureId,
+        Guid RateId);
 }
