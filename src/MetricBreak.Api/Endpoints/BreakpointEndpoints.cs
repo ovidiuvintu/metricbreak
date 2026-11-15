@@ -87,6 +87,117 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapPost(
+            "/api/sessions/{sessionId:guid}/breakpoints/composite",
+            (
+                Guid sessionId,
+                CreateCompositeBreakpointRequest request,
+                ReplaySessionManager manager) =>
+            {
+                if (!Enum.TryParse<LogicalOperator>(
+                        request.LogicalOperator,
+                        ignoreCase: true,
+                        out var logicalOperator))
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "InvalidLogicalOperator",
+                        Message = "Logical operator is invalid. Use And or Or."
+                    });
+                }
+
+                if (request.Conditions is null || request.Conditions.Count < 2)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "InvalidCompositeConditions",
+                        Message = "Composite breakpoints require at least two conditions."
+                    });
+                }
+
+                var parsedConditions = new List<BreakpointCondition>(request.Conditions.Count);
+
+                foreach (var condition in request.Conditions)
+                {
+                    if (!Enum.TryParse<ComparisonOperator>(
+                            condition.Operator,
+                            ignoreCase: true,
+                            out var comparisonOperator))
+                    {
+                        return Results.BadRequest(new
+                        {
+                            Error = "InvalidComparisonOperator",
+                            Message = "Comparison operator is invalid."
+                        });
+                    }
+
+                    parsedConditions.Add(new BreakpointCondition(
+                        condition.ChannelId,
+                        comparisonOperator,
+                        condition.Threshold));
+                }
+
+                try
+                {
+                    var found = manager.TryAddCompositeBreakpoint(
+                        sessionId,
+                        logicalOperator,
+                        parsedConditions,
+                        out var breakpoint,
+                        out var unknownChannel);
+
+                    if (!found)
+                        return Results.NotFound();
+
+                    if (unknownChannel)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            Error = "UnknownChannelId",
+                            Message = "One or more channel IDs are not part of this recording."
+                        });
+                    }
+
+                    if (breakpoint is null)
+                        return Results.Problem("Composite breakpoint was not created.");
+
+                    var response = new CompositeBreakpointResponse(
+                        BreakpointId: breakpoint.Id,
+                        LogicalOperator: breakpoint.LogicalOperator.ToString(),
+                        Conditions: breakpoint.Conditions
+                            .Select(condition => new BreakpointConditionRequest(
+                                condition.ChannelId,
+                                condition.Operator.ToString(),
+                                condition.Threshold))
+                            .ToArray(),
+                        IsEnabled: true);
+
+                    return Results.Created(
+                        $"/api/sessions/{sessionId}/breakpoints/{response.BreakpointId}",
+                        response);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+            })
+            .WithName("CreateSessionCompositeBreakpoint")
+            .WithTags(_breakpointTag)
+            .Produces<CompositeBreakpointResponse>(
+                StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
         app.MapGet(
             "/api/sessions/{sessionId:guid}/breakpoints",
             (
@@ -97,7 +208,11 @@ internal static class BreakpointEndpoints
                     sessionId,
                     out var breakpoints);
 
-                if (!found || breakpoints is null)
+                var foundComposites = manager.TryGetCompositeBreakpoints(
+                    sessionId,
+                    out var compositeBreakpoints);
+
+                if (!found || !foundComposites || breakpoints is null || compositeBreakpoints is null)
                     return Results.NotFound();
 
                 var response = new BreakpointsResponse(
@@ -106,6 +221,18 @@ internal static class BreakpointEndpoints
                             BreakpointResponseMapper.Map(
                                 registered.Breakpoint,
                                 registered.IsEnabled))
+                        .ToArray(),
+                    compositeBreakpoints
+                        .Select(registered => new CompositeBreakpointResponse(
+                            BreakpointId: registered.Breakpoint.Id,
+                            LogicalOperator: registered.Breakpoint.LogicalOperator.ToString(),
+                            Conditions: registered.Breakpoint.Conditions
+                                .Select(condition => new BreakpointConditionRequest(
+                                    condition.ChannelId,
+                                    condition.Operator.ToString(),
+                                    condition.Threshold))
+                                .ToArray(),
+                            IsEnabled: registered.IsEnabled))
                         .ToArray());
 
                 return Results.Ok(response);
