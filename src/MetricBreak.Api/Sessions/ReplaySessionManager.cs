@@ -389,6 +389,101 @@ public sealed class ReplaySessionManager
         }
     }
 
+
+    public bool TryAddCompositeBreakpoint(
+        Guid sessionId,
+        LogicalOperator logicalOperator,
+        IReadOnlyList<BreakpointCondition> conditions,
+        out CompositeBreakpoint? breakpoint,
+        out bool unknownChannel)
+    {
+        breakpoint = null;
+        unknownChannel = false;
+
+        ArgumentNullException.ThrowIfNull(conditions);
+
+        if (!Enum.IsDefined(logicalOperator))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(logicalOperator));
+        }
+
+        if (conditions.Count < 2)
+        {
+            throw new ArgumentException(
+                "Composite breakpoints require at least two conditions.",
+                nameof(conditions));
+        }
+
+        if (conditions.Any(condition => condition is null))
+        {
+            throw new ArgumentException(
+                "Conditions cannot contain null entries.",
+                nameof(conditions));
+        }
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            var channelIds = entry.Imported.Channels
+                .Select(channel => channel.Id)
+                .ToHashSet();
+
+            if (conditions.Any(condition =>
+                    !channelIds.Contains(condition.ChannelId)))
+            {
+                unknownChannel = true;
+                return true;
+            }
+
+            // Validate all conditions before modifying the collection.
+            var candidate = new CompositeBreakpoint(
+                Guid.NewGuid(),
+                logicalOperator,
+                conditions);
+
+            entry.Breakpoints.Add(candidate);
+
+            breakpoint = candidate;
+
+            return true;
+        }
+    }
+
+    public bool TryGetCompositeBreakpoints(
+        Guid sessionId,
+        out IReadOnlyList<(
+            CompositeBreakpoint Breakpoint,
+            bool IsEnabled)>? breakpoints)
+    {
+        breakpoints = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            breakpoints = entry.Breakpoints
+                .GetAllRegistered()
+                .Where(registered =>
+                    registered.Breakpoint is CompositeBreakpoint)
+                .Select(registered => (
+                    Breakpoint: (CompositeBreakpoint)registered.Breakpoint,
+                    IsEnabled: registered.IsEnabled))
+                .ToArray();
+
+            return true;
+        }
+    }
+
     public bool Remove(Guid sessionId)
     {
         if (!_sessions.TryGetValue(sessionId, out var entry))
