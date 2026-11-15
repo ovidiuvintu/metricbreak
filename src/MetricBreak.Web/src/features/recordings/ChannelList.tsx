@@ -27,6 +27,23 @@ interface ChannelListProps {
 
 const MAX_CHANNEL_NAME_LENGTH = 16;
 
+function formatChannelValue(sample: CurrentSample | null | undefined, channelId: string): string {
+  const typed = sample?.typedChannels?.[channelId];
+  if (typed !== undefined) {
+    if (typed.valueType === "Missing" || typed.value === null) return "N/A";
+    switch (typed.valueType) {
+      case "Numeric":
+        return Number.isFinite(typed.value) ? typed.value.toLocaleString() : "N/A";
+      case "Boolean":
+        return typed.value ? "True" : "False";
+      case "Categorical":
+        return typed.value;
+    }
+  }
+  const legacy = sample?.channels?.[channelId];
+  return legacy == null || !Number.isFinite(legacy) ? "N/A" : legacy.toLocaleString();
+}
+
 function truncateChannelName(name: string): string {
   if (name.length <= MAX_CHANNEL_NAME_LENGTH) {
     return name;
@@ -132,8 +149,7 @@ export function ChannelList({
 
           <TableBody>
             {visibleChannels.map((channel) => {
-              const value =
-                sample?.channels?.[channel.channelId];
+              const displayValue = formatChannelValue(sample, channel.channelId);
 
               return (
                 <TableRow key={channel.channelId} hover>
@@ -163,11 +179,7 @@ export function ChannelList({
                   {/* Current value */}
                   <TableCell align="right">
                     <Tooltip
-                      title={
-                        value == null
-                          ? "No value available"
-                          : String(value)
-                      }
+                      title={displayValue === "N/A" ? "No value available" : displayValue}
                       arrow
                     >
                       <Typography
@@ -181,9 +193,7 @@ export function ChannelList({
                           fontVariantNumeric: "tabular-nums",
                         }}
                       >
-                        {value == null
-                          ? "N/A"
-                          : value.toLocaleString()}
+                        {displayValue}
                       </Typography>
                     </Tooltip>
                   </TableCell>
