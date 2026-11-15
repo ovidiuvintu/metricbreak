@@ -33,6 +33,37 @@ interface RecordingChartProps {
   onSeek: (sequence: number) => void;
 }
 
+type HoverDetails = {
+  sequence: number;
+  timestamp: string;
+  x: number;
+  y: number;
+  values: { name: string; value: string }[];
+};
+
+function formatTimestamp(nanoseconds: string): string {
+  try {
+    // Divide before converting to Number to avoid losing nanosecond precision.
+    const milliseconds = BigInt(nanoseconds) / 1_000_000n;
+    const date = new Date(Number(milliseconds));
+    return Number.isNaN(date.getTime()) ? nanoseconds : date.toISOString();
+  } catch {
+    return nanoseconds;
+  }
+}
+
+function formatSampleValue(sample: SampleRangeItem, channelId: string): string {
+  const typed = sample.typedChannels?.[channelId];
+  if (typed) {
+    if (typed.valueType === "Missing" || typed.value === null) return "N/A";
+    if (typed.valueType === "Boolean") return typed.value ? "True" : "False";
+    if (typed.valueType === "Numeric") return typed.value.toLocaleString();
+    return typed.value;
+  }
+  const numeric = sample.channels[channelId];
+  return numeric == null ? "N/A" : numeric.toLocaleString();
+}
+
 const MAX_SAMPLES = 5000;
 
 function getLineWidth(sampleCount: number): number {
@@ -63,21 +94,28 @@ export function RecordingChart({
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hover, setHover] = useState<HoverDetails | null>(null);
+  const listenerCleanupRef = useRef<(() => void) | null>(null);
 
   // Keep the latest callback and sample range accessible
   // without re-registering chart listeners on each render.
   const onSeekRef = useRef(onSeek);
   const samplesRef = useRef(samples);
   const currentSequenceRef = useRef(currentSequence);
+  const channelsRef = useRef(channels);
+  const selectedIdsRef = useRef(selectedChannelIds);
 
   onSeekRef.current = onSeek;
   samplesRef.current = samples;
   currentSequenceRef.current = currentSequence;
+  channelsRef.current = channels;
+  selectedIdsRef.current = selectedChannelIds;
 
   useEffect(() => {
     let cancelled = false;
 
     setSamples([]);
+    setHover(null);
 
     if (sampleCount <= 0) {
       setLoading(false);
@@ -408,6 +446,9 @@ export function RecordingChart({
     lineWidth,
   ]);
 
+  // Detach our ZRender listeners when the chart unmounts.
+  useEffect(() => () => listenerCleanupRef.current?.(), []);
+
   // Register click-to-seek when ECharts is initialized.
   // This also handles clicks on empty areas of the plot.
   const handleChartReady = useCallback(
@@ -475,7 +516,60 @@ export function RecordingChart({
         onSeekRef.current(sequence);
       };
 
+      const handleMove = (event: { offsetX: number; offsetY: number }) => {
+        const pixel: [number, number] = [event.offsetX, event.offsetY];
+        if (!chart.containPixel({ gridIndex: 0 }, pixel)) {
+          setHover(null);
+          return;
+        }
+        const coordinates = chart.convertFromPixel(
+          { gridIndex: 0 }, pixel,
+        ) as number[];
+        const rawSequence = coordinates[0];
+        const loaded = samplesRef.current;
+        if (!Number.isFinite(rawSequence) || loaded.length === 0) {
+          setHover(null);
+          return;
+        }
+
+        // Find the nearest loaded sample, without assuming contiguous sequences.
+        let closest = loaded[0];
+        let distance = Math.abs(closest.sequence - rawSequence);
+        for (let i = 1; i < loaded.length; i++) {
+          const candidate = loaded[i];
+          const nextDistance = Math.abs(candidate.sequence - rawSequence);
+          if (nextDistance < distance) {
+            closest = candidate;
+            distance = nextDistance;
+          }
+        }
+        const selected = new Set(selectedIdsRef.current);
+        const values = channelsRef.current
+          .filter((channel) => selected.has(channel.channelId))
+          .map((channel) => ({
+            name: channel.unit ? `${channel.name} (${channel.unit})` : channel.name,
+            value: formatSampleValue(closest, channel.channelId),
+          }));
+        setHover({
+          sequence: closest.sequence,
+          timestamp: formatTimestamp(closest.timestampNanoseconds),
+          x: event.offsetX,
+          y: event.offsetY,
+          values,
+        });
+      };
+
+      const handleLeave = () => setHover(null);
+
+      listenerCleanupRef.current?.();
       renderer.on("click", handleClick);
+      renderer.on("mousemove", handleMove);
+      renderer.on("globalout", handleLeave);
+      listenerCleanupRef.current = () => {
+        renderer.off("click", handleClick);
+        renderer.off("mousemove", handleMove);
+        renderer.off("globalout", handleLeave);
+      };
 
       // Remove only our listener when this chart is
       // disposed. Avoid renderer.off("click"), which
@@ -556,6 +650,7 @@ export function RecordingChart({
             <CircularProgress />
           </Box>
         ) : samples.length > 0 ? (
+          <>
           <ReactECharts
             ref={chartRef}
             option={option}
@@ -567,6 +662,40 @@ export function RecordingChart({
               cursor: "crosshair",
             }}
           />
+          {hover && (
+            <Box
+              sx={{
+                position: "absolute",
+                zIndex: 10,
+                pointerEvents: "none",
+                left: Math.max(8, Math.min(hover.x + 14, (containerRef.current?.clientWidth ?? 450) - 260)),
+                top: Math.max(8, Math.min(hover.y + 14, (containerRef.current?.clientHeight ?? 400) - 180)),
+                width: 240,
+                maxHeight: "70%",
+                overflowY: "auto",
+                p: 1.5,
+                border: 1,
+                borderColor: "divider",
+                borderRadius: 1,
+                bgcolor: "background.paper",
+                boxShadow: 4,
+              }}
+            >
+              <Typography variant="caption" sx={{ display: "block", fontWeight: 700 }}>
+                Sequence {hover.sequence.toLocaleString()}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                {hover.timestamp}
+              </Typography>
+              {hover.values.map((entry) => (
+                <Box key={entry.name} sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                  <Typography variant="caption" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>{entry.value}</Typography>
+                </Box>
+              ))}
+            </Box>
+          )}
+          </>
         ) : (
           <Box
             sx={{
