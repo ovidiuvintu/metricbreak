@@ -24,13 +24,16 @@ import { ImportRecordingDialog } from "./ImportRecordingDialog";
 import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
 import { BreakpointDialog } from "./BreakpointDialog";
+import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 
 import { recordingApi } from "./recordingApi";
 import { replayApi } from "./replayApi";
 import {
   breakpointApi,
   type Breakpoint,
+  type CompositeBreakpoint,
   type CreateBreakpointRequest,
+  type CreateCompositeBreakpointRequest,
 } from "./breakpointApi";
 
 import type { CreateSessionResponse } from "./recordingTypes";
@@ -60,6 +63,8 @@ export function RecordingDashboard() {
     [],
   );
 
+  const [compositeBreakpoints, setCompositeBreakpoints] = useState<CompositeBreakpoint[]>([]);
+
   const [inspectorTab, setInspectorTab] =
     useState<InspectorTab>(0);
 
@@ -87,6 +92,8 @@ export function RecordingDashboard() {
 
   const [breakpointDialogOpen, setBreakpointDialogOpen] =
     useState(false);
+
+  const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
   const loadedSessionIdRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
@@ -129,6 +136,7 @@ export function RecordingDashboard() {
       setSession(loadedSession);
       setChannels(loadedChannels);
       setBreakpoints(loadedBreakpoints.breakpoints);
+      setCompositeBreakpoints(loadedBreakpoints.compositeBreakpoints ?? []);
 
       setSelectedChannelIds((current) => {
         if (!isSameSession) {
@@ -147,6 +155,7 @@ export function RecordingDashboard() {
       if (!isSameSession) {
         setInspectorTab(0);
         setBreakpointDialogOpen(false);
+        setCompositeDialogOpen(false);
       }
 
       loadedSessionIdRef.current = loadedSession.sessionId;
@@ -155,7 +164,8 @@ export function RecordingDashboard() {
         sessionId: loadedSession.sessionId,
         sampleCount: loadedSession.sampleCount,
         channelCount: loadedChannels.length,
-        breakpointCount: loadedBreakpoints.breakpoints.length,
+        breakpointCount: loadedBreakpoints.breakpoints.length +
+          (loadedBreakpoints.compositeBreakpoints?.length ?? 0),
       });
 
       return true;
@@ -304,6 +314,7 @@ export function RecordingDashboard() {
 
     if (activeSessionIdRef.current === sessionId) {
       setBreakpoints(response.breakpoints);
+      setCompositeBreakpoints(response.compositeBreakpoints ?? []);
     }
   };
 
@@ -355,6 +366,18 @@ export function RecordingDashboard() {
 
     if (succeeded) {
       setBreakpointDialogOpen(false);
+    }
+  };
+
+  const handleCreateCompositeBreakpoint = async (
+    request: CreateCompositeBreakpointRequest,
+  ) => {
+    const succeeded = await executeBreakpointMutation(async (sessionId) => {
+      await breakpointApi.createComposite(sessionId, request);
+    });
+
+    if (succeeded) {
+      setCompositeDialogOpen(false);
     }
   };
 
@@ -621,11 +644,13 @@ export function RecordingDashboard() {
         {session && (
           <BreakpointPanel
             breakpoints={breakpoints}
+            compositeBreakpoints={compositeBreakpoints}
             channels={channels}
-            loading={breakpointsLoading}
-            busy={breakpointBusy || loading || seeking}
+            loading={loading}
+            busy={breakpointBusy || seeking}
             error={breakpointError}
             onAdd={() => setBreakpointDialogOpen(true)}
+            onAddComposite={() => setCompositeDialogOpen(true)}
             onSetEnabled={handleSetBreakpointEnabled}
             onDelete={handleDeleteBreakpoint}
           />
@@ -760,6 +785,17 @@ export function RecordingDashboard() {
           }
         }}
         onCreate={handleCreateBreakpoint}
+      />
+
+      <CompositeBreakpointDialog
+        open={compositeDialogOpen}
+        channels={channels}
+        busy={breakpointBusy}
+        error={breakpointError}
+        onClose={() => {
+          if (!breakpointBusy) setCompositeDialogOpen(false);
+        }}
+        onCreate={handleCreateCompositeBreakpoint}
       />
     </>
   );
