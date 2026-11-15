@@ -18,9 +18,11 @@ import {
 
 import type { CurrentSample } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
+import type { SampleRangeItem } from "./sampleTypes";
 
 interface ChannelListProps {
   sample?: CurrentSample | null;
+  previousSample?: SampleRangeItem | null;
   channels: ChannelMetadata[];
   selectedChannelIds?: string[];
 }
@@ -44,6 +46,35 @@ function formatChannelValue(sample: CurrentSample | null | undefined, channelId:
   return legacy == null || !Number.isFinite(legacy) ? "N/A" : legacy.toLocaleString();
 }
 
+// Compare original typed values, not formatted strings (which can round numbers).
+function readChannelValue(
+  sample: CurrentSample | SampleRangeItem,
+  channelId: string,
+): { type: string; value: string | number | boolean | null } {
+  const typed = sample.typedChannels?.[channelId];
+  if (typed) {
+    if (typed.valueType === "Missing" || typed.value === null) {
+      return { type: "Missing", value: null };
+    }
+    return { type: typed.valueType, value: typed.value };
+  }
+  const numeric = sample.channels?.[channelId];
+  return numeric == null || !Number.isFinite(numeric)
+    ? { type: "Missing", value: null }
+    : { type: "Numeric", value: numeric };
+}
+
+function hasChannelChanged(
+  current: CurrentSample | null | undefined,
+  previous: SampleRangeItem | null | undefined,
+  channelId: string,
+): boolean {
+  if (!current || !previous || current.sequence !== previous.sequence + 1) return false;
+  const a = readChannelValue(current, channelId);
+  const b = readChannelValue(previous, channelId);
+  return a.type !== b.type || !Object.is(a.value, b.value);
+}
+
 function truncateChannelName(name: string): string {
   if (name.length <= MAX_CHANNEL_NAME_LENGTH) {
     return name;
@@ -54,6 +85,7 @@ function truncateChannelName(name: string): string {
 
 export function ChannelList({
   sample,
+  previousSample,
   channels,
   selectedChannelIds,
 }: ChannelListProps) {
@@ -150,6 +182,7 @@ export function ChannelList({
           <TableBody>
             {visibleChannels.map((channel) => {
               const displayValue = formatChannelValue(sample, channel.channelId);
+              const changed = hasChannelChanged(sample, previousSample, channel.channelId);
 
               return (
                 <TableRow key={channel.channelId} hover>
@@ -191,6 +224,8 @@ export function ChannelList({
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                           fontVariantNumeric: "tabular-nums",
+                          color: changed ? "warning.main" : "text.primary",
+                          fontWeight: changed ? 700 : 400,
                         }}
                       >
                         {displayValue}
