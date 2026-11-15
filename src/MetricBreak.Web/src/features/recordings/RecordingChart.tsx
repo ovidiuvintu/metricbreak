@@ -12,6 +12,7 @@ import type { EChartsType } from "echarts/core";
 
 import {
   Alert,
+  Button,
   Box,
   CircularProgress,
   Typography,
@@ -95,6 +96,15 @@ export function RecordingChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hover, setHover] = useState<HoverDetails | null>(null);
+  const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
+  const tooltipsEnabledRef = useRef(true);
+
+  const toggleTooltips = () => {
+    const next = !tooltipsEnabledRef.current;
+    tooltipsEnabledRef.current = next;
+    setTooltipsEnabled(next);
+    if (!next) setHover(null);
+  };
   const listenerCleanupRef = useRef<(() => void) | null>(null);
 
   // Keep the latest callback and sample range accessible
@@ -306,7 +316,7 @@ export function RecordingChart({
 
         top: 8,
         left: "center",
-        right: 10,
+        right: 140,
 
         itemWidth: 18,
         itemHeight: 3,
@@ -417,6 +427,24 @@ export function RecordingChart({
           },
         },
 
+        min: (range: { min: number; max: number }) => {
+          const span = range.max - range.min;
+          const padding = span === 0
+             ? Math.max(Math.abs(range.min) * 0.05, 1)
+             : span * 0.05;
+
+          return range.min - padding;
+        },
+
+        max: (range: { min: number; max: number }) => {
+          const span = range.max - range.min;
+          const padding = span === 0
+             ? Math.max(Math.abs(range.max) * 0.05, 1)
+             : span * 0.05;
+
+        return range.max + padding;
+        },
+
         splitLine: {
           show: true,
           lineStyle: {
@@ -517,6 +545,7 @@ export function RecordingChart({
       };
 
       const handleMove = (event: { offsetX: number; offsetY: number }) => {
+        if (!tooltipsEnabledRef.current) return;
         const pixel: [number, number] = [event.offsetX, event.offsetY];
         if (!chart.containPixel({ gridIndex: 0 }, pixel)) {
           setHover(null);
@@ -601,8 +630,29 @@ export function RecordingChart({
         minWidth: 0,
         minHeight: 0,
         overflow: "hidden",
+        position: "relative",
       }}
     >
+      <Box
+        sx={{
+          position: "absolute",
+          top: 4,
+          right: 8,
+          zIndex: 12,
+        }}
+      >
+        <Button
+          size="small"
+          variant="outlined"
+          color={tooltipsEnabled ? "primary" : "inherit"}
+          aria-pressed={tooltipsEnabled}
+          onClick={toggleTooltips}
+          sx={{ minWidth: 112, bgcolor: "background.paper" }}
+        >
+          Tooltips: {tooltipsEnabled ? "On" : "Off"}
+        </Button>
+      </Box>
+
       {error && (
         <Alert
           severity="error"
@@ -662,7 +712,7 @@ export function RecordingChart({
               cursor: "crosshair",
             }}
           />
-          {hover && (
+          {tooltipsEnabled && hover && (
             <Box
               sx={{
                 position: "absolute",
