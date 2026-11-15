@@ -1,5 +1,5 @@
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -39,6 +39,7 @@ import {
 import type { CreateSessionResponse } from "./recordingTypes";
 import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
+import type { SampleRangeItem } from "./sampleTypes";
 
 type InspectorTab = 0 | 1 | 2;
 
@@ -67,6 +68,12 @@ export function RecordingDashboard() {
 
   const [inspectorTab, setInspectorTab] =
     useState<InspectorTab>(0);
+
+  const [previousSampleResult, setPreviousSampleResult] = useState<{
+    sessionId: string;
+    currentSequence: number;
+    sample: SampleRangeItem;
+  } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -101,6 +108,44 @@ export function RecordingDashboard() {
   const loadVersionRef = useRef(0);
   const seekInProgressRef = useRef(false);
   const breakpointInProgressRef = useRef(false);
+
+  // Fetch the immediately preceding *recorded* sample only when inspecting Values.
+  // A cancellation flag prevents older seeks from publishing stale comparisons.
+  const watchSessionId = session?.sessionId;
+  const watchSequence = session?.currentSample?.sequence;
+
+  useEffect(() => {
+    if (inspectorTab !== 2 || !watchSessionId || watchSequence == null || watchSequence <= 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void recordingApi.getSamples(watchSessionId, watchSequence - 1, 1)
+      .then((response) => {
+        if (cancelled) return;
+        const preceding = response.samples.find((item) => item.sequence === watchSequence - 1);
+        if (preceding) {
+          setPreviousSampleResult({
+            sessionId: watchSessionId,
+            currentSequence: watchSequence,
+            sample: preceding,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        // No comparison is displayed when the preceding sample cannot be retrieved.
+        if (!cancelled) console.warn("Unable to load previous watch sample:", error);
+      });
+
+    return () => { cancelled = true; };
+  }, [inspectorTab, watchSessionId, watchSequence]);
+
+  const previousWatchSample =
+    previousSampleResult != null &&
+    previousSampleResult.sessionId === watchSessionId &&
+    previousSampleResult.currentSequence === watchSequence
+      ? previousSampleResult.sample
+      : null;
 
   // --------------------------------------------------
   // Recording loading
@@ -670,6 +715,7 @@ export function RecordingDashboard() {
         {session?.currentSample ? (
           <ChannelList
             sample={session.currentSample}
+            previousSample={previousWatchSample}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
           />
