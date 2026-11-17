@@ -350,6 +350,21 @@ export function RecordingDashboard() {
     }, "Unable to continue replay.");
   };
 
+  const handleChangeNavigation = async (
+    channelId: string,
+    direction: "next" | "previous",
+  ) => {
+    await executeReplay(async (sessionId) => {
+      const response = direction === "next"
+        ? await replayApi.nextChange(sessionId, channelId)
+        : await replayApi.previousChange(sessionId, channelId);
+      if (!response.foundChange) {
+        console.debug(`No ${direction} transition found for channel ${channelId}.`);
+      }
+      return response.session;
+    }, `Unable to navigate to ${direction} change.`);
+  };
+
   // --------------------------------------------------
   // Breakpoint operations
   // --------------------------------------------------
@@ -718,6 +733,9 @@ export function RecordingDashboard() {
             previousSample={previousWatchSample}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
+            navigationBusy={loading || seeking || breakpointBusy}
+            onNextChange={(channelId) => void handleChangeNavigation(channelId, "next")}
+            onPreviousChange={(channelId) => void handleChangeNavigation(channelId, "previous")}
           />
         ) : (
           <Typography

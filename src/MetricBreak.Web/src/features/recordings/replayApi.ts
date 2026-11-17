@@ -62,6 +62,14 @@ export const replayApi = {
     );
   },
 
+  nextChange(sessionId: string, channelId: string): Promise<ChangeNavigationResponse> {
+    return changeNavigationRequest(sessionId, channelId, "next-change");
+  },
+
+  previousChange(sessionId: string, channelId: string): Promise<ChangeNavigationResponse> {
+    return changeNavigationRequest(sessionId, channelId, "previous-change");
+  },
+
   reset(sessionId: string): Promise<ResetResponse> {
     return apiRequest<ResetResponse>(
       `/api/sessions/${encodeURIComponent(sessionId)}/reset`,
@@ -83,4 +91,27 @@ export interface ContinueResponse {
   reachedEndOfRecording: boolean;
   stop: unknown | null;
   session: SessionState;
+}
+
+export interface ChangeNavigationResponse {
+  foundChange: boolean;
+  session: SessionState;
+}
+
+function changeNavigationRequest(
+  sessionId: string,
+  channelId: string,
+  direction: "next-change" | "previous-change",
+): Promise<ChangeNavigationResponse> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId)) {
+    throw new Error("Invalid channel ID.");
+  }
+  return apiRequest<ChangeNavigationResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/${direction}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channelId }),
+    },
+  );
 }
