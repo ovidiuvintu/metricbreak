@@ -415,15 +415,6 @@ export function RecordingChart({
       yAxis: {
         type: "value" as const,
         scale: true,
-        min: ({ min, max }: { min: number; max: number }) => {
-          const span = max - min;
-          return min - (span === 0 ? Math.max(Math.abs(min) * 0.05, 1) : span * 0.05);
-        },
-        max: ({ min, max }: { min: number; max: number }) => {
-          const span = max - min;
-          return max + (span === 0 ? Math.max(Math.abs(max) * 0.05, 1) : span * 0.05);
-        },
-
         axisLine: {
           lineStyle: {
             color: chartTheme.axisTextColor,
