@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import {
   Box,
+  IconButton,
   FormControlLabel,
   Paper,
   Switch,
@@ -16,6 +17,9 @@ import {
   Typography,
 } from "@mui/material";
 
+import NavigateBeforeIcon from "@mui/icons-material/NavigateBefore";
+import NavigateNextIcon from "@mui/icons-material/NavigateNext";
+
 import type { CurrentSample } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
@@ -25,6 +29,9 @@ interface ChannelListProps {
   previousSample?: SampleRangeItem | null;
   channels: ChannelMetadata[];
   selectedChannelIds?: string[];
+  navigationBusy?: boolean;
+  onNextChange?: (channelId: string) => void;
+  onPreviousChange?: (channelId: string) => void;
 }
 
 const MAX_CHANNEL_NAME_LENGTH = 16;
@@ -88,6 +95,9 @@ export function ChannelList({
   previousSample,
   channels,
   selectedChannelIds,
+  navigationBusy = false,
+  onNextChange,
+  onPreviousChange,
 }: ChannelListProps) {
   const [showAll, setShowAll] = useState(false);
 
@@ -150,7 +160,7 @@ export function ChannelList({
       <TableContainer
         sx={{
           width: "100%",
-          overflowX: "hidden",
+          overflowX: "auto",
         }}
       >
         <Table
@@ -176,6 +186,7 @@ export function ChannelList({
               <TableCell>Channel</TableCell>
               <TableCell align="right">Value</TableCell>
               <TableCell>Unit</TableCell>
+              <TableCell align="center">Navigate</TableCell>
             </TableRow>
           </TableHead>
 
@@ -254,13 +265,33 @@ export function ChannelList({
                       </Typography>
                     </Tooltip>
                   </TableCell>
+                  <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
+                    <Tooltip title={`Previous change: ${channel.name}`}>
+                      <span>
+                        <IconButton size="small" aria-label={`Previous change for ${channel.name}`}
+                          disabled={navigationBusy || !onPreviousChange || !sample || sample.sequence <= 0}
+                          onClick={() => onPreviousChange?.(channel.channelId)}>
+                          <NavigateBeforeIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title={`Next change: ${channel.name}`}>
+                      <span>
+                        <IconButton size="small" aria-label={`Next change for ${channel.name}`}
+                          disabled={navigationBusy || !onNextChange || !sample}
+                          onClick={() => onNextChange?.(channel.channelId)}>
+                          <NavigateNextIcon fontSize="small" />
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  </TableCell>
                 </TableRow>
               );
             })}
 
             {visibleChannels.length === 0 && (
               <TableRow>
-                <TableCell colSpan={3}>
+                <TableCell colSpan={4}>
                   <Typography
                     variant="caption"
                     color="text.secondary"
