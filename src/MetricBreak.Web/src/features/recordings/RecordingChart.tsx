@@ -230,6 +230,19 @@ export function RecordingChart({
     };
   }, []);
 
+  // A manual page change also moves the backend replay cursor to the
+  // first recorded sample on that page. Cursor-driven page following remains
+  // one-way: the effect above never calls onSeek.
+  const navigateToPage = (targetPage: number) => {
+    if (loading || targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
+
+    const targetSequence = targetPage * PAGE_SIZE;
+    setPageIndex(targetPage);
+    if (currentSequence !== targetSequence) {
+      onSeek(targetSequence);
+    }
+  };
+
   const lineWidth = getLineWidth(samples.length);
 
   const option = useMemo(() => {
@@ -678,8 +691,8 @@ export function RecordingChart({
             {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
           </Typography>
           <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation">
-            <Button disabled={loading || activePage === 0} onClick={() => setPageIndex(activePage - 1)}>Previous</Button>
-            <Button disabled={loading || activePage >= pageCount - 1} onClick={() => setPageIndex(activePage + 1)}>Next</Button>
+            <Button disabled={loading || activePage === 0} onClick={() => navigateToPage(activePage - 1)}>Previous</Button>
+            <Button disabled={loading || activePage >= pageCount - 1} onClick={() => navigateToPage(activePage + 1)}>Next</Button>
           </ButtonGroup>
         </Box>
       )}
@@ -706,9 +719,11 @@ export function RecordingChart({
         ) : samples.length > 0 ? (
           <>
           <ReactECharts
+            key={`${sessionId}:${pageStart}`}
             ref={chartRef}
             option={option}
-            notMerge
+            notMerge={false}
+            replaceMerge={["series"]}
             onChartReady={handleChartReady}
             style={{
               height: "100%",
