@@ -13,6 +13,7 @@ import type { EChartsType } from "echarts/core";
 import {
   Alert,
   Button,
+  ButtonGroup,
   Box,
   CircularProgress,
   Typography,
@@ -65,7 +66,7 @@ function formatSampleValue(sample: SampleRangeItem, channelId: string): string {
   return numeric == null ? "N/A" : numeric.toLocaleString();
 }
 
-const MAX_SAMPLES = 5000;
+const PAGE_SIZE = 5000;
 
 function getLineWidth(sampleCount: number): number {
   if (sampleCount <= 100) return 2.5;
@@ -93,6 +94,11 @@ export function RecordingChart({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const pageCount = Math.ceil(sampleCount / PAGE_SIZE);
+  const activePage = Math.min(pageIndex, Math.max(0, pageCount - 1));
+  const pageStart = activePage * PAGE_SIZE;
+  const pageEnd = Math.min(sampleCount, pageStart + PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hover, setHover] = useState<HoverDetails | null>(null);
@@ -121,13 +127,47 @@ export function RecordingChart({
   channelsRef.current = channels;
   selectedIdsRef.current = selectedChannelIds;
 
+  // Track the last replay position independently of manual chart paging.
+  // A page change must never be interpreted as a replay cursor movement.
+  const lastReplayPositionRef = useRef<{
+    sessionId: string;
+    sequence: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const previous = lastReplayPositionRef.current;
+    const sessionChanged = previous?.sessionId !== sessionId;
+    const sequenceChanged = previous?.sequence !== currentSequence;
+
+    lastReplayPositionRef.current = { sessionId, sequence: currentSequence };
+
+    if (sessionChanged) {
+      setSamples([]);
+      setHover(null);
+    }
+
+    // Manual Next/Previous page navigation does not change either value.
+    if (!sessionChanged && !sequenceChanged) return;
+
+    const targetPage =
+      currentSequence === null || sampleCount <= 0
+        ? 0
+        : Math.floor(
+            Math.max(0, Math.min(currentSequence, sampleCount - 1)) /
+              PAGE_SIZE,
+          );
+
+    setPageIndex((previousPage) =>
+      previousPage === targetPage ? previousPage : targetPage,
+    );
+  }, [sessionId, currentSequence, sampleCount]);
+
   useEffect(() => {
     let cancelled = false;
-
     setSamples([]);
     setHover(null);
 
-    if (sampleCount <= 0) {
+    if (sampleCount <= 0 || pageStart >= sampleCount) {
       setLoading(false);
       setError("");
       return;
@@ -136,49 +176,25 @@ export function RecordingChart({
     async function loadSamples() {
       setLoading(true);
       setError("");
-
       try {
         const result = await recordingApi.getSamples(
           sessionId,
-          0,
-          Math.min(sampleCount, MAX_SAMPLES),
-          );
-          console.debug("Sample API response:", {
-              sessionId,
-              sampleCount,
-              requestedCount: Math.min(sampleCount, MAX_SAMPLES),
-              samplesLength: result.samples?.length,
-          });
-
-        if (!cancelled) {
-          setSamples(result.samples);
-        }
-      } catch (caught) {
-        console.error(
-          "Failed to load recording samples:",
-          caught,
+          pageStart,
+          Math.min(PAGE_SIZE, sampleCount - pageStart),
         );
-
+        if (!cancelled) setSamples(result.samples);
+      } catch (caught) {
         if (!cancelled) {
-          setError(
-            caught instanceof Error
-              ? caught.message
-              : "Unable to load recording samples.",
-          );
+          setError(caught instanceof Error ? caught.message : "Unable to load recording samples.");
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     }
 
     void loadSamples();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, sampleCount]);
+    return () => { cancelled = true; };
+  }, [sessionId, pageStart, sampleCount]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -274,7 +290,10 @@ export function RecordingChart({
     // The cursor position comes from backend replay state.
     // Attach it to the first visible telemetry series.
     const replayCursor =
-      currentSequence === null || series.length === 0
+      currentSequence === null ||
+      currentSequence < pageStart ||
+      currentSequence >= pageEnd ||
+      series.length === 0
         ? undefined
         : {
             silent: true,
@@ -345,6 +364,10 @@ export function RecordingChart({
       xAxis: {
         type: "value" as const,
         name: "Sequence",
+
+        min: pageStart,
+        max: Math.max(pageStart + 1, pageEnd - 1),
+
         nameLocation: "middle" as const,
         nameGap: 30,
         minInterval: 1,
@@ -392,6 +415,14 @@ export function RecordingChart({
       yAxis: {
         type: "value" as const,
         scale: true,
+        min: ({ min, max }: { min: number; max: number }) => {
+          const span = max - min;
+          return min - (span === 0 ? Math.max(Math.abs(min) * 0.05, 1) : span * 0.05);
+        },
+        max: ({ min, max }: { min: number; max: number }) => {
+          const span = max - min;
+          return max + (span === 0 ? Math.max(Math.abs(max) * 0.05, 1) : span * 0.05);
+        },
 
         axisLine: {
           lineStyle: {
@@ -427,24 +458,6 @@ export function RecordingChart({
           },
         },
 
-        min: (range: { min: number; max: number }) => {
-          const span = range.max - range.min;
-          const padding = span === 0
-             ? Math.max(Math.abs(range.min) * 0.05, 1)
-             : span * 0.05;
-
-          return range.min - padding;
-        },
-
-        max: (range: { min: number; max: number }) => {
-          const span = range.max - range.min;
-          const padding = span === 0
-             ? Math.max(Math.abs(range.max) * 0.05, 1)
-             : span * 0.05;
-
-        return range.max + padding;
-        },
-
         splitLine: {
           show: true,
           lineStyle: {
@@ -466,12 +479,14 @@ export function RecordingChart({
       series: chartSeries,
     };
   }, [
-    channels,
-    samples,
-    selectedChannelIds,
-    chartTheme,
-    currentSequence,
-    lineWidth,
+      channels,
+      samples,
+      selectedChannelIds,
+      chartTheme,
+      currentSequence,
+      lineWidth,
+      pageStart,
+      pageEnd,
   ]);
 
   // Detach our ZRender listeners when the chart unmounts.
@@ -665,19 +680,17 @@ export function RecordingChart({
         </Alert>
       )}
 
-      {sampleCount > MAX_SAMPLES && (
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{
-            flexShrink: 0,
-            px: 1,
-          }}
-        >
-          Displaying the first{" "}
-          {MAX_SAMPLES.toLocaleString()} of{" "}
-          {sampleCount.toLocaleString()} samples.
-        </Typography>
+      {sampleCount > 0 && (
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, px: 1, py: 0.5, flexShrink: 0, pr: 17 }}>
+          <Typography variant="caption" color="text.secondary" noWrap>
+            Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
+            {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
+          </Typography>
+          <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation">
+            <Button disabled={loading || activePage === 0} onClick={() => setPageIndex(activePage - 1)}>Previous</Button>
+            <Button disabled={loading || activePage >= pageCount - 1} onClick={() => setPageIndex(activePage + 1)}>Next</Button>
+          </ButtonGroup>
+        </Box>
       )}
 
       <Box
