@@ -111,6 +111,18 @@ export function RecordingChart({
     setTooltipsEnabled(next);
     if (!next) setHover(null);
   };
+  const handleResetZoom = () => {
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart || chart.isDisposed()) return;
+
+    chart.dispatchAction({
+      type: "dataZoom",
+      dataZoomIndex: 0,
+      start: 0,
+      end: 100,
+    });
+  };
+
   const listenerCleanupRef = useRef<(() => void) | null>(null);
 
   // Keep the latest callback and sample range accessible
@@ -652,26 +664,6 @@ export function RecordingChart({
         position: "relative",
       }}
     >
-      <Box
-        sx={{
-          position: "absolute",
-          top: 4,
-          right: 8,
-          zIndex: 12,
-        }}
-      >
-        <Button
-          size="small"
-          variant="outlined"
-          color={tooltipsEnabled ? "primary" : "inherit"}
-          aria-pressed={tooltipsEnabled}
-          onClick={toggleTooltips}
-          sx={{ minWidth: 112, bgcolor: "background.paper" }}
-        >
-          Tooltips: {tooltipsEnabled ? "On" : "Off"}
-        </Button>
-      </Box>
-
       {error && (
         <Alert
           severity="error"
@@ -684,18 +676,50 @@ export function RecordingChart({
         </Alert>
       )}
 
-      {sampleCount > 0 && (
-        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, px: 1, py: 0.5, flexShrink: 0, pr: 17 }}>
-          <Typography variant="caption" color="text.secondary" noWrap>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          px: 1,
+          py: 0.5,
+          flexShrink: 0,
+          flexWrap: "nowrap",
+          overflowX: "auto",
+        }}
+      >
+        {sampleCount > 0 && (
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ mr: "auto", flexShrink: 0 }}>
             Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
             {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
           </Typography>
-          <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation">
+        )}
+        {sampleCount > 0 && (
+          <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
             <Button disabled={loading || activePage === 0} onClick={() => navigateToPage(activePage - 1)}>Previous</Button>
             <Button disabled={loading || activePage >= pageCount - 1} onClick={() => navigateToPage(activePage + 1)}>Next</Button>
           </ButtonGroup>
-        </Box>
-      )}
+        )}
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={handleResetZoom}
+          disabled={loading || samples.length === 0}
+          sx={{ bgcolor: "background.paper", flexShrink: 0, whiteSpace: "nowrap" }}
+        >
+          Reset Zoom (100%)
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          color={tooltipsEnabled ? "primary" : "inherit"}
+          aria-pressed={tooltipsEnabled}
+          onClick={toggleTooltips}
+          sx={{ minWidth: 112, bgcolor: "background.paper", flexShrink: 0, whiteSpace: "nowrap" }}
+        >
+          Tooltips: {tooltipsEnabled ? "On" : "Off"}
+        </Button>
+      </Box>
 
       <Box
         sx={{
