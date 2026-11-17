@@ -1,5 +1,5 @@
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode, type PointerEvent, type KeyboardEvent } from "react";
 
 import {
   Box,
@@ -38,6 +38,65 @@ export function RecordingWorkspace({
   const [valuesCollapsed, setValuesCollapsed] =
     useState(true);
 
+  const DEFAULT_INSPECTOR_WIDTH = 280;
+  const MIN_INSPECTOR_WIDTH = 280;
+  const MIN_CHART_WIDTH = 400;
+  const SPLITTER_WIDTH = 8;
+  const workspaceRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const [inspectorWidth, setInspectorWidth] = useState(DEFAULT_INSPECTOR_WIDTH);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const resizeInspector = (clientX: number) => {
+    const bounds = workspaceRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const available = bounds.width - SPLITTER_WIDTH;
+    // On narrow viewports, keep both panes usable without exceeding the container.
+    const maximum = Math.max(0, available - MIN_CHART_WIDTH);
+    const minimum = Math.min(MIN_INSPECTOR_WIDTH, maximum);
+    const requested = bounds.right - clientX;
+    setInspectorWidth(Math.max(minimum, Math.min(maximum, requested)));
+  };
+
+  const handleSplitterPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || channelsCollapsed) return;
+    event.preventDefault();
+    dragPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsDragging(true);
+  };
+
+  const handleSplitterPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragPointerIdRef.current !== event.pointerId) return;
+    resizeInspector(event.clientX);
+  };
+
+  const stopDragging = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragPointerIdRef.current !== event.pointerId) return;
+    dragPointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsDragging(false);
+  };
+
+  const handleSplitterKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (channelsCollapsed) return;
+    const step = event.shiftKey ? 50 : 10;
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const bounds = workspaceRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const maximum = Math.max(0, bounds.width - SPLITTER_WIDTH - MIN_CHART_WIDTH);
+      const minimum = Math.min(MIN_INSPECTOR_WIDTH, maximum);
+      const delta = event.key === "ArrowLeft" ? step : -step;
+      setInspectorWidth((width) => Math.max(minimum, Math.min(maximum, width + delta)));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setInspectorWidth(DEFAULT_INSPECTOR_WIDTH);
+    }
+  };
+
   return (
     <Box
       sx={{
@@ -65,6 +124,7 @@ export function RecordingWorkspace({
 
       {/* Main workspace */}
       <Paper
+        ref={workspaceRef}
         variant="outlined"
         sx={{
           display: "flex",
@@ -185,25 +245,62 @@ export function RecordingWorkspace({
           )}
         </Box>
 
+        {/* Resizable boundary between chart and inspector */}
+        {!channelsCollapsed && (
+          <Box
+            role="separator"
+            aria-label="Resize chart and inspector"
+            aria-orientation="vertical"
+            tabIndex={0}
+            onPointerDown={handleSplitterPointerDown}
+            onPointerMove={handleSplitterPointerMove}
+            onPointerUp={stopDragging}
+            onPointerCancel={stopDragging}
+            onLostPointerCapture={() => {
+              dragPointerIdRef.current = null;
+              setIsDragging(false);
+            }}
+            onKeyDown={handleSplitterKeyDown}
+            onDoubleClick={() => setInspectorWidth(DEFAULT_INSPECTOR_WIDTH)}
+            sx={{
+              width: SPLITTER_WIDTH,
+              flexShrink: 0,
+              cursor: "col-resize",
+              touchAction: "none",
+              bgcolor: isDragging ? "action.selected" : "background.paper",
+              borderLeft: 1,
+              borderRight: 1,
+              borderColor: "divider",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              "&:hover, &:focus-visible": { bgcolor: "action.hover" },
+              "&::after": {
+                content: '""',
+                height: 40,
+                width: 3,
+                borderRadius: 2,
+                bgcolor: "text.disabled",
+              },
+            }}
+          />
+        )}
+
         {/* Inspector sidebar */}
         <Box
           component="aside"
           sx={{
             display: "flex",
             flexDirection: "column",
-            width: channelsCollapsed ? 48 : 280,
+            width: channelsCollapsed ? 48 : inspectorWidth,
             flexShrink: 0,
             minWidth: 0,
             minHeight: 0,
             overflow: "hidden",
-            borderLeft: 1,
+            borderLeft: channelsCollapsed ? 1 : 0,
             borderColor: "divider",
             bgcolor: "background.paper",
-            transition: (theme) =>
-              theme.transitions.create("width", {
-                duration:
-                  theme.transitions.duration.shorter,
-              }),
+            transition: isDragging ? "none" : undefined,
           }}
         >
           <Box

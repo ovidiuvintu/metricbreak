@@ -160,7 +160,7 @@ export function ChannelList({
       <TableContainer
         sx={{
           width: "100%",
-          overflowX: "auto",
+          overflowX: "hidden",
         }}
       >
         <Table
@@ -176,9 +176,9 @@ export function ChannelList({
           }}
         >
           <colgroup>
-            <col style={{ width: "48%" }} />
-            <col style={{ width: "32%" }} />
-            <col style={{ width: "20%" }} />
+            <col style={{ width: "55%" }} />
+            <col style={{ width: "28%" }} />
+            <col style={{ width: "17%" }} />
           </colgroup>
 
           <TableHead>
@@ -186,7 +186,6 @@ export function ChannelList({
               <TableCell>Channel</TableCell>
               <TableCell align="right">Value</TableCell>
               <TableCell>Unit</TableCell>
-              <TableCell align="center">Navigate</TableCell>
             </TableRow>
           </TableHead>
 
@@ -197,27 +196,47 @@ export function ChannelList({
 
               return (
                 <TableRow key={channel.channelId} hover>
-                  {/* Channel name */}
+                  {/* Channel name and change navigation */}
                   <TableCell>
-                    <Tooltip
-                      title={channel.name}
-                      arrow
-                      placement="left"
-                    >
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{
-                          display: "block",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          maxWidth: "100%",
-                        }}
-                      >
-                        {truncateChannelName(channel.name)}
-                      </Typography>
-                    </Tooltip>
+                    <Box sx={{ display: "flex", alignItems: "center", minWidth: 0, gap: 0.25 }}>
+                      <Tooltip title={channel.name} arrow placement="left">
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                        >
+                          {truncateChannelName(channel.name)}
+                        </Typography>
+                      </Tooltip>
+                      <Box sx={{ display: "flex", flexShrink: 0 }}>
+                        <Tooltip title={`Previous change: ${channel.name}`}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              sx={{ p: 0.25 }}
+                              aria-label={`Previous change for ${channel.name}`}
+                              disabled={navigationBusy || !onPreviousChange || !sample || sample.sequence <= 0}
+                              onClick={() => onPreviousChange?.(channel.channelId)}
+                            >
+                              <NavigateBeforeIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title={`Next change: ${channel.name}`}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              sx={{ p: 0.25 }}
+                              aria-label={`Next change for ${channel.name}`}
+                              disabled={navigationBusy || !onNextChange || !sample}
+                              onClick={() => onNextChange?.(channel.channelId)}
+                            >
+                              <NavigateNextIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      </Box>
+                    </Box>
                   </TableCell>
 
                   {/* Current value */}
@@ -265,33 +284,13 @@ export function ChannelList({
                       </Typography>
                     </Tooltip>
                   </TableCell>
-                  <TableCell align="center" sx={{ whiteSpace: "nowrap" }}>
-                    <Tooltip title={`Previous change: ${channel.name}`}>
-                      <span>
-                        <IconButton size="small" aria-label={`Previous change for ${channel.name}`}
-                          disabled={navigationBusy || !onPreviousChange || !sample || sample.sequence <= 0}
-                          onClick={() => onPreviousChange?.(channel.channelId)}>
-                          <NavigateBeforeIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <Tooltip title={`Next change: ${channel.name}`}>
-                      <span>
-                        <IconButton size="small" aria-label={`Next change for ${channel.name}`}
-                          disabled={navigationBusy || !onNextChange || !sample}
-                          onClick={() => onNextChange?.(channel.channelId)}>
-                          <NavigateNextIcon fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  </TableCell>
                 </TableRow>
               );
             })}
 
             {visibleChannels.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4}>
+                <TableCell colSpan={3}>
                   <Typography
                     variant="caption"
                     color="text.secondary"
