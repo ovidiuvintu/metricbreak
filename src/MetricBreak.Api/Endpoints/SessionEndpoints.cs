@@ -6,6 +6,23 @@ namespace MetricBreak.Api.Endpoints;
 
 internal static class SessionEndpoints
 {
+    private sealed record ChangeNavigationRequest(Guid ChannelId);
+
+    private static IResult NavigateChange(
+        Guid sessionId, ChangeNavigationRequest request, ReplaySessionManager manager, bool forward)
+    {
+        if (!manager.TryNavigateChangeWithSnapshot(sessionId, request.ChannelId, forward,
+                out var unknownChannel, out var foundChange, out var snapshot))
+            return Results.NotFound(new { Error = "Replay session not found." });
+        if (unknownChannel)
+            return Results.BadRequest(new { Error = "Unknown channel ID." });
+        return Results.Ok(new
+        {
+            FoundChange = foundChange,
+            Session = SessionStateResponseMapper.Map(snapshot!)
+        });
+    }
+
     private const int _maxSampleCount = 5000;
 
     private const string _sessionTag = "Sessions";
@@ -132,6 +149,15 @@ internal static class SessionEndpoints
                 StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
+
+        // NAVIGATE TO THE NEXT / PREVIOUS CHANGE OF A SELECTED CHANNEL
+        group.MapPost("/{sessionId:guid}/next-change", (
+            Guid sessionId, ChangeNavigationRequest request, ReplaySessionManager manager) =>
+            NavigateChange(sessionId, request, manager, forward: true));
+
+        group.MapPost("/{sessionId:guid}/previous-change", (
+            Guid sessionId, ChangeNavigationRequest request, ReplaySessionManager manager) =>
+            NavigateChange(sessionId, request, manager, forward: false));
 
         return app;
     }

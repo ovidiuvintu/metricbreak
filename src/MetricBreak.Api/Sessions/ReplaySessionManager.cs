@@ -703,6 +703,40 @@ public sealed class ReplaySessionManager
             return true;
         }
     }
+    public bool TryNavigateChangeWithSnapshot(
+        Guid sessionId,
+        Guid channelId,
+        bool forward,
+        out bool unknownChannel,
+        out bool foundChange,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        unknownChannel = false;
+        foundChange = false;
+        snapshot = null;
+        if (!_sessions.TryGetValue(sessionId, out var entry)) return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed) return false;
+            if (channelId == Guid.Empty || !entry.Imported.Channels.Any(c => c.Id == channelId))
+            {
+                unknownChannel = true;
+                return true;
+            }
+
+            var position = entry.Controller.Position.SequenceNumber;
+            var target = TelemetryChangeNavigator.Find(entry.Imported.Reader, channelId, position, forward);
+            if (target.HasValue)
+            {
+                entry.Controller.Seek(target.Value);
+                foundChange = true;
+            }
+            snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
+
     public bool TryGetSampleRange(
         Guid sessionId,
         long start,
