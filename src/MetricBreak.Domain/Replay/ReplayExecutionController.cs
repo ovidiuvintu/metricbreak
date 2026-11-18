@@ -63,4 +63,21 @@ public sealed class ReplayExecutionController
     {
         _session.Reset();
     }
+
+    public PlaybackAdvanceResult AdvancePlayback(
+        int maxSamples,
+        BreakpointCollection breakpoints)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        return _session.AdvancePlayback(
+            maxSamples,
+            breakpoints);
+    }
+
+    public void PausePlayback()
+    {
+        _session.PausePlayback();
+    }
+
 }

@@ -380,6 +380,70 @@ public sealed class ReplaySession
     }
 
     /// <summary>
+    /// Advances at most maxSamples, evaluating every traversed sample.
+    /// A completed batch leaves the session Running.
+    /// </summary>
+    public PlaybackAdvanceResult AdvancePlayback(int maxSamples, BreakpointCollection breakpoints)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+        if (maxSamples <= 0 || maxSamples > 5000)
+            throw new ArgumentOutOfRangeException(nameof(maxSamples));
+
+        var active = breakpoints.GetAllActive();
+        var advanced = 0;
+        try
+        {
+            if (!_cursor.CanStepForward)
+            {
+                UpdateExecutionState(ReplayExecutionStatus.Completed, ReplayPauseReason.EndOfRecording);
+                return new PlaybackAdvanceResult(0, true, null);
+            }
+
+            UpdateExecutionState(ReplayExecutionStatus.Running, ReplayPauseReason.None);
+            while (advanced < maxSamples && _cursor.StepForward())
+            {
+                advanced++;
+                var sample = _reader.Read(_cursor.CurrentSequenceNumber);
+                var hits = new List<BreakpointHit>();
+                foreach (var breakpoint in active)
+                {
+                    var hit = BreakpointEvaluator.EvaluateHit(breakpoint, _cursor.Position, sample);
+                    if (hit is not null)
+                        hits.Add(hit);
+                }
+
+                if (hits.Count > 0)
+                {
+                    UpdateExecutionState(ReplayExecutionStatus.Paused, ReplayPauseReason.Breakpoint, sample);
+                    return new PlaybackAdvanceResult(advanced, false,
+                        new BreakpointStop(_cursor.Position, sample.Timestamp, hits));
+                }
+            }
+
+            if (!_cursor.CanStepForward)
+            {
+                UpdateExecutionState(ReplayExecutionStatus.Completed, ReplayPauseReason.EndOfRecording);
+                return new PlaybackAdvanceResult(advanced, true, null);
+            }
+
+            UpdateExecutionState(ReplayExecutionStatus.Running, ReplayPauseReason.None);
+            return new PlaybackAdvanceResult(advanced, false, null);
+        }
+        catch
+        {
+            SetFaultedState();
+            throw;
+        }
+    }
+
+    /// <summary>Pauses an active playback batch sequence at its current position.</summary>
+    public void PausePlayback()
+    {
+        if (ExecutionState.Status == ReplayExecutionStatus.Running)
+            UpdateExecutionState(ReplayExecutionStatus.Paused, ReplayPauseReason.User);
+    }
+
+    /// <summary>
     /// Creates a new immutable execution-state snapshot
     /// using the current cursor position.
     /// </summary>

@@ -216,6 +216,13 @@ public sealed class ReplaySessionManager
         return true;
     }
 
+    // Must be called while holding entry.SyncRoot.
+    private static void InvalidatePlayback(SessionEntry entry)
+    {
+        entry.PlaybackActive = false;
+        entry.PlaybackGeneration = checked(entry.PlaybackGeneration + 1);
+    }
+
     public bool TryContinueBackwardWithSnapshot(
         Guid sessionId,
         out bool hadActiveBreakpoints,
@@ -234,6 +241,7 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
+            InvalidatePlayback(entry);
             hadActiveBreakpoints = entry.Breakpoints.ActiveCount > 0;
 
             if (hadActiveBreakpoints)
@@ -265,6 +273,7 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
+            InvalidatePlayback(entry);
             hadActiveBreakpoints = entry.Breakpoints.ActiveCount > 0;
 
             if (hadActiveBreakpoints)
@@ -543,10 +552,10 @@ public sealed class ReplaySessionManager
         Guid sessionId,
         out bool advanced)
     {
-        return TryExecute(
+        return TryStepForwardWithSnapshot(
             sessionId,
-            controller => controller.StepForward(),
-            out advanced);
+            out advanced,
+            out _);
     }
 
     public bool TryStepForwardWithSnapshot(
@@ -565,6 +574,7 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
+            InvalidatePlayback(entry);
             advanced = entry.Controller.StepForward();
 
             snapshot = CreateSnapshot(sessionId, entry);
@@ -589,6 +599,7 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
+            InvalidatePlayback(entry);
             movedBackward = entry.Controller.StepBackward();
 
             snapshot = CreateSnapshot(sessionId, entry);
@@ -622,6 +633,7 @@ public sealed class ReplaySessionManager
                 return true;
             }
 
+            InvalidatePlayback(entry);
             entry.Controller.Seek(sequenceNumber);
 
             snapshot = CreateSnapshot(sessionId, entry);
@@ -645,6 +657,7 @@ public sealed class ReplaySessionManager
             if (entry.IsClosed)
                 return false;
 
+            InvalidatePlayback(entry);
             entry.Controller.Reset();
 
             snapshot = CreateSnapshot(sessionId, entry);
@@ -653,6 +666,111 @@ public sealed class ReplaySessionManager
         }
     }
 
+
+    // A new generation is issued for each Play/Resume action.
+    public bool TryStartPlayback(Guid sessionId, out long generation)
+    {
+        generation = 0;
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            entry.PlaybackGeneration = checked(entry.PlaybackGeneration + 1);
+            entry.PlaybackActive = true;
+            generation = entry.PlaybackGeneration;
+            return true;
+        }
+    }
+
+    public bool TryAdvancePlaybackWithSnapshot(
+        Guid sessionId,
+        long generation,
+        int maxSamples,
+        out bool accepted,
+        out PlaybackAdvanceResult? result,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        if (maxSamples < 1 || maxSamples > 5000)
+            throw new ArgumentOutOfRangeException(nameof(maxSamples));
+
+        accepted = false;
+        result = null;
+        snapshot = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (!entry.PlaybackActive ||
+                generation != entry.PlaybackGeneration)
+            {
+                snapshot = CreateSnapshot(sessionId, entry);
+                return true;
+            }
+
+            accepted = true;
+            result = entry.Controller.AdvancePlayback(maxSamples, entry.Breakpoints);
+            snapshot = CreateSnapshot(sessionId, entry);
+
+            // A completed or breakpoint-stopped batch cannot accept another
+            // advance under the same generation.
+            if (entry.Controller.State.Status != ReplayExecutionStatus.Running)
+            {
+                entry.PlaybackActive = false;
+                entry.PlaybackGeneration = checked(entry.PlaybackGeneration + 1);
+            }
+
+            return true;
+        }
+    }
+
+    public bool TryPausePlaybackWithSnapshot(
+        Guid sessionId,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        snapshot = null;
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            InvalidatePlayback(entry);
+            entry.Controller.PausePlayback();
+            snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
+
+    public bool TryStopPlaybackWithSnapshot(
+        Guid sessionId,
+        out ReplaySessionSnapshot? snapshot)
+    {
+        snapshot = null;
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            InvalidatePlayback(entry);
+            entry.Controller.Reset();
+            snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
 
     private sealed class SessionEntry
     {
@@ -665,6 +783,10 @@ public sealed class ReplaySessionManager
         public object SyncRoot { get; } = new();
 
         public bool IsClosed { get; set; }
+
+        public long PlaybackGeneration { get; set; }
+
+        public bool PlaybackActive { get; set; }
 
         public SessionEntry(
             ReplayExecutionController controller,
@@ -725,6 +847,7 @@ public sealed class ReplaySessionManager
                 return true;
             }
 
+            InvalidatePlayback(entry);
             var position = entry.Controller.Position.SequenceNumber;
             var target = TelemetryChangeNavigator.Find(entry.Imported.Reader, channelId, position, forward);
             if (target.HasValue)
@@ -798,7 +921,4 @@ public sealed class ReplaySessionManager
             return true;
         }
     }
-
-
-
 }
