@@ -7,6 +7,7 @@ namespace MetricBreak.Api.Endpoints;
 internal static class ReplayEndpoints
 {
     private const string _replayTag = "Replay Controls";
+    private sealed record PlaybackAdvanceRequest(long Generation, int MaxSamples);
     public static IEndpointRouteBuilder MapReplayEndpoints(
         this IEndpointRouteBuilder app)
     {
@@ -228,6 +229,103 @@ internal static class ReplayEndpoints
             .Produces<ContinueResponse>(
                 StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);
+
+        // PLAY / RESUME: ISSUE A NEW GENERATION
+        group.MapPost(
+            "/playback/start",
+            (Guid sessionId, ReplaySessionManager manager) =>
+            {
+                if (!manager.TryStartPlayback(sessionId, out var generation))
+                    return Results.NotFound();
+
+                return Results.Ok(new { Generation = generation });
+            })
+            .WithName("StartPlayback")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
+        // CONTINUOUS PLAYBACK: BOUNDED ADVANCE
+        group.MapPost(
+            "/playback/advance",
+            (
+                Guid sessionId,
+                PlaybackAdvanceRequest request,
+                ReplaySessionManager manager) =>
+            {
+                if (request.MaxSamples is < 1 or > 5000)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "InvalidBatchSize",
+                        Message = "MaxSamples must be between 1 and 5000."
+                    });
+                }
+
+                if (!manager.TryAdvancePlaybackWithSnapshot(
+                        sessionId,
+                        request.Generation,
+                        request.MaxSamples,
+                        out var accepted,
+                        out var result,
+                        out var snapshot))
+                {
+                    return Results.NotFound();
+                }
+
+                if (!accepted)
+                {
+                    return Results.Conflict(new
+                    {
+                        Error = "StalePlaybackGeneration",
+                        Message = "Playback has been paused, stopped, or restarted."
+                    });
+                }
+
+                if (result is null || snapshot is null)
+                    return Results.Problem("Playback advance did not produce a result.");
+
+                return Results.Ok(new
+                {
+                    result.SamplesAdvanced,
+                    result.EndOfRecording,
+                    HitBreakpoint = result.BreakpointStop is not null,
+                    Stop = result.BreakpointStop is null
+                        ? null
+                        : ContinueResponseMapper.Map(result.BreakpointStop),
+                    Session = SessionStateResponseMapper.Map(snapshot)
+                });
+            })
+            .WithName("AdvancePlayback")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict);
+
+        // PAUSE: INVALIDATE GENERATION AND PRESERVE POSITION
+        group.MapPost(
+            "/playback/pause",
+            (Guid sessionId, ReplaySessionManager manager) =>
+            {
+                if (!manager.TryPausePlaybackWithSnapshot(sessionId, out var snapshot) ||
+                    snapshot is null)
+                    return Results.NotFound();
+
+                return Results.Ok(SessionStateResponseMapper.Map(snapshot));
+            })
+            .WithName("PausePlayback");
+
+        // STOP: INVALIDATE GENERATION AND RESET POSITION
+        group.MapPost(
+            "/playback/stop",
+            (Guid sessionId, ReplaySessionManager manager) =>
+            {
+                if (!manager.TryStopPlaybackWithSnapshot(sessionId, out var snapshot) ||
+                    snapshot is null)
+                    return Results.NotFound();
+
+                return Results.Ok(SessionStateResponseMapper.Map(snapshot));
+            })
+            .WithName("StopPlayback");
 
         return app;
     }
