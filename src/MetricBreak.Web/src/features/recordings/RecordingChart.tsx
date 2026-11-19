@@ -33,6 +33,7 @@ interface RecordingChartProps {
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
   currentSequence: number | null;
+  currentTimestampNanoseconds?: number | string | null;
   onSeek: (sequence: number) => void;
   onScrubStart: () => void;
   onScrubEnd: (sequence: number) => void;
@@ -84,6 +85,7 @@ export function RecordingChart({
   channels,
   selectedChannelIds,
   currentSequence,
+  currentTimestampNanoseconds,
   onSeek,
   onScrubStart,
   onScrubEnd,
@@ -707,6 +709,23 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           <Typography variant="caption" color="text.secondary" noWrap sx={{ mr: "auto", flexShrink: 0 }}>
             Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
             {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
+          </Typography>
+        )}
+        {sampleCount > 0 && (
+          <Typography
+            variant="body2"
+            noWrap
+            sx={{ fontWeight: 400, color: "primary.main", fontVariantNumeric: "tabular-nums", flexShrink: 0, mx: 1 }}
+            title="Actual replay position (independent of chart page)"
+          >
+            Current sample: {currentSequence?.toLocaleString() ?? "—"}
+            {currentTimestampNanoseconds != null && (() => {
+              try {
+                const ms = Number(BigInt(currentTimestampNanoseconds) / 1_000_000n);
+                const date = new Date(ms);
+                return Number.isNaN(date.getTime()) ? "" : ` · ${date.toISOString().slice(11, 23)} UTC`;
+              } catch { return ""; }
+            })()}
           </Typography>
         )}
         {sampleCount > 0 && (

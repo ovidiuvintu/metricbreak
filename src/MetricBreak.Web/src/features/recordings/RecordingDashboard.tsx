@@ -88,6 +88,7 @@ export function RecordingDashboard() {
   const playbackSessionRef = useRef<string | null>(null);
   const scrubRef = useRef<{ sessionId: string; wasPlaying: boolean; pause: Promise<void> } | null>(null);
 
+
   const [breakpointBusy, setBreakpointBusy] = useState(false);
 
   const [loadError, setLoadError] = useState<string | null>(
@@ -789,8 +790,6 @@ export function RecordingDashboard() {
             noWrap
           >
             {session.sampleCount.toLocaleString()} samples
-            {" · "}
-            Sequence {session.currentSample?.sequence ?? "—"}
             {seeking ? " · Seeking..." : ""}
           </Typography>
         )}
@@ -876,6 +875,7 @@ export function RecordingDashboard() {
             currentSequence={
               session.currentSample?.sequence ?? null
             }
+            currentTimestampNanoseconds={session.currentSample?.timestampNanoseconds ?? null}
             onSeek={handleSeek}
             onScrubStart={handleScrubStart}
             onScrubEnd={(sequence) => void handleScrubEnd(sequence)}
