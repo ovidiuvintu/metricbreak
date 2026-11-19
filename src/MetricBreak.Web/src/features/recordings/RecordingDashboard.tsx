@@ -966,6 +966,9 @@ export function RecordingDashboard() {
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
+          overflowX: "hidden",
+          scrollbarGutter: "stable",
+          overscrollBehavior: "contain",
           display: inspectorTab === 0 ? "block" : "none",
         }}
       >
@@ -983,6 +986,9 @@ export function RecordingDashboard() {
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
+          overflowX: "hidden",
+          scrollbarGutter: "stable",
+          overscrollBehavior: "contain",
           display: inspectorTab === 1 ? "block" : "none",
         }}
       >
@@ -1009,6 +1015,9 @@ export function RecordingDashboard() {
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
+          overflowX: "hidden",
+          scrollbarGutter: "stable",
+          overscrollBehavior: "contain",
           display: inspectorTab === 2 ? "block" : "none",
         }}
       >

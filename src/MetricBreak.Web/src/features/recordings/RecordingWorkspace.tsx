@@ -233,6 +233,8 @@ export function RecordingWorkspace({
                     maxHeight: "60%",
                     resize: "vertical",
                     overflow: "auto",
+                    scrollbarGutter: "stable",
+                    overscrollBehavior: "contain",
                     borderTop: 1,
                     borderColor: "divider",
                     p: 1,
@@ -362,6 +364,8 @@ export function RecordingWorkspace({
                   minHeight: 0,
                   overflowY: "auto",
                   overflowX: "hidden",
+                  scrollbarGutter: "stable",
+                  overscrollBehavior: "contain",
                   p: 1,
                 }}
               >
