@@ -16,6 +16,7 @@ import {
   ButtonGroup,
   Box,
   CircularProgress,
+  Slider,
   Typography,
 } from "@mui/material";
 
@@ -33,6 +34,8 @@ interface RecordingChartProps {
   selectedChannelIds: string[];
   currentSequence: number | null;
   onSeek: (sequence: number) => void;
+  onScrubStart: () => void;
+  onScrubEnd: (sequence: number) => void;
 }
 
 type HoverDetails = {
@@ -82,6 +85,8 @@ export function RecordingChart({
   selectedChannelIds,
   currentSequence,
   onSeek,
+  onScrubStart,
+  onScrubEnd,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -102,6 +107,11 @@ export function RecordingChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hover, setHover] = useState<HoverDetails | null>(null);
+  const [cursorHovered, setCursorHovered] = useState(false);
+  const [previewSequence, setPreviewSequence] = useState<number | null>(null);
+  const dragRef = useRef<{ sequence: number } | null>(null);
+  const sliderScrubbingRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const tooltipsEnabledRef = useRef(true);
 
@@ -128,12 +138,16 @@ export function RecordingChart({
   // Keep the latest callback and sample range accessible
   // without re-registering chart listeners on each render.
   const onSeekRef = useRef(onSeek);
+  const onScrubStartRef = useRef(onScrubStart);
+  const onScrubEndRef = useRef(onScrubEnd);
   const samplesRef = useRef(samples);
   const currentSequenceRef = useRef(currentSequence);
   const channelsRef = useRef(channels);
   const selectedIdsRef = useRef(selectedChannelIds);
 
   onSeekRef.current = onSeek;
+  onScrubStartRef.current = onScrubStart;
+  onScrubEndRef.current = onScrubEnd;
   samplesRef.current = samples;
   currentSequenceRef.current = currentSequence;
   channelsRef.current = channels;
@@ -141,6 +155,8 @@ export function RecordingChart({
 
   // Track the last replay position independently of manual chart paging.
   // A page change must never be interpreted as a replay cursor movement.
+  // Manual page browsing is independent of the replay cursor.
+  const manualPageRef = useRef(false);
   const lastReplayPositionRef = useRef<{
     sessionId: string;
     sequence: number | null;
@@ -154,9 +170,14 @@ export function RecordingChart({
     lastReplayPositionRef.current = { sessionId, sequence: currentSequence };
 
     if (sessionChanged) {
+      manualPageRef.current = false;
+      dragRef.current = null;
+      setPreviewSequence(null);
       setSamples([]);
       setHover(null);
     }
+
+    if (dragRef.current || manualPageRef.current) return;
 
     // Manual Next/Previous page navigation does not change either value.
     if (!sessionChanged && !sequenceChanged) return;
@@ -242,17 +263,12 @@ export function RecordingChart({
     };
   }, []);
 
-  // A manual page change also moves the backend replay cursor to the
-  // first recorded sample on that page. Cursor-driven page following remains
-  // one-way: the effect above never calls onSeek.
+  // Browsing another chart page must not seek or invalidate playback.
+  // Keep the selected page visible until the user explicitly scrubs/seeks.
   const navigateToPage = (targetPage: number) => {
     if (loading || targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
-
-    const targetSequence = targetPage * PAGE_SIZE;
+    manualPageRef.current = true;
     setPageIndex(targetPage);
-    if (currentSequence !== targetSequence) {
-      onSeek(targetSequence);
-    }
   };
 
   const lineWidth = getLineWidth(samples.length);
@@ -314,10 +330,11 @@ export function RecordingChart({
 
     // The cursor position comes from backend replay state.
     // Attach it to the first visible telemetry series.
+    const cursorSequence = previewSequence ?? currentSequence;
     const replayCursor =
-      currentSequence === null ||
-      currentSequence < pageStart ||
-      currentSequence >= pageEnd ||
+      cursorSequence === null ||
+      cursorSequence < pageStart ||
+      cursorSequence >= pageEnd ||
       series.length === 0
         ? undefined
         : {
@@ -329,10 +346,10 @@ export function RecordingChart({
             },
             lineStyle: {
               color: chartTheme.cursorColor,
-              width: 2,
+              width: cursorHovered || previewSequence !== null ? 4 : 2,
               type: "dashed" as const,
             },
-            data: [{ xAxis: currentSequence }],
+            data: [{ xAxis: cursorSequence }],
           };
 
     const chartSeries = series.map((item, index) =>
@@ -500,6 +517,8 @@ export function RecordingChart({
       selectedChannelIds,
       chartTheme,
       currentSequence,
+      cursorHovered,
+      previewSequence,
       lineWidth,
       pageStart,
       pageEnd,
@@ -516,66 +535,53 @@ export function RecordingChart({
 
       const renderer = chart.getZr();
 
-      const handleClick = (event: {
-        offsetX: number;
-        offsetY: number;
-      }) => {
-        const pixel: [number, number] = [
-          event.offsetX,
-          event.offsetY,
-        ];
+             const sequenceAt = (x: number, y: number): number | null => {
+         const pixel: [number, number] = [x, y];
+         if (!chart.containPixel({ gridIndex: 0 }, pixel)) return null;
+         const coords = chart.convertFromPixel({ gridIndex: 0 }, pixel) as number[];
+         const loaded = samplesRef.current;
+         if (!loaded.length || !Number.isFinite(coords[0])) return null;
+         // Sequence is authoritative even when timestamps are identical.
+         return Math.max(loaded[0].sequence,
+           Math.min(loaded[loaded.length - 1].sequence, Math.round(coords[0])));
+       };
 
-        if (
-          !chart.containPixel(
-            { gridIndex: 0 },
-            pixel,
-          )
-        ) {
-          return;
-        }
+       const handleDown = (event: { offsetX: number; offsetY: number }) => {
+         const sequence = sequenceAt(event.offsetX, event.offsetY);
+         if (sequence === null) return;
+         // Only grab near the replay cursor; preserve ordinary chart pan/zoom.
+         const cursor = currentSequenceRef.current;
+         if (cursor === null) return;
+         const cursorPixel = chart.convertToPixel({ gridIndex: 0 }, [cursor, 0]) as number[];
+         if (!Number.isFinite(cursorPixel[0]) || Math.abs(event.offsetX - cursorPixel[0]) > 12) return;
+         dragRef.current = { sequence };
+         suppressClickRef.current = true;
+         setPreviewSequence(sequence);
+         setHover(null);
+         onScrubStartRef.current();
+       };
 
-        const coordinates = chart.convertFromPixel(
-          { gridIndex: 0 },
-          pixel,
-        ) as number[];
+       const handleUp = () => {
+         const drag = dragRef.current;
+         if (!drag) return;
+         dragRef.current = null;
+         setPreviewSequence(null);
+         manualPageRef.current = false;
+         onScrubEndRef.current(drag.sequence);
+       };
 
-        const rawSequence = coordinates[0];
+       const handleClick = (event: { offsetX: number; offsetY: number }) => {
+         if (suppressClickRef.current) {
+           suppressClickRef.current = false;
+           return;
+         }
+         const sequence = sequenceAt(event.offsetX, event.offsetY);
+         if (sequence !== null && sequence !== currentSequenceRef.current) {
+           onSeekRef.current(sequence);
+         }
+       };
 
-        if (!Number.isFinite(rawSequence)) {
-          return;
-        }
-
-        const loadedSamples = samplesRef.current;
-
-        if (loadedSamples.length === 0) {
-          return;
-        }
-
-        const firstSequence =
-          loadedSamples[0].sequence;
-
-        const lastSequence =
-          loadedSamples[loadedSamples.length - 1]
-            .sequence;
-
-        const sequence = Math.max(
-          firstSequence,
-          Math.min(
-            lastSequence,
-            Math.round(rawSequence),
-          ),
-        );
-
-        if (sequence === currentSequenceRef.current) {
-          return;
-        }
-
-        console.debug("Chart clicked:", sequence);
-
-        onSeekRef.current(sequence);
-      };
-
-      const handleMove = (event: { offsetX: number; offsetY: number }) => {
+const handleMove = (event: { offsetX: number; offsetY: number }) => {
         if (!tooltipsEnabledRef.current) return;
         const pixel: [number, number] = [event.offsetX, event.offsetY];
         if (!chart.containPixel({ gridIndex: 0 }, pixel)) {
@@ -619,16 +625,25 @@ export function RecordingChart({
         });
       };
 
-      const handleLeave = () => setHover(null);
+      const handleLeave = () => {
+        setHover(null);
+        setCursorHovered(false);
+      };
 
       listenerCleanupRef.current?.();
+      renderer.on("mousedown", handleDown);
+      renderer.on("mouseup", handleUp);
       renderer.on("click", handleClick);
       renderer.on("mousemove", handleMove);
       renderer.on("globalout", handleLeave);
+      window.addEventListener("mouseup", handleUp);
       listenerCleanupRef.current = () => {
+        renderer.off("mousedown", handleDown);
+        renderer.off("mouseup", handleUp);
         renderer.off("click", handleClick);
         renderer.off("mousemove", handleMove);
         renderer.off("globalout", handleLeave);
+        window.removeEventListener("mouseup", handleUp);
       };
 
       // Remove only our listener when this chart is
@@ -720,6 +735,43 @@ export function RecordingChart({
           Tooltips: {tooltipsEnabled ? "On" : "Off"}
         </Button>
       </Box>
+
+      {sampleCount > 0 && (
+        <Box sx={{ px: 2.5, pb: 0.5, display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+            Scrub cursor
+          </Typography>
+          <Slider
+            size="small"
+            aria-label="Drag replay cursor"
+            min={pageStart}
+            max={Math.max(pageStart + 1, pageEnd - 1)}
+            step={1}
+            value={Math.max(pageStart, Math.min(pageEnd - 1, previewSequence ?? currentSequence ?? pageStart))}
+            disabled={loading || samples.length === 0}
+            valueLabelDisplay="auto"
+            valueLabelFormat={(value) => `Sequence ${value.toLocaleString()}`}
+            onChange={(_, value) => {
+              if (!sliderScrubbingRef.current) {
+                sliderScrubbingRef.current = true;
+                onScrubStartRef.current();
+              }
+              setPreviewSequence(value as number);
+            }}
+            onChangeCommitted={(_, value) => {
+              if (!sliderScrubbingRef.current) onScrubStartRef.current();
+              sliderScrubbingRef.current = false;
+              setPreviewSequence(null);
+              manualPageRef.current = false;
+              onScrubEndRef.current(value as number);
+            }}
+            sx={{ flex: 1, minWidth: 80, '& .MuiSlider-thumb': { width: 18, height: 18 } }}
+          />
+          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 62, textAlign: "right" }}>
+            {(previewSequence ?? currentSequence ?? pageStart).toLocaleString()}
+          </Typography>
+        </Box>
+      )}
 
       <Box
         sx={{
