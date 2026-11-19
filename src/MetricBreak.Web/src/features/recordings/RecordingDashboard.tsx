@@ -353,12 +353,17 @@ export function RecordingDashboard() {
     );
   };
 
+  // Chart click-to-seek uses the same playback-aware transaction as dragging.
+  // A running recording resumes from the selected sample; a paused or stopped
+  // recording stays in its previous playback state.
   const handleSeek = async (sequence: number) => {
-    await executeReplay(
-      async (sessionId) =>
-        (await replayApi.seek(sessionId, sequence)).session,
-      "Unable to seek replay.",
-    );
+    if (!session || scrubRef.current || seekInProgressRef.current ||
+        playbackBusyRef.current || breakpointInProgressRef.current || loading) {
+      return;
+    }
+
+    handleScrubStart();
+    await handleScrubEnd(sequence);
   };
 
   const handleContinue = async () => {
@@ -426,67 +431,112 @@ export function RecordingDashboard() {
       playbackStateRef.current = "playing";
       setPlaybackState("playing");
 
-      // One sample per request: never skip a breakpoint or recorded timestamp.
-      // Delays use the next recorded sample's timestamp, not a fixed sample rate.
-      const advance = async (current: SessionState): Promise<void> => {
-        if (epoch !== playbackEpochRef.current) return;
-        try {
-          const nextSequence = (current.currentSample?.sequence ?? 0) + 1;
-          const next = await recordingApi.getSamples(sessionId, nextSequence - 1, 2);
-          if (epoch !== playbackEpochRef.current) return;
-          const nextSample = next.samples.find(item => item.sequence === nextSequence);
-          if (!nextSample) throw new Error("Next recorded sample was not found.");
+       // V2: schedule against an absolute recorded-time clock. Network and
+       // rendering latency do not accumulate into the replay timeline.
+       // The backend evaluates every intermediate sample for breakpoints.
+       const maxBatch = 64;
+       const fetchSize = 256;
+       const minimumUiIntervalMs = 16;
+       const clockStartMs = performance.now();
+       let recordingStartNs: bigint | null = null;
+       let cache = new Map<number, bigint>();
+       let cacheStart = -1;
+       let cacheEnd = -1;
 
-          // BigInt preserves nanosecond precision for long recordings.
-          const currentRecorded = next.samples.find(item => item.sequence === nextSequence - 1);
-          if (!currentRecorded) throw new Error("Current recorded sample was not found.");
-          const currentTimestamp = BigInt(currentRecorded.timestampNanoseconds);
-          const nextTimestamp = BigInt(nextSample.timestampNanoseconds);
-          const difference = nextTimestamp - currentTimestamp;
-          const delayMs = difference > 0n ? Number(difference / 1000000n) : 0;
-          const wait = Math.max(0, Math.min(delayMs, 2147483647));
+       const timestampAt = async (sequence: number): Promise<bigint> => {
+         if (sequence < cacheStart || sequence >= cacheEnd || !cache.has(sequence)) {
+           const start = Math.max(0, sequence - 1);
+           const result = await recordingApi.getSamples(sessionId, start, fetchSize);
+           if (epoch !== playbackEpochRef.current) throw new Error("Playback cancelled.");
+           cache = new Map(result.samples.map(sample => [
+             sample.sequence, BigInt(sample.timestampNanoseconds),
+           ]));
+           cacheStart = start;
+           cacheEnd = start + fetchSize;
+         }
+         const timestamp = cache.get(sequence);
+         if (timestamp === undefined) throw new Error(`Recorded sample ${sequence} was not found.`);
+         return timestamp;
+       };
 
-          playbackTimerRef.current = setTimeout(async () => {
-            playbackTimerRef.current = null;
-            if (epoch !== playbackEpochRef.current) return;
-            try {
-              const response = await replayApi.advancePlayback(sessionId, generation, 1);
-              if (epoch !== playbackEpochRef.current ||
-                  activeSessionIdRef.current !== sessionId) return;
+       const advance = async (current: SessionState): Promise<void> => {
+         if (epoch !== playbackEpochRef.current) return;
+         try {
+           const sequence = current.currentSample?.sequence ?? 0;
+           if (recordingStartNs === null) {
+             recordingStartNs = await timestampAt(sequence);
+           }
+           if (epoch !== playbackEpochRef.current) return;
 
-              setSession(previous => previous?.sessionId === sessionId
-                ? response.session : previous);
+           // Compare relative nanoseconds using BigInt to avoid precision loss
+           // for absolute timestamps. Milliseconds are sufficient for timers.
+           const elapsedMs = performance.now() - clockStartMs;
+           const dueNs = recordingStartNs + BigInt(Math.floor(elapsedMs * 1_000_000));
+           let count = 0;
+           let nextTimestamp: bigint | null = null;
+           const lastSequence = current.sampleCount - 1;
 
-              if (response.hitBreakpoint || response.endOfRecording ||
-                  response.samplesAdvanced === 0) {
-                playbackRunningRef.current = false;
-                playbackStateRef.current = response.hitBreakpoint ? "paused" : "stopped";
-                setPlaybackState(playbackStateRef.current);
-                if (response.hitBreakpoint) {
-                  console.debug("Playback stopped at breakpoint:", response.stop);
-                }
-                return;
-              }
-              void advance(response.session);
-            } catch (error) {
-              if (epoch !== playbackEpochRef.current) return;
-              cancelLocalPlayback();
-              playbackStateRef.current = "paused";
-              setPlaybackState("paused");
-              setLoadError(errorMessage(error, "Unable to advance playback."));
-            }
-          }, wait);
-        } catch (error) {
-          if (epoch !== playbackEpochRef.current) return;
-          cancelLocalPlayback();
-          playbackStateRef.current = "paused";
-          setPlaybackState("paused");
-          setLoadError(errorMessage(error, "Unable to schedule playback."));
-        }
-      };
+           while (count < maxBatch && sequence + count < lastSequence) {
+             const timestamp = await timestampAt(sequence + count + 1);
+             if (epoch !== playbackEpochRef.current) return;
+             if (timestamp > dueNs) {
+               nextTimestamp = timestamp;
+               break;
+             }
+             count++;
+           }
 
-      void advance(targetSession);
-    } catch (error) {
+           if (count === 0) {
+             if (sequence >= lastSequence) {
+               playbackRunningRef.current = false;
+               playbackStateRef.current = "stopped";
+               setPlaybackState("stopped");
+               return;
+             }
+             if (nextTimestamp === null) nextTimestamp = await timestampAt(sequence + 1);
+             if (epoch !== playbackEpochRef.current) return;
+             const remainingNs = nextTimestamp - dueNs;
+             const delayMs = remainingNs > 0n ? Number(remainingNs / 1_000_000n) : 0;
+             playbackTimerRef.current = setTimeout(() => {
+               playbackTimerRef.current = null;
+               void advance(current);
+             }, Math.max(1, Math.min(delayMs, 2_147_483_647)));
+             return;
+           }
+
+           const response = await replayApi.advancePlayback(sessionId, generation, count);
+           if (epoch !== playbackEpochRef.current ||
+               activeSessionIdRef.current !== sessionId) return;
+
+           setSession(previous => previous?.sessionId === sessionId
+             ? response.session : previous);
+
+           if (response.hitBreakpoint || response.endOfRecording ||
+               response.samplesAdvanced === 0) {
+             playbackRunningRef.current = false;
+             playbackStateRef.current = response.hitBreakpoint ? "paused" : "stopped";
+             setPlaybackState(playbackStateRef.current);
+             if (response.hitBreakpoint) {
+               console.debug("Playback stopped at breakpoint:", response.stop);
+             }
+             return;
+           }
+
+           // Keep rendering responsive even when catching up on dense data.
+           playbackTimerRef.current = setTimeout(() => {
+             playbackTimerRef.current = null;
+             void advance(response.session);
+           }, minimumUiIntervalMs);
+         } catch (error) {
+           if (epoch !== playbackEpochRef.current) return;
+           cancelLocalPlayback();
+           playbackStateRef.current = "paused";
+           setPlaybackState("paused");
+           setLoadError(errorMessage(error, "Unable to advance playback."));
+         }
+       };
+
+      void advance(targetSession);    } catch (error) {
       if (epoch === playbackEpochRef.current) {
         playbackStateRef.current = "stopped";
         setPlaybackState("stopped");
@@ -549,8 +599,10 @@ export function RecordingDashboard() {
     const sessionId = session.sessionId;
     const wasPlaying = playbackRunningRef.current;
     cancelLocalPlayback();
-    playbackStateRef.current = "paused";
-    setPlaybackState("paused");
+    if (wasPlaying) {
+      playbackStateRef.current = "paused";
+      setPlaybackState("paused");
+    }
     // The backend pause is serialized before seek, even if release is immediate.
     const pause = wasPlaying
       ? replayApi.pausePlayback(sessionId).then(() => undefined)
@@ -564,6 +616,7 @@ export function RecordingDashboard() {
     scrubRef.current = null;
     let resumed = false;
     playbackBusyRef.current = true;
+    seekInProgressRef.current = true;
     setPlaybackBusy(true);
     setSeeking(true);
     try {
@@ -575,6 +628,7 @@ export function RecordingDashboard() {
       // Keep stopped/paused semantics if the recording wasn't playing.
       if (!scrub.wasPlaying) return;
       playbackBusyRef.current = false;
+      seekInProgressRef.current = false;
       setPlaybackBusy(false);
       setSeeking(false);
       await handlePlay(result.session);
@@ -588,6 +642,7 @@ export function RecordingDashboard() {
     } finally {
       if (!resumed) {
         playbackBusyRef.current = false;
+        seekInProgressRef.current = false;
         setPlaybackBusy(false);
         setSeeking(false);
       }
