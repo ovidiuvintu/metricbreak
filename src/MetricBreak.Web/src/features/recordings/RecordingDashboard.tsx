@@ -42,6 +42,7 @@ import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 
 type InspectorTab = 0 | 1 | 2;
+type PlaybackState = "stopped" | "playing" | "paused";
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -77,6 +78,14 @@ export function RecordingDashboard() {
 
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
+  const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
+  const [playbackBusy, setPlaybackBusy] = useState(false);
+  const playbackEpochRef = useRef(0);
+  const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackBusyRef = useRef(false);
+  const playbackRunningRef = useRef(false);
+  const playbackStateRef = useRef<PlaybackState>("stopped");
+  const playbackSessionRef = useRef<string | null>(null);
 
   const [breakpointsLoading, setBreakpointsLoading] =
     useState(false);
@@ -108,6 +117,24 @@ export function RecordingDashboard() {
   const loadVersionRef = useRef(0);
   const seekInProgressRef = useRef(false);
   const breakpointInProgressRef = useRef(false);
+
+  // Cancels scheduled work and prevents older responses from publishing state.
+  // Backend generation tokens independently reject stale advances.
+  const cancelLocalPlayback = () => {
+    ++playbackEpochRef.current;
+    playbackRunningRef.current = false;
+    if (playbackTimerRef.current !== null) {
+      clearTimeout(playbackTimerRef.current);
+      playbackTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => {
+    ++playbackEpochRef.current;
+    if (playbackTimerRef.current !== null) {
+      clearTimeout(playbackTimerRef.current);
+    }
+  }, []);
 
   // Fetch the immediately preceding *recorded* sample only when inspecting Values.
   // A cancellation flag prevents older seeks from publishing stale comparisons.
@@ -154,6 +181,10 @@ export function RecordingDashboard() {
   const loadRecording = async (
     sessionId: string,
   ): Promise<boolean> => {
+    cancelLocalPlayback();
+    playbackSessionRef.current = null;
+    playbackStateRef.current = "stopped";
+    setPlaybackState("stopped");
     const version = ++loadVersionRef.current;
 
     setLoading(true);
@@ -366,6 +397,150 @@ export function RecordingDashboard() {
   };
 
   // --------------------------------------------------
+  // Continuous playback (forward, 1x recorded time)
+  // --------------------------------------------------
+
+  const handlePlay = async () => {
+    if (!session || playbackRunningRef.current || playbackBusyRef.current ||
+        seekInProgressRef.current || breakpointInProgressRef.current || loading ||
+        session.sampleCount === 0 ||
+        (session.currentSample?.sequence ?? 0) >= session.sampleCount - 1) {
+      return;
+    }
+
+    const sessionId = session.sessionId;
+    const epoch = ++playbackEpochRef.current;
+    playbackBusyRef.current = true;
+    setPlaybackBusy(true);
+    setLoadError(null);
+
+    try {
+      const { generation } = await replayApi.startPlayback(sessionId);
+      if (epoch !== playbackEpochRef.current ||
+          activeSessionIdRef.current !== sessionId) return;
+
+      playbackSessionRef.current = sessionId;
+      playbackRunningRef.current = true;
+      playbackStateRef.current = "playing";
+      setPlaybackState("playing");
+
+      // One sample per request: never skip a breakpoint or recorded timestamp.
+      // Delays use the next recorded sample's timestamp, not a fixed sample rate.
+      const advance = async (current: SessionState): Promise<void> => {
+        if (epoch !== playbackEpochRef.current) return;
+        try {
+          const nextSequence = (current.currentSample?.sequence ?? 0) + 1;
+          const next = await recordingApi.getSamples(sessionId, nextSequence - 1, 2);
+          if (epoch !== playbackEpochRef.current) return;
+          const nextSample = next.samples.find(item => item.sequence === nextSequence);
+          if (!nextSample) throw new Error("Next recorded sample was not found.");
+
+          // BigInt preserves nanosecond precision for long recordings.
+          const currentRecorded = next.samples.find(item => item.sequence === nextSequence - 1);
+          if (!currentRecorded) throw new Error("Current recorded sample was not found.");
+          const currentTimestamp = BigInt(currentRecorded.timestampNanoseconds);
+          const nextTimestamp = BigInt(nextSample.timestampNanoseconds);
+          const difference = nextTimestamp - currentTimestamp;
+          const delayMs = difference > 0n ? Number(difference / 1000000n) : 0;
+          const wait = Math.max(0, Math.min(delayMs, 2147483647));
+
+          playbackTimerRef.current = setTimeout(async () => {
+            playbackTimerRef.current = null;
+            if (epoch !== playbackEpochRef.current) return;
+            try {
+              const response = await replayApi.advancePlayback(sessionId, generation, 1);
+              if (epoch !== playbackEpochRef.current ||
+                  activeSessionIdRef.current !== sessionId) return;
+
+              setSession(previous => previous?.sessionId === sessionId
+                ? response.session : previous);
+
+              if (response.hitBreakpoint || response.endOfRecording ||
+                  response.samplesAdvanced === 0) {
+                playbackRunningRef.current = false;
+                playbackStateRef.current = response.hitBreakpoint ? "paused" : "stopped";
+                setPlaybackState(playbackStateRef.current);
+                if (response.hitBreakpoint) {
+                  console.debug("Playback stopped at breakpoint:", response.stop);
+                }
+                return;
+              }
+              void advance(response.session);
+            } catch (error) {
+              if (epoch !== playbackEpochRef.current) return;
+              cancelLocalPlayback();
+              playbackStateRef.current = "paused";
+              setPlaybackState("paused");
+              setLoadError(errorMessage(error, "Unable to advance playback."));
+            }
+          }, wait);
+        } catch (error) {
+          if (epoch !== playbackEpochRef.current) return;
+          cancelLocalPlayback();
+          playbackStateRef.current = "paused";
+          setPlaybackState("paused");
+          setLoadError(errorMessage(error, "Unable to schedule playback."));
+        }
+      };
+
+      void advance(session);
+    } catch (error) {
+      if (epoch === playbackEpochRef.current) {
+        playbackStateRef.current = "stopped";
+        setPlaybackState("stopped");
+        setLoadError(errorMessage(error, "Unable to start playback."));
+      }
+    } finally {
+      playbackBusyRef.current = false;
+      setPlaybackBusy(false);
+    }
+  };
+
+  const handlePause = async () => {
+    if (!session || !playbackRunningRef.current || playbackBusyRef.current) return;
+    const sessionId = session.sessionId;
+    cancelLocalPlayback();
+    playbackBusyRef.current = true;
+    setPlaybackBusy(true);
+    try {
+      const updated = await replayApi.pausePlayback(sessionId);
+      if (activeSessionIdRef.current === sessionId) {
+        setSession(updated);
+        playbackStateRef.current = "paused";
+        setPlaybackState("paused");
+      }
+    } catch (error) {
+      if (activeSessionIdRef.current === sessionId)
+        setLoadError(errorMessage(error, "Unable to pause playback."));
+    } finally {
+      playbackBusyRef.current = false;
+      setPlaybackBusy(false);
+    }
+  };
+
+  const handleStop = async () => {
+    if (!session || playbackBusyRef.current) return;
+    const sessionId = session.sessionId;
+    cancelLocalPlayback();
+    playbackBusyRef.current = true;
+    setPlaybackBusy(true);
+    try {
+      const updated = await replayApi.stopPlayback(sessionId);
+      if (activeSessionIdRef.current === sessionId) {
+        setSession(updated);
+        playbackStateRef.current = "stopped";
+        setPlaybackState("stopped");
+      }
+    } catch (error) {
+      if (activeSessionIdRef.current === sessionId)
+        setLoadError(errorMessage(error, "Unable to stop playback."));
+    } finally {
+      playbackBusyRef.current = false;
+      setPlaybackBusy(false);
+    }
+  };
+
+  // --------------------------------------------------
   // Breakpoint operations
   // --------------------------------------------------
 
@@ -468,7 +643,11 @@ export function RecordingDashboard() {
     <ReplayControls
       currentSequence={session.currentSample?.sequence ?? 0}
       sampleCount={session.sampleCount}
-      busy={loading || seeking || breakpointBusy}
+      busy={loading || seeking || breakpointBusy || playbackBusy}
+      playbackState={playbackState}
+      onPlay={() => void handlePlay()}
+      onPause={() => void handlePause()}
+      onStop={() => void handleStop()}
       onStepForward={handleStepForward}
       onStepBackward={handleStepBackward}
       onReset={handleReset}
@@ -521,7 +700,7 @@ export function RecordingDashboard() {
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
             disabled={
-              loading || seeking || breakpointBusy
+              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
             }
           >
             Refresh
@@ -534,7 +713,7 @@ export function RecordingDashboard() {
           startIcon={<UploadFileIcon />}
           onClick={() => setDialogOpen(true)}
           disabled={
-            loading || seeking || breakpointBusy
+            loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
           }
         >
           Import CSV
@@ -707,7 +886,7 @@ export function RecordingDashboard() {
             compositeBreakpoints={compositeBreakpoints}
             channels={channels}
             loading={loading}
-            busy={breakpointBusy || seeking}
+            busy={breakpointBusy || seeking || playbackRunningRef.current || playbackBusy}
             error={breakpointError}
             onAdd={() => setBreakpointDialogOpen(true)}
             onAddComposite={() => setCompositeDialogOpen(true)}
@@ -733,7 +912,7 @@ export function RecordingDashboard() {
             previousSample={previousWatchSample}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
-            navigationBusy={loading || seeking || breakpointBusy}
+            navigationBusy={loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy}
             onNextChange={(channelId) => void handleChangeNavigation(channelId, "next")}
             onPreviousChange={(channelId) => void handleChangeNavigation(channelId, "previous")}
           />

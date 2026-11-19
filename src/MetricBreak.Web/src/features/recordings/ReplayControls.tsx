@@ -10,6 +10,9 @@ import SkipPreviousIcon from "@mui/icons-material/SkipPrevious";
 import NavigateBeforeIcon from "@mui/icons-material/NavigateBefore";
 import NavigateNextIcon from "@mui/icons-material/NavigateNext";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import PauseIcon from "@mui/icons-material/Pause";
+import StopIcon from "@mui/icons-material/Stop";
+import FastForwardIcon from "@mui/icons-material/FastForward";
 
 interface ReplayControlsProps {
   currentSequence: number;
@@ -19,6 +22,10 @@ interface ReplayControlsProps {
   onStepBackward: () => void;
   onReset: () => void;
   onContinue: () => void;
+  playbackState: "stopped" | "playing" | "paused";
+  onPlay: () => void;
+  onPause: () => void;
+  onStop: () => void;
 }
 
 export function ReplayControls({
@@ -29,6 +36,10 @@ export function ReplayControls({
   onStepBackward,
   onReset,
   onContinue,
+  playbackState,
+  onPlay,
+  onPause,
+  onStop,
 }: ReplayControlsProps) {
   const atStart = currentSequence <= 0;
   const atEnd =
@@ -50,7 +61,7 @@ export function ReplayControls({
           <span>
             <IconButton
               size="small"
-              disabled={busy || atStart}
+              disabled={busy || playbackState === "playing" || atStart}
               onClick={onReset}
               aria-label="Reset replay"
             >
@@ -63,7 +74,7 @@ export function ReplayControls({
           <span>
             <IconButton
               size="small"
-              disabled={busy || atStart}
+              disabled={busy || playbackState === "playing" || atStart}
               onClick={onStepBackward}
               aria-label="Step backward"
             >
@@ -76,7 +87,7 @@ export function ReplayControls({
           <span>
             <IconButton
               size="small"
-              disabled={busy || atEnd}
+              disabled={busy || playbackState === "playing" || atEnd}
               onClick={onStepForward}
               aria-label="Step forward"
             >
@@ -89,11 +100,36 @@ export function ReplayControls({
           <span>
             <IconButton
               size="small"
-              disabled={busy || atEnd}
+              disabled={busy || playbackState === "playing" || atEnd}
               onClick={onContinue}
               aria-label="Continue replay"
             >
-                <PlayArrowIcon />
+                <FastForwardIcon />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title={playbackState === "playing" ? "Pause playback" : "Play recording"}>
+          <span>
+            <IconButton
+              size="small"
+              disabled={busy || (playbackState !== "playing" && atEnd)}
+              onClick={playbackState === "playing" ? onPause : onPlay}
+              aria-label={playbackState === "playing" ? "Pause playback" : "Play recording"}
+            >
+              {playbackState === "playing" ? <PauseIcon /> : <PlayArrowIcon />}
+            </IconButton>
+          </span>
+        </Tooltip>
+
+        <Tooltip title="Stop playback and reset">
+          <span>
+            <IconButton
+              size="small"
+              disabled={busy || (playbackState === "stopped" && atStart)}
+              onClick={onStop}
+              aria-label="Stop playback"
+            >
+              <StopIcon />
             </IconButton>
           </span>
         </Tooltip>
