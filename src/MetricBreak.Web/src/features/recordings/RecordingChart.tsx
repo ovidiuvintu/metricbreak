@@ -165,6 +165,7 @@ export function RecordingChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hover, setHover] = useState<HoverDetails | null>(null);
+  const [inspectedSample, setInspectedSample] = useState<HoverDetails | null>(null);
   const [cursorHovered, setCursorHovered] = useState(false);
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
   const dragRef = useRef<{ sequence: number } | null>(null);
@@ -199,6 +200,7 @@ export function RecordingChart({
       samples[0],
     );
     setHover(null);
+    setInspectedSample(null);
     setChartMenu({
       clientX: event.clientX,
       clientY: event.clientY,
@@ -214,7 +216,7 @@ export function RecordingChart({
     const sample = samples.find((item) => item.sequence === chartMenu.sequence);
     if (!sample) return;
     const selected = new Set(selectedChannelIds);
-    setHover({
+    setInspectedSample({
       sequence: sample.sequence,
       timestamp: formatTimestamp(sample.timestampNanoseconds),
       x: chartMenu.x,
@@ -228,6 +230,8 @@ export function RecordingChart({
   };
 
 
+
+  const displayedSample = inspectedSample ?? (tooltipsEnabled ? hover : null);
 
   const toggleTooltips = () => {
     const next = !tooltipsEnabledRef.current;
@@ -705,6 +709,7 @@ export function RecordingChart({
        };
 
        const handleClick = (event: { offsetX: number; offsetY: number }) => {
+         setInspectedSample(null);
          if (suppressClickRef.current) {
            suppressClickRef.current = false;
            return;
@@ -945,7 +950,16 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         ) : samples.length > 0 ? (
           <>
-          <Box sx={{ height: "100%", width: "100%" }} onContextMenu={handlePlotContextMenu}>
+          <Box
+            sx={{
+              height: "100%",
+              width: "100%",
+              "& canvas": {
+                cursor: "default !important",
+              },
+            }}
+            onContextMenu={handlePlotContextMenu}
+          >
           <ReactECharts
             key={`${sessionId}:${pageStart}`}
             ref={chartRef}
@@ -956,18 +970,18 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             style={{
               height: "100%",
               width: "100%",
-              cursor: "crosshair",
+              cursor: "default",
             }}
           />
           </Box>
-          {tooltipsEnabled && hover && (
+          {displayedSample && (
             <Box
               sx={{
                 position: "absolute",
                 zIndex: 10,
                 pointerEvents: "none",
-                left: Math.max(8, Math.min(hover.x + 14, (containerRef.current?.clientWidth ?? 450) - 260)),
-                top: Math.max(8, Math.min(hover.y + 14, (containerRef.current?.clientHeight ?? 400) - 180)),
+                left: Math.max(8, Math.min(displayedSample.x + 14, (containerRef.current?.clientWidth ?? 450) - 260)),
+                top: Math.max(8, Math.min(displayedSample.y + 14, (containerRef.current?.clientHeight ?? 400) - 180)),
                 width: 240,
                 maxHeight: "70%",
                 overflowY: "auto",
@@ -979,13 +993,20 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 boxShadow: 4,
               }}
             >
-              <Typography variant="caption" sx={{ display: "block", fontWeight: 700 }}>
-                Sequence {hover.sequence.toLocaleString()}
-              </Typography>
+              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                  Sequence {displayedSample.sequence.toLocaleString()}
+                </Typography>
+                {inspectedSample && (
+                  <Button size="small" sx={{ minWidth: 0, p: 0.25, pointerEvents: "auto" }} onClick={() => setInspectedSample(null)} aria-label="Close sample inspection">
+                    Close
+                  </Button>
+                )}
+              </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                {hover.timestamp}
+                {displayedSample.timestamp}
               </Typography>
-              {hover.values.map((entry) => (
+              {displayedSample.values.map((entry) => (
                 <Box key={entry.name} sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
                   <Typography variant="caption" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
                   <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>{entry.value}</Typography>
