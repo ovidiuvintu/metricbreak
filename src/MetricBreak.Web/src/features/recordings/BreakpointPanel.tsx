@@ -40,7 +40,9 @@ export function BreakpointPanel({
         <span>
           <Switch size="small" checked={enabled} disabled={busy}
             onChange={(_, checked) => onSetEnabled(id, checked)}
-            inputProps={{ "aria-label": `Toggle ${label}` }} />
+            slotProps={{
+              input: { "aria-label": `Toggle ${label}` },
+            }} />
         </span>
       </Tooltip>
       <Tooltip title="Delete breakpoint">
@@ -80,7 +82,7 @@ export function BreakpointPanel({
             <Box key={b.breakpointId} sx={{ display: "flex", alignItems: "center", gap: 0.5, py: 1, opacity: b.isEnabled ? 1 : 0.6 }}>
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Tooltip title={format(b)}>
-                  <Typography variant="body2" fontWeight={500} noWrap>{names.get(b.channelId) ?? b.channelId}</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>{names.get(b.channelId) ?? b.channelId}</Typography>
                 </Tooltip>
                 <Typography variant="caption" color="text.secondary">{symbols[b.operator]} {b.threshold.toLocaleString()}</Typography>
               </Box>
@@ -92,7 +94,13 @@ export function BreakpointPanel({
             return (
               <Box key={b.breakpointId} sx={{ display: "flex", alignItems: "center", gap: 0.5, py: 1, opacity: b.isEnabled ? 1 : 0.6 }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="caption" fontWeight={700} color="primary">COMPOSITE · {b.logicalOperator.toUpperCase()}</Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{ fontWeight: 700 }}
+                    color="primary"
+                  >
+                    COMPOSITE · {b.logicalOperator.toUpperCase()}
+                  </Typography>
                   <Tooltip title={expression}>
                     <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{expression}</Typography>
                   </Tooltip>

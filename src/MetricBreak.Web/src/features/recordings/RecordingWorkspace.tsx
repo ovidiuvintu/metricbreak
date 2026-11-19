@@ -193,7 +193,7 @@ export function RecordingWorkspace({
               >
                 <Typography
                   variant="subtitle2"
-                  fontWeight={600}
+                  sx={{ fontWeight: 600 }}
                 >
                   Current Values
                 </Typography>
@@ -319,7 +319,7 @@ export function RecordingWorkspace({
             {!channelsCollapsed && (
               <Typography
                 variant="subtitle2"
-                fontWeight={600}
+                sx={{ fontWeight: 600 }}
               >
                 Inspector
               </Typography>

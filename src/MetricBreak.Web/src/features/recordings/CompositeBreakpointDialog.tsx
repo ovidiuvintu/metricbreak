@@ -82,7 +82,7 @@ export function CompositeBreakpointDialog({
           </ToggleButtonGroup>
           {conditions.map((c, index) => (
             <Box key={c.key} sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 1 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+              <Stack direction="row" sx={{ alignItems: "center", justifyContent: "space-between", mb: 1 }}>
                 <Typography variant="subtitle2">Condition {index + 1}</Typography>
                 <IconButton size="small" aria-label={`Remove condition ${index + 1}`}
                   disabled={busy || conditions.length <= 2}

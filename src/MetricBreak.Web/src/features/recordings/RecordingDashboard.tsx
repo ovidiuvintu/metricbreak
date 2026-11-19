@@ -88,9 +88,6 @@ export function RecordingDashboard() {
   const playbackSessionRef = useRef<string | null>(null);
   const scrubRef = useRef<{ sessionId: string; wasPlaying: boolean; pause: Promise<void> } | null>(null);
 
-  const [breakpointsLoading, setBreakpointsLoading] =
-    useState(false);
-
   const [breakpointBusy, setBreakpointBusy] = useState(false);
 
   const [loadError, setLoadError] = useState<string | null>(
@@ -191,7 +188,6 @@ export function RecordingDashboard() {
     setLoading(true);
     setLoadError(null);
     setBreakpointError(null);
-    setBreakpointsLoading(true);
 
     try {
       const [loadedSession, loadedChannels, loadedBreakpoints] =
@@ -257,7 +253,6 @@ export function RecordingDashboard() {
     } finally {
       if (version === loadVersionRef.current) {
         setLoading(false);
-        setBreakpointsLoading(false);
       }
     }
   };
@@ -780,7 +775,7 @@ export function RecordingDashboard() {
       }}
     >
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="body2" fontWeight={600} noWrap>
+        <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
           {session
             ? session.recordingName
             : "Recording Workspace"}
@@ -801,7 +796,7 @@ export function RecordingDashboard() {
         )}
       </Box>
 
-      <Stack direction="row" spacing={1} flexShrink={0}>
+      <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
         {session && (
           <Button
             size="small"
@@ -906,7 +901,7 @@ export function RecordingDashboard() {
             }}
           />
 
-          <Typography variant="h6" fontWeight={600}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>
             No recording loaded
           </Typography>
 

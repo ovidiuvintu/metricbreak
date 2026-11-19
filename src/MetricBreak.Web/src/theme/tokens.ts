@@ -1,3 +1,5 @@
+export type MetricBreakThemeMode = "light" | "dark";
+
 
 export const colors = {
   gray: {
