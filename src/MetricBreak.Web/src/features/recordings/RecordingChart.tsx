@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useRef,
+  type PointerEvent,
   useState,
 } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
@@ -21,7 +22,6 @@ import {
   Divider,
   Box,
   CircularProgress,
-  Slider,
   Typography,
 } from "@mui/material";
 
@@ -168,8 +168,8 @@ export function RecordingChart({
   const [inspectedSample, setInspectedSample] = useState<HoverDetails | null>(null);
   const [cursorHovered, setCursorHovered] = useState(false);
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
+  const [cursorLabelX, setCursorLabelX] = useState<number | null>(null);
   const dragRef = useRef<{ sequence: number } | null>(null);
-  const sliderScrubbingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const tooltipsEnabledRef = useRef(true);
@@ -456,13 +456,12 @@ export function RecordingChart({
             silent: true,
             symbol: "none",
             animation: false,
-            label: {
-              show: false,
-            },
+            label: { show: false },
             lineStyle: {
-              color: chartTheme.cursorColor,
-              width: cursorHovered || previewSequence !== null ? 4 : 2,
-              type: "dashed" as const,
+              color: "#F59E0B",
+              width: cursorHovered || previewSequence !== null ? 4 : 2.5,
+              type: "solid" as const,
+              opacity: 1,
             },
             data: [{ xAxis: cursorSequence }],
           };
@@ -641,7 +640,8 @@ export function RecordingChart({
           type: "inside" as const,
           xAxisIndex: 0,
           zoomOnMouseWheel: true,
-          moveOnMouseMove: true,
+          // Reserve left-button dragging for replay scrubbing, not ECharts panning.
+          moveOnMouseMove: false,
           moveOnMouseWheel: false,
         },
       ],
@@ -661,6 +661,72 @@ export function RecordingChart({
       pageEnd,
   ]);
 
+  // Keep the draggable HTML label aligned with the ECharts x-axis, including zoom/resize.
+  useEffect(() => {
+    const chart = chartRef.current?.getEchartsInstance();
+    const sequence = previewSequence ?? currentSequence;
+    if (!chart || sequence === null || sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
+      setCursorLabelX(null);
+      return;
+    }
+    const update = () => {
+      if (chart.isDisposed()) return;
+      const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
+      setCursorLabelX(Number.isFinite(pixel) ? pixel : null);
+    };
+    update();
+    chart.on("datazoom", update);
+    const observer = new ResizeObserver(update);
+    observer.observe(chart.getDom());
+    return () => {
+      chart.off("datazoom", update);
+      observer.disconnect();
+    };
+  }, [currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
+
+  const handleLabelPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const sequence = previewSequence ?? currentSequence;
+    if (sequence === null) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { sequence };
+    suppressClickRef.current = true;
+    setHover(null);
+    setInspectedSample(null);
+    onScrubStartRef.current();
+  };
+
+  const handleLabelPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const chart = chartRef.current?.getEchartsInstance();
+    const loaded = samplesRef.current;
+    if (!chart || !loaded.length) return;
+    const rect = chart.getDom().getBoundingClientRect();
+    const coords = chart.convertFromPixel(
+      { xAxisIndex: 0 }, event.clientX - rect.left,
+    ) as number;
+    if (!Number.isFinite(coords)) return;
+    const sequence = Math.max(loaded[0].sequence,
+      Math.min(loaded[loaded.length - 1].sequence, Math.round(coords)));
+    dragRef.current.sequence = sequence;
+    setPreviewSequence(sequence);
+  };
+
+  const handleLabelPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const sequence = dragRef.current.sequence;
+    dragRef.current = null;
+    suppressClickRef.current = false;
+    setPreviewSequence(null);
+    manualPageRef.current = false;
+    onScrubEndRef.current(sequence);
+  };
+
   // Detach our ZRender listeners when the chart unmounts.
   useEffect(() => () => listenerCleanupRef.current?.(), []);
 
@@ -671,6 +737,11 @@ export function RecordingChart({
       console.debug("Replay chart ready");
 
       const renderer = chart.getZr();
+      const initialSequence = currentSequenceRef.current;
+      if (initialSequence !== null) {
+        const pixel = chart.convertToPixel({ xAxisIndex: 0 }, initialSequence) as number;
+        if (Number.isFinite(pixel)) setCursorLabelX(pixel);
+      }
 
              const sequenceAt = (x: number, y: number): number | null => {
          const pixel: [number, number] = [x, y];
@@ -681,31 +752,6 @@ export function RecordingChart({
          // Sequence is authoritative even when timestamps are identical.
          return Math.max(loaded[0].sequence,
            Math.min(loaded[loaded.length - 1].sequence, Math.round(coords[0])));
-       };
-
-       const handleDown = (event: { offsetX: number; offsetY: number; event?: { button?: number } }) => {
-         if (event.event?.button === 2) return;
-         const sequence = sequenceAt(event.offsetX, event.offsetY);
-         if (sequence === null) return;
-         // Only grab near the replay cursor; preserve ordinary chart pan/zoom.
-         const cursor = currentSequenceRef.current;
-         if (cursor === null) return;
-         const cursorPixel = chart.convertToPixel({ gridIndex: 0 }, [cursor, 0]) as number[];
-         if (!Number.isFinite(cursorPixel[0]) || Math.abs(event.offsetX - cursorPixel[0]) > 12) return;
-         dragRef.current = { sequence };
-         suppressClickRef.current = true;
-         setPreviewSequence(sequence);
-         setHover(null);
-         onScrubStartRef.current();
-       };
-
-       const handleUp = () => {
-         const drag = dragRef.current;
-         if (!drag) return;
-         dragRef.current = null;
-         setPreviewSequence(null);
-         manualPageRef.current = false;
-         onScrubEndRef.current(drag.sequence);
        };
 
        const handleClick = (event: { offsetX: number; offsetY: number }) => {
@@ -770,19 +816,13 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
       };
 
       listenerCleanupRef.current?.();
-      renderer.on("mousedown", handleDown);
-      renderer.on("mouseup", handleUp);
       renderer.on("click", handleClick);
       renderer.on("mousemove", handleMove);
       renderer.on("globalout", handleLeave);
-      window.addEventListener("mouseup", handleUp);
       listenerCleanupRef.current = () => {
-        renderer.off("mousedown", handleDown);
-        renderer.off("mouseup", handleUp);
         renderer.off("click", handleClick);
         renderer.off("mousemove", handleMove);
         renderer.off("globalout", handleLeave);
-        window.removeEventListener("mouseup", handleUp);
       };
 
       // Remove only our listener when this chart is
@@ -892,43 +932,6 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         </Button>
       </Box>
 
-      {sampleCount > 0 && (
-        <Box sx={{ px: 2.5, pb: 0.5, display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-            Scrub cursor
-          </Typography>
-          <Slider
-            size="small"
-            aria-label="Drag replay cursor"
-            min={pageStart}
-            max={Math.max(pageStart + 1, pageEnd - 1)}
-            step={1}
-            value={Math.max(pageStart, Math.min(pageEnd - 1, previewSequence ?? currentSequence ?? pageStart))}
-            disabled={loading || samples.length === 0}
-            valueLabelDisplay="auto"
-            valueLabelFormat={(value) => `Sequence ${value.toLocaleString()}`}
-            onChange={(_, value) => {
-              if (!sliderScrubbingRef.current) {
-                sliderScrubbingRef.current = true;
-                onScrubStartRef.current();
-              }
-              setPreviewSequence(value as number);
-            }}
-            onChangeCommitted={(_, value) => {
-              if (!sliderScrubbingRef.current) onScrubStartRef.current();
-              sliderScrubbingRef.current = false;
-              setPreviewSequence(null);
-              manualPageRef.current = false;
-              onScrubEndRef.current(value as number);
-            }}
-            sx={{ flex: 1, minWidth: 80, '& .MuiSlider-thumb': { width: 18, height: 18 } }}
-          />
-          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 62, textAlign: "right" }}>
-            {(previewSequence ?? currentSequence ?? pageStart).toLocaleString()}
-          </Typography>
-        </Box>
-      )}
-
       <Box
         sx={{
           flex: 1,
@@ -950,16 +953,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         ) : samples.length > 0 ? (
           <>
-          <Box
-            sx={{
-              height: "100%",
-              width: "100%",
-              "& canvas": {
-                cursor: "default !important",
-              },
-            }}
-            onContextMenu={handlePlotContextMenu}
-          >
+          <Box sx={{ height: "100%", width: "100%", position: "relative" }} onContextMenu={handlePlotContextMenu}>
           <ReactECharts
             key={`${sessionId}:${pageStart}`}
             ref={chartRef}
@@ -970,9 +964,38 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             style={{
               height: "100%",
               width: "100%",
-              cursor: "default",
+              cursor: "crosshair",
             }}
           />
+          {cursorLabelX !== null && (
+            <Box
+              onPointerDown={handleLabelPointerDown}
+              onPointerMove={handleLabelPointerMove}
+              onPointerUp={handleLabelPointerUp}
+              onPointerCancel={handleLabelPointerUp}
+              sx={{
+                position: "absolute",
+                // Place the handle between the legend and the plot (grid starts at 55px).
+                top: 30,
+                left: cursorLabelX,
+                transform: "translateX(-50%)",
+                zIndex: 12,
+                px: 1,
+                py: 0.25,
+                borderRadius: 1,
+                bgcolor: "#F59E0B",
+                color: "#17202B",
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: dragRef.current ? "grabbing" : "grab",
+                userSelect: "none",
+                touchAction: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {(previewSequence ?? currentSequence)?.toLocaleString()}
+            </Box>
+          )}
           </Box>
           {displayedSample && (
             <Box
