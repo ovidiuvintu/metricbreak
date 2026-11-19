@@ -86,6 +86,7 @@ export function RecordingDashboard() {
   const playbackRunningRef = useRef(false);
   const playbackStateRef = useRef<PlaybackState>("stopped");
   const playbackSessionRef = useRef<string | null>(null);
+  const scrubRef = useRef<{ sessionId: string; wasPlaying: boolean; pause: Promise<void> } | null>(null);
 
   const [breakpointsLoading, setBreakpointsLoading] =
     useState(false);
@@ -400,15 +401,16 @@ export function RecordingDashboard() {
   // Continuous playback (forward, 1x recorded time)
   // --------------------------------------------------
 
-  const handlePlay = async () => {
-    if (!session || playbackRunningRef.current || playbackBusyRef.current ||
+  const handlePlay = async (resumeSession?: SessionState) => {
+    const targetSession = resumeSession ?? session;
+    if (!targetSession || playbackRunningRef.current || playbackBusyRef.current ||
         seekInProgressRef.current || breakpointInProgressRef.current || loading ||
-        session.sampleCount === 0 ||
-        (session.currentSample?.sequence ?? 0) >= session.sampleCount - 1) {
+        targetSession.sampleCount === 0 ||
+        (targetSession.currentSample?.sequence ?? 0) >= targetSession.sampleCount - 1) {
       return;
     }
 
-    const sessionId = session.sessionId;
+    const sessionId = targetSession.sessionId;
     const epoch = ++playbackEpochRef.current;
     playbackBusyRef.current = true;
     setPlaybackBusy(true);
@@ -483,7 +485,7 @@ export function RecordingDashboard() {
         }
       };
 
-      void advance(session);
+      void advance(targetSession);
     } catch (error) {
       if (epoch === playbackEpochRef.current) {
         playbackStateRef.current = "stopped";
@@ -537,6 +539,58 @@ export function RecordingDashboard() {
     } finally {
       playbackBusyRef.current = false;
       setPlaybackBusy(false);
+    }
+  };
+
+  // Scrubbing is a transaction: cancel local scheduling, invalidate the old
+  // backend generation, seek once on release, then resume only if playing.
+  const handleScrubStart = () => {
+    if (!session || scrubRef.current) return;
+    const sessionId = session.sessionId;
+    const wasPlaying = playbackRunningRef.current;
+    cancelLocalPlayback();
+    playbackStateRef.current = "paused";
+    setPlaybackState("paused");
+    // The backend pause is serialized before seek, even if release is immediate.
+    const pause = wasPlaying
+      ? replayApi.pausePlayback(sessionId).then(() => undefined)
+      : Promise.resolve();
+    scrubRef.current = { sessionId, wasPlaying, pause };
+  };
+
+  const handleScrubEnd = async (sequence: number) => {
+    const scrub = scrubRef.current;
+    if (!scrub) return;
+    scrubRef.current = null;
+    let resumed = false;
+    playbackBusyRef.current = true;
+    setPlaybackBusy(true);
+    setSeeking(true);
+    try {
+      await scrub.pause;
+      if (activeSessionIdRef.current !== scrub.sessionId) return;
+      const result = await replayApi.seek(scrub.sessionId, sequence);
+      if (activeSessionIdRef.current !== scrub.sessionId) return;
+      setSession(result.session);
+      // Keep stopped/paused semantics if the recording wasn't playing.
+      if (!scrub.wasPlaying) return;
+      playbackBusyRef.current = false;
+      setPlaybackBusy(false);
+      setSeeking(false);
+      await handlePlay(result.session);
+      resumed = true;
+    } catch (error) {
+      if (activeSessionIdRef.current === scrub.sessionId) {
+        setLoadError(errorMessage(error, "Unable to scrub recording."));
+        playbackStateRef.current = "paused";
+        setPlaybackState("paused");
+      }
+    } finally {
+      if (!resumed) {
+        playbackBusyRef.current = false;
+        setPlaybackBusy(false);
+        setSeeking(false);
+      }
     }
   };
 
@@ -773,6 +827,8 @@ export function RecordingDashboard() {
               session.currentSample?.sequence ?? null
             }
             onSeek={handleSeek}
+            onScrubStart={handleScrubStart}
+            onScrubEnd={(sequence) => void handleScrubEnd(sequence)}
           />
         </Box>
       ) : (
