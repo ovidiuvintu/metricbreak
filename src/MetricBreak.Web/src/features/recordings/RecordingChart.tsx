@@ -14,6 +14,8 @@ import {
   Alert,
   Button,
   ButtonGroup,
+  FormControlLabel,
+  Switch,
   Box,
   CircularProgress,
   Slider,
@@ -25,7 +27,7 @@ import { useTheme } from "@mui/material/styles";
 import { recordingApi } from "./recordingApi";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
-import { createChartTheme } from "../../theme/chartTheme";
+import { createChartTheme, getSeriesColor } from "../../theme/chartTheme";
 
 interface RecordingChartProps {
   sessionId: string;
@@ -101,6 +103,7 @@ export function RecordingChart({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
+  const [separateAxes, setSeparateAxes] = useState(true);
   const [pageIndex, setPageIndex] = useState(0);
   const pageCount = Math.ceil(sampleCount / PAGE_SIZE);
   const activePage = Math.min(pageIndex, Math.max(0, pageCount - 1));
@@ -278,6 +281,23 @@ export function RecordingChart({
   const option = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
 
+    // Unit groups are derived from the selected channels only. Keep channel
+    // identity and series color tied to the original channel index.
+    const visibleChannels = channels.filter((channel) => selectedIds.has(channel.channelId));
+    const axisKeys = [...new Set(visibleChannels.map((channel) =>
+      channel.unit?.trim().toLowerCase() || "(unitless)"
+    ))];
+    const axisIndexByUnit = new Map(axisKeys.map((unit, index) => [unit, index]));
+    const unitLabelByKey = new Map(visibleChannels.map((channel) => [
+      channel.unit?.trim().toLowerCase() || "(unitless)",
+      channel.unit?.trim() || "Unitless",
+    ]));
+    const axisCount = separateAxes ? axisKeys.length : 1;
+    const leftCount = Math.ceil(axisCount / 2);
+    const rightCount = Math.floor(axisCount / 2);
+    const leftMargin = separateAxes ? 60 + Math.max(0, leftCount - 1) * 58 : 35;
+    const rightMargin = separateAxes ? 42 + Math.max(0, rightCount - 1) * 58 : 35;
+
     const series = channels
       .map((channel, channelIndex) => ({
         channel,
@@ -287,10 +307,7 @@ export function RecordingChart({
         selectedIds.has(channel.channelId),
       )
       .map(({ channel, channelIndex }) => {
-        const seriesColor =
-          chartTheme.color[
-            channelIndex % chartTheme.color.length
-          ];
+        const seriesColor = getSeriesColor(theme.palette.mode, channelIndex);
 
         return {
           id: channel.channelId,
@@ -300,6 +317,9 @@ export function RecordingChart({
             : channel.name,
 
           type: "line" as const,
+          yAxisIndex: separateAxes
+            ? (axisIndexByUnit.get(channel.unit?.trim().toLowerCase() || "(unitless)") ?? 0)
+            : 0,
           showSymbol: false,
           connectNulls: false,
           smooth: false,
@@ -398,8 +418,8 @@ export function RecordingChart({
       },
 
       grid: {
-        left: 20,
-        right: 35,
+        left: leftMargin,
+        right: rightMargin,
         top: 55,
         bottom: 45,
         containLabel: true,
@@ -456,50 +476,38 @@ export function RecordingChart({
         },
       },
 
-      yAxis: {
-        type: "value" as const,
-        scale: true,
-        axisLine: {
-          lineStyle: {
-            color: chartTheme.axisTextColor,
+      yAxis: (separateAxes ? axisKeys : ["all"]).map((unitKey, index) => {
+        const onLeft = index % 2 === 0;
+        const offset = Math.floor(index / 2) * 58;
+        const axisColor = chartTheme.axisTextColor;
+        return {
+          type: "value" as const,
+          name: separateAxes ? unitLabelByKey.get(unitKey) : "Value",
+          nameLocation: "end" as const,
+          nameGap: 12,
+          nameTextStyle: { color: axisColor, fontSize: 11 },
+          position: onLeft ? "left" as const : "right" as const,
+          offset,
+          scale: true,
+          axisLine: { show: true, lineStyle: { color: axisColor } },
+          axisTick: { show: false },
+          axisLabel: {
+            color: axisColor,
+            fontSize: 10,
+            formatter: (value: number) => {
+              const abs = Math.abs(value);
+              if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}G`;
+              if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+              if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+              return Number(value.toPrecision(4)).toLocaleString();
+            },
           },
-        },
-
-        axisTick: {
-          lineStyle: {
-            color: chartTheme.axisTextColor,
+          splitLine: {
+            show: index === 0,
+            lineStyle: { color: chartTheme.gridLineColor },
           },
-        },
-
-        axisLabel: {
-          color: chartTheme.axisTextColor,
-
-          formatter: (value: number) => {
-            const absolute = Math.abs(value);
-
-            if (absolute >= 1_000_000_000) {
-              return `${(value / 1_000_000_000).toFixed(1)}G`;
-            }
-
-            if (absolute >= 1_000_000) {
-              return `${(value / 1_000_000).toFixed(1)}M`;
-            }
-
-            if (absolute >= 1_000) {
-              return `${(value / 1_000).toFixed(1)}K`;
-            }
-
-            return value.toLocaleString();
-          },
-        },
-
-        splitLine: {
-          show: true,
-          lineStyle: {
-            color: chartTheme.gridLineColor,
-          },
-        },
-      },
+        };
+      }),
 
       dataZoom: [
         {
@@ -522,6 +530,8 @@ export function RecordingChart({
       cursorHovered,
       previewSequence,
       lineWidth,
+      separateAxes,
+      theme.palette.mode,
       pageStart,
       pageEnd,
   ]);
@@ -715,7 +725,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           <Typography
             variant="body2"
             noWrap
-            sx={{ fontWeight: 400, color: "primary.main", fontVariantNumeric: "tabular-nums", flexShrink: 0, mx: 1 }}
+            sx={{ fontWeight: 400, color: "warning.main", fontVariantNumeric: "tabular-nums", flexShrink: 0, mx: 1 }}
             title="Actual replay position (independent of chart page)"
           >
             Current sample: {currentSequence?.toLocaleString() ?? "—"}
@@ -734,6 +744,11 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             <Button disabled={loading || activePage >= pageCount - 1} onClick={() => navigateToPage(activePage + 1)}>Next</Button>
           </ButtonGroup>
         )}
+        <FormControlLabel
+          sx={{ m: 0, flexShrink: 0, whiteSpace: "nowrap" }}
+          control={<Switch size="small" checked={separateAxes} onChange={(_, checked) => setSeparateAxes(checked)} />}
+          label={<Typography variant="caption">Separate units</Typography>}
+        />
         <Button
           size="small"
           variant="outlined"
