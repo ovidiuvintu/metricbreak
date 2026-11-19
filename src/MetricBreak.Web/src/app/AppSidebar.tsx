@@ -127,10 +127,12 @@ export function AppSidebar({
               {(!collapsed || mobile) && (
                 <ListItemText
                   primary={label}
-                  primaryTypographyProps={{
-                    fontSize: 14,
-                    fontWeight: selected === id ? 600 : 400,
-                  }}
+                  slotProps={{ primary:{
+                    sx: {
+                      fontSize: 14,
+                      fontWeight: selected === id ? 600 : 400,
+                    }
+                  } }}
                 />
               )}
             </ListItemButton>
