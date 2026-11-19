@@ -5,7 +5,7 @@
 
 MetricBreak is an offline-first, industry-independent debugger for recorded time-series telemetry. It helps engineers investigate what happened, find when conditions occurred, inspect the exact samples around an event, and preserve reproducible debugging context.
 
-> **Project status (November 2026):** Active development. Numeric CSV ingestion, recording/session management, deterministic replay navigation, conditional and composite breakpoints, a .NET API, and a React debugging interface have been implemented. Other capabilities described below are in progress or planned. This README distinguishes the existing foundation from the intended MVP; it is not a release-readiness claim.
+> **Project status (November 2026):** Active development. CSV ingestion with typed channel values, recording/session management, deterministic forward/reverse replay, simulation-style playback, numeric conditional and composite breakpoints, a .NET API, and a React debugging interface are implemented. Investigation persistence, expanded analysis, and release hardening remain ongoing or planned. This README is not a release-readiness claim.
 
 ## Why MetricBreak?
 
@@ -16,61 +16,54 @@ Example questions:
 - When did pressure first fall below 4,000 psi?
 - At which sample were pressure above 9,000 psi **and** flow rate below 50 bpm?
 - What happened immediately before and after a breakpoint triggered?
-- Was a valve `ON` when pressure spiked? *(Requires planned typed-channel support.)*
+- Was a valve `ON` when pressure spiked? *(Categorical values can be inspected; typed breakpoint comparisons remain a separate extension.)*
 - How did an abnormal recording differ from a known-good run? *(Planned comparison capability.)*
 
 MetricBreak's core remains **industry-neutral**. Industrial telemetry, vehicle diagnostics, infrastructure/SRE recordings, and scientific measurements are use cases—not hardcoded assumptions.
 
 ## Current implementation
 
-The following capabilities have been developed; their end-to-end integration and release hardening remain ongoing:
+The following capabilities are implemented; full end-to-end validation and release hardening remain ongoing:
 
-- **Numeric CSV ingestion:** Import recorded numeric telemetry and expose recording/channel metadata.
-- **Recording and session management:** Create and inspect replay sessions through the API.
-- **Deterministic replay navigation:** Seek, step forward/backward, and continue toward breakpoints, including reverse breakpoint traversal in the replay engine.
-- **Conditional breakpoints:** Evaluate numeric channel conditions.
-- **Composite breakpoints:** Combine numeric conditions using `AND` or `OR`, with API operations and React UI for creation and management.
-- **Project workspace foundation:** Create/open project workflows and local persistence infrastructure.
-- **Browser-based UI:** React/TypeScript interface for recordings, channels, replay controls, and breakpoints.
-- **Automated tests:** Domain and API tests cover core behaviors; comprehensive end-to-end validation remains a release task.
-
-Implementation details and completeness may change as development continues.
+- **Typed CSV ingestion:** Import recordings with numeric, Boolean, and categorical values; preserve missing-value semantics and source sample order, including duplicate timestamps.
+- **Recording and session management:** Create and inspect recording sessions through the ASP.NET Core API.
+- **Deterministic replay:** Seek, step forward/backward, and navigate conditional breakpoint hits in either direction.
+- **Simulation-style playback:** Play/pause, forward/reverse traversal, adjustable speed, and time-based or sample-based pacing. Breakpoint evaluation remains authoritative even when UI rendering is batched.
+- **Breakpoints:** Numeric conditional rules and composite `AND`/`OR` rules, with API and React management UI.
+- **Recording chart:** Numeric-only plotted series and legend, channel selection, paginated sample windows (up to 5,000 samples per page), zoom, and a replay-position indicator and scrub control. Missing values appear as gaps rather than invented zero readings.
+- **Sample inspection:** Inspector tabs for Channels, Breakpoints, and Values. Categorical and Boolean values remain inspectable even though they are not plotted as numeric chart series.
+- **Chart context menu:** Right-click to move the replay cursor to a sample, inspect its values without seeking, or copy its sequence or timestamp. The chart uses a standard arrow cursor.
+- **Local project workspace foundation:** Project create/open workflows and local persistence infrastructure.
+- **Automated tests:** Core domain and API tests; comprehensive browser and end-to-end validation remains a release task.
 
 ## CSV-first MVP
 
-**CSV is the initial and reference data source.** We will finish ingestion, processing, replay, breakpoints, inspection, persistence, and end-to-end reliability for CSV **before** evaluating other sources such as MQTT, Kafka, databases, or live streams.
+**CSV is the initial and reference data source.** Complete the CSV debugging workflow, investigation persistence, and reliability work before evaluating MQTT, Kafka, databases, or live streams.
 
-### Typed CSV channels — next milestone
+### Typed CSV channels — implemented foundation
 
-CSV ingestion will recognize three channel value types:
-
-| Type | Examples | Intended behavior |
+| Type | Examples | Current behavior |
 | --- | --- | --- |
-| Numeric | `1200`, `45.2` | Numeric charts and threshold conditions |
-| Boolean | `true`, `false` | Boolean inspection and equality conditions |
-| Categorical | `ON`, `OFF`, `RUNNING`, `STOPPED` | State inspection, transitions, and equality conditions |
+| Numeric | `1200`, `45.2` | Numeric plotting, inspection, and numeric breakpoint conditions |
+| Boolean | `true`, `false` | Typed inspection; excluded from numeric plots |
+| Categorical | `ON`, `OFF`, `RUNNING` | Typed inspection; excluded from numeric plots |
+| Missing | Empty CSV cell | Explicit missing value; chart gaps instead of fabricated zeros |
 
-Type inference will inspect column values and preserve their meaning. `ON`/`OFF` will initially be treated as **categorical**, not silently converted to `1`/`0`. Empty cells need explicit missing-value handling. The original categorical spelling should be retained. Type overrides may be introduced where inference is ambiguous.
+Channel typing preserves the distinction between measurements and states. `ON`/`OFF` are categorical rather than silently converted to numeric values. Typed equality/transition breakpoints remain a future extension.
 
-Typed channel metadata and values are **planned**, not yet part of the completed numeric ingestion pipeline.
+### Simulation-style playback — implemented foundation
 
-### Simulation-style playback — planned MVP capability
+- Play, pause, seek, step, and continue through recorded samples.
+- Play forward or backward with adjustable speed.
+- Use timestamp-based or sample-based playback.
+- Stop at matching numeric conditional or composite breakpoints in either direction.
+- Keep breakpoint evaluation independent of throttled or batched chart updates.
 
-MetricBreak will evolve the existing replay engine into a simulation-style playback experience for **recorded** data:
-
-- Play, pause, seek, single-step, and continue.
-- Play forward **and backward**.
-- Fast-forward and reverse at adjustable speeds.
-- Support timestamp-based pacing and, where useful, sample-based playback.
-- Stop precisely at enabled simple or composite breakpoints in either direction.
-- Keep breakpoint evaluation accurate even when chart/UI updates are throttled at high playback speeds.
-- Handle end-of-recording, cancellation, and resume without repeatedly stopping on the same sample.
-
-**Playback does not generate or predict telemetry.** It controls traversal of immutable recorded samples. The replay engine determines sample order and breakpoint results; a separate playback controller handles direction, timing, and speed.
+**Playback never generates or predicts telemetry.** It traverses immutable recorded samples. The replay engine owns sample ordering and breakpoint results; playback controls handle direction, timing, and speed.
 
 ### Typed breakpoints — planned extension
 
-Numeric conditions will be extended to typed channels. For example:
+Numeric conditions will be extended to Boolean and categorical values, for example:
 
 ```text
 ValveState == ON
@@ -78,13 +71,13 @@ ValveState == ON
 Pressure > 1400
 ```
 
-Categorical and Boolean comparisons will use operators appropriate to their types. The debugger must not impose numeric ordering on text values.
+Boolean and categorical comparisons will use operators appropriate to their types. The debugger must not impose numeric ordering on text values.
 
 ## Product areas
 
 ### Recording Dashboard — execute and inspect
 
-The Recording Dashboard is the primary debugging surface. It provides recording/channel inspection, replay navigation, and breakpoint management. Planned additions include simulation-style playback controls, categorical state timelines, and richer breakpoint-hit inspection.
+The Recording Dashboard is the primary debugging surface. It provides recording/channel inspection, replay navigation, and breakpoint management. The existing interface includes playback controls, paginated numeric charts, a replay scrubber, sample-value inspection, and right-click navigation. Planned additions include categorical state timelines and richer breakpoint-hit inspection.
 
 ### Investigations — preserve debugging context
 
@@ -143,13 +136,13 @@ The recording reader, replay engine, breakpoint evaluation, and analysis logic *
 CSV Source (initially)
         |
         v
-Ingestion & Type Inference
+CSV Ingestion & Type Inference
         |
         v
 Recording + Typed Channel Metadata
         |
         v
-Telemetry Reader / Replay Engine <---- Playback Controller (planned)
+Telemetry Reader / Replay Engine <---- Playback Controller
         |                                     |
         v                                     v
 Breakpoint Evaluation                 Direction / Clock / Speed
@@ -182,7 +175,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 
 - C# / .NET 10
 - ASP.NET Core API
-- React / TypeScript with Material UI
+- React / TypeScript with Material UI and ECharts
 - Local filesystem persistence; SQLite remains a possible local metadata option, not a confirmed requirement
 - CSV as the initial import format
 - Modular, testable domain, ingestion, replay, breakpoint, API, and UI components
@@ -192,7 +185,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 ### Implemented foundation
 
 - [x] Establish recording, channel, sample, and replay domain foundations.
-- [x] Implement numeric CSV ingestion and recording sessions.
+- [x] Implement typed CSV ingestion and recording sessions, including missing values.
 - [x] Implement replay seek and step operations.
 - [x] Implement forward and backward breakpoint traversal in the replay engine.
 - [x] Implement numeric conditional breakpoints.
@@ -200,13 +193,13 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 - [x] Add composite breakpoint management to the React UI.
 - [x] Establish project workspace creation/opening and local persistence foundations.
 - [x] Build the initial browser-based recording/debugging interface.
+- [x] Implement forward/reverse playback with adjustable speed and time/sample pacing.
+- [x] Expose typed channel metadata and sample values for inspection.
+- [x] Add paginated numeric-only chart plotting, missing-data gaps, replay scrubbing, and context-menu sample actions.
 
 ### Complete the CSV MVP
 
-- [ ] Infer numeric, Boolean, and categorical CSV channels; preserve typed values and missing-value semantics.
-- [ ] Expose typed channel metadata and sample values through the API and UI.
-- [ ] Add simulation-style play/pause, reverse, fast-forward, and adjustable-speed playback.
-- [ ] Extend simple/composite breakpoint evaluation and UI to typed values.
+- [ ] Extend simple/composite breakpoint evaluation and UI to Boolean and categorical conditions.
 - [ ] Complete investigation persistence, restoration, bookmarks, and notes.
 - [ ] Add initial Analysis functionality: statistics, time-window inspection, and multi-channel comparison.
 - [ ] Add categorical state timelines and richer breakpoint-hit inspection.
