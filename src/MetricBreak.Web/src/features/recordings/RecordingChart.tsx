@@ -106,6 +106,26 @@ function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
   return windows;
 }
 
+// ChannelMetadata does not currently expose a declared value type. Infer chartable
+// numeric channels from the loaded samples, preferring typed values over the
+// numeric projection (which can contain placeholder zeros for other types).
+function isNumericChartChannel(samples: SampleRangeItem[], channelId: string): boolean {
+  let sawNumeric = false;
+  for (const sample of samples) {
+    const typed = sample.typedChannels?.[channelId];
+    if (typed) {
+      if (typed.valueType === "Boolean" || typed.valueType === "Categorical") return false;
+      if (typed.valueType === "Numeric" && typeof typed.value === "number" && Number.isFinite(typed.value)) {
+        sawNumeric = true;
+      }
+      continue;
+    }
+    const projected = sample.channels[channelId];
+    if (typeof projected === "number" && Number.isFinite(projected)) sawNumeric = true;
+  }
+  return sawNumeric;
+}
+
 const PAGE_SIZE = 5000;
 
 function getLineWidth(sampleCount: number): number {
@@ -376,7 +396,7 @@ export function RecordingChart({
         channelIndex,
       }))
       .filter(({ channel }) =>
-        selectedIds.has(channel.channelId),
+        selectedIds.has(channel.channelId) && isNumericChartChannel(samples, channel.channelId),
       )
       .map(({ channel, channelIndex }) => {
         const seriesColor = getSeriesColor(theme.palette.mode, channelIndex);
@@ -484,6 +504,7 @@ export function RecordingChart({
 
       legend: {
         show: true,
+        data: series.map((item) => item.name),
         type: "scroll" as const,
         orient: "horizontal" as const,
 
