@@ -1,4 +1,3 @@
-
 import {
   useCallback,
   useEffect,
@@ -293,6 +292,8 @@ export function RecordingChart({
       setPreviewSequence(null);
       setSamples([]);
       setHover(null);
+    } else if (sequenceChanged && !dragRef.current && previewSequence !== null) {
+      setPreviewSequence(null);
     }
 
     if (dragRef.current || manualPageRef.current) return;
@@ -311,7 +312,7 @@ export function RecordingChart({
     setPageIndex((previousPage) =>
       previousPage === targetPage ? previousPage : targetPage,
     );
-  }, [sessionId, currentSequence, sampleCount]);
+  }, [sessionId, currentSequence, sampleCount, previewSequence]);
 
   useEffect(() => {
     let cancelled = false;
@@ -751,7 +752,7 @@ export function RecordingChart({
     const sequence = dragRef.current.sequence;
     dragRef.current = null;
     suppressClickRef.current = false;
-    setPreviewSequence(null);
+    setPreviewSequence(sequence === currentSequence ? null : sequence);
     manualPageRef.current = false;
     onScrubEndRef.current(sequence);
   };
