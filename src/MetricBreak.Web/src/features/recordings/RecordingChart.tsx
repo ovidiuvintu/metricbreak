@@ -953,7 +953,16 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         ) : samples.length > 0 ? (
           <>
-          <Box sx={{ height: "100%", width: "100%", position: "relative" }} onContextMenu={handlePlotContextMenu}>
+          <Box
+            sx={{
+              height: "100%",
+              width: "100%",
+              "& canvas": {
+                cursor: "default !important",
+              },
+            }}
+            onContextMenu={handlePlotContextMenu}
+          >
           <ReactECharts
             key={`${sessionId}:${pageStart}`}
             ref={chartRef}
@@ -964,7 +973,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             style={{
               height: "100%",
               width: "100%",
-              cursor: "crosshair",
+              cursor: "default",
             }}
           />
           {cursorLabelX !== null && (
