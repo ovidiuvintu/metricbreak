@@ -70,6 +70,37 @@ function formatSampleValue(sample: SampleRangeItem, channelId: string): string {
   return numeric == null ? "N/A" : numeric.toLocaleString();
 }
 
+// The numeric projection may contain a default zero for a typed Missing value.
+// Always consult the typed representation before drawing a point.
+function numericPlotValue(sample: SampleRangeItem, channelId: string): number | null {
+  const typedSample = sample as SampleRangeItem & {
+    typedChannels?: Record<string, { valueType: string; value: unknown } | undefined>;
+  };
+  if (typedSample.typedChannels?.[channelId]?.valueType === "Missing") return null;
+  const value = sample.channels[channelId];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+// Mark windows where all plotted channels lack data. Individual channel gaps
+// remain visible as broken lines without falsely labeling valid data "No Data".
+function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
+  const windows: { start: number; end: number }[] = [];
+  if (!channelIds.length) return windows;
+  let start: number | null = null;
+  let previous: number | null = null;
+  for (const sample of samples) {
+    const missing = channelIds.every((id) => numericPlotValue(sample, id) === null);
+    if (start !== null && (!missing || (previous !== null && sample.sequence !== previous + 1))) {
+      windows.push({ start, end: previous! });
+      start = null;
+    }
+    if (missing && start === null) start = sample.sequence;
+    previous = sample.sequence;
+  }
+  if (start !== null && previous !== null) windows.push({ start, end: previous });
+  return windows;
+}
+
 const PAGE_SIZE = 5000;
 
 function getLineWidth(sampleCount: number): number {
@@ -322,7 +353,7 @@ export function RecordingChart({
 
           data: samples.map((sample) => [
             sample.sequence,
-            sample.channels[channel.channelId] ?? null,
+            numericPlotValue(sample, channel.channelId),
           ]),
         };
       });
@@ -351,9 +382,30 @@ export function RecordingChart({
             data: [{ xAxis: cursorSequence }],
           };
 
+    const noDataWindows = findNoDataWindows(samples, series.map((item) => item.id));
+    const noDataArea = noDataWindows.length === 0 ? undefined : {
+      silent: true,
+      animation: false,
+      itemStyle: {
+        color: theme.palette.mode === "dark" ? "rgba(148,163,184,0.10)" : "rgba(100,116,139,0.09)",
+      },
+      label: {
+        show: true,
+        position: "insideTop" as const,
+        color: chartTheme.axisTextColor,
+        fontSize: 10,
+        formatter: "No Data",
+      },
+      data: noDataWindows.map(({ start, end }) => [
+        { xAxis: Math.max(pageStart, start - 0.5) },
+        { xAxis: Math.min(pageEnd - 1, end + 0.5) },
+      ]),
+    };
+
     const chartSeries = series.map((item, index) =>
-      index === 0 && replayCursor
-        ? { ...item, markLine: replayCursor }
+      index === 0
+        ? { ...item, ...(replayCursor ? { markLine: replayCursor } : {}),
+            ...(noDataArea ? { markArea: noDataArea } : {}) }
         : item,
     );
 
