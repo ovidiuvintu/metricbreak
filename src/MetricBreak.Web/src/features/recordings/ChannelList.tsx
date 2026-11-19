@@ -117,6 +117,10 @@ export function ChannelList({
         width: "100%",
         minWidth: 0,
         overflow: "hidden",
+        height: "100%",
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       {/* Display options */}
@@ -128,6 +132,7 @@ export function ChannelList({
           alignItems: "center",
           justifyContent: "space-between",
           gap: 1,
+          flexShrink: 0,
         }}
       >
         <FormControlLabel
@@ -161,9 +166,13 @@ export function ChannelList({
         sx={{
           width: "100%",
           overflowX: "hidden",
+          overflowY: "auto",
+          flex: 1,
+          minHeight: 0,
         }}
       >
         <Table
+          stickyHeader
           size="small"
           sx={{
             width: "100%",
