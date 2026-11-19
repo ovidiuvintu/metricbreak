@@ -661,25 +661,49 @@ export function RecordingChart({
       pageEnd,
   ]);
 
-  // Keep the draggable HTML label aligned with the ECharts x-axis, including zoom/resize.
+  // Position the draggable label only after ECharts has a usable coordinate system.
+  // ReactECharts can expose an instance before its axis model is ready.
   useEffect(() => {
     const chart = chartRef.current?.getEchartsInstance();
     const sequence = previewSequence ?? currentSequence;
-    if (!chart || sequence === null || sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
+    if (!chart || chart.isDisposed() || sequence === null ||
+        sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
       setCursorLabelX(null);
       return;
     }
+
+    let disposed = false;
+    let frame: number | null = null;
     const update = () => {
-      if (chart.isDisposed()) return;
-      const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
-      setCursorLabelX(Number.isFinite(pixel) ? pixel : null);
+      if (disposed || chart.isDisposed()) return;
+      // convertToPixel can throw while ECharts is applying a new option.
+      // Do not use the private getModel() API to check readiness.
+      try {
+        const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
+        setCursorLabelX(Number.isFinite(pixel) ? pixel : null);
+      } catch {
+        setCursorLabelX(null);
+      }
     };
-    update();
-    chart.on("datazoom", update);
-    const observer = new ResizeObserver(update);
+    const scheduleUpdate = () => {
+      if (disposed || frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    };
+
+    // Defer the initial conversion until ReactECharts has applied the option.
+    scheduleUpdate();
+    chart.on("finished", scheduleUpdate);
+    chart.on("datazoom", scheduleUpdate);
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(chart.getDom());
     return () => {
-      chart.off("datazoom", update);
+      disposed = true;
+      if (frame !== null) cancelAnimationFrame(frame);
+      chart.off("finished", scheduleUpdate);
+      chart.off("datazoom", scheduleUpdate);
       observer.disconnect();
     };
   }, [currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
@@ -704,9 +728,14 @@ export function RecordingChart({
     const loaded = samplesRef.current;
     if (!chart || !loaded.length) return;
     const rect = chart.getDom().getBoundingClientRect();
-    const coords = chart.convertFromPixel(
-      { xAxisIndex: 0 }, event.clientX - rect.left,
-    ) as number;
+    let coords: number;
+    try {
+      coords = chart.convertFromPixel(
+        { xAxisIndex: 0 }, event.clientX - rect.left,
+      ) as number;
+    } catch {
+      return; // Axis is being initialized or replaced.
+    }
     if (!Number.isFinite(coords)) return;
     const sequence = Math.max(loaded[0].sequence,
       Math.min(loaded[loaded.length - 1].sequence, Math.round(coords)));
@@ -737,12 +766,6 @@ export function RecordingChart({
       console.debug("Replay chart ready");
 
       const renderer = chart.getZr();
-      const initialSequence = currentSequenceRef.current;
-      if (initialSequence !== null) {
-        const pixel = chart.convertToPixel({ xAxisIndex: 0 }, initialSequence) as number;
-        if (Number.isFinite(pixel)) setCursorLabelX(pixel);
-      }
-
              const sequenceAt = (x: number, y: number): number | null => {
          const pixel: [number, number] = [x, y];
          if (!chart.containPixel({ gridIndex: 0 }, pixel)) return null;
