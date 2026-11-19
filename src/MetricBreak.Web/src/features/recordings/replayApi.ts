@@ -20,6 +20,18 @@ export interface ResetResponse {
   session: SessionState;
 }
 
+export interface PlaybackStartResponse {
+  generation: number;
+}
+
+export interface PlaybackAdvanceResponse {
+  samplesAdvanced: number;
+  endOfRecording: boolean;
+  hitBreakpoint: boolean;
+  stop: unknown | null;
+  session: SessionState;
+}
+
 export const replayApi = {
   seek(
     sessionId: string,
@@ -73,6 +85,44 @@ export const replayApi = {
   reset(sessionId: string): Promise<ResetResponse> {
     return apiRequest<ResetResponse>(
       `/api/sessions/${encodeURIComponent(sessionId)}/reset`,
+      { method: "POST" },
+    );
+  },
+
+  startPlayback(sessionId: string): Promise<PlaybackStartResponse> {
+    return apiRequest<PlaybackStartResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/playback/start`,
+      { method: "POST" },
+    );
+  },
+
+  advancePlayback(sessionId: string, generation: number, maxSamples: number): Promise<PlaybackAdvanceResponse> {
+    if (!Number.isSafeInteger(generation) || generation < 0) {
+      throw new Error("Invalid playback generation.");
+    }
+    if (!Number.isSafeInteger(maxSamples) || maxSamples < 1 || maxSamples > 5000) {
+      throw new Error("MaxSamples must be between 1 and 5000.");
+    }
+    return apiRequest<PlaybackAdvanceResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/playback/advance`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ generation, maxSamples }),
+      },
+    );
+  },
+
+  pausePlayback(sessionId: string): Promise<SessionState> {
+    return apiRequest<SessionState>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/playback/pause`,
+      { method: "POST" },
+    );
+  },
+
+  stopPlayback(sessionId: string): Promise<SessionState> {
+    return apiRequest<SessionState>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/playback/stop`,
       { method: "POST" },
     );
   },
