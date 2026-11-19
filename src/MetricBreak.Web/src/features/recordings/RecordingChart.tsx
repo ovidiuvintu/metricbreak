@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import ReactECharts from "echarts-for-react";
 import type { EChartsType } from "echarts/core";
@@ -14,6 +15,10 @@ import {
   Alert,
   Button,
   ButtonGroup,
+  Menu,
+  MenuItem,
+  ListItemText,
+  Divider,
   Box,
   CircularProgress,
   Slider,
@@ -147,6 +152,62 @@ export function RecordingChart({
   const suppressClickRef = useRef(false);
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const tooltipsEnabledRef = useRef(true);
+  const [chartMenu, setChartMenu] = useState<{
+    clientX: number;
+    clientY: number;
+    sequence: number;
+    timestamp: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // Only the chart plot opens the menu. Merely opening it never seeks.
+  const handlePlotContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart || chart.isDisposed()) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    if (!chart.containPixel({ gridIndex: 0 }, [x, y])) return;
+    const coordinates = chart.convertFromPixel({ gridIndex: 0 }, [x, y]) as number[];
+    if (!Number.isFinite(coordinates?.[0]) || samples.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nearest = samples.reduce((best, item) =>
+      Math.abs(item.sequence - coordinates[0]) < Math.abs(best.sequence - coordinates[0])
+        ? item : best,
+      samples[0],
+    );
+    setHover(null);
+    setChartMenu({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      sequence: nearest.sequence,
+      timestamp: formatTimestamp(nearest.timestampNanoseconds),
+      x,
+      y,
+    });
+  };
+
+  const inspectMenuSample = () => {
+    if (!chartMenu) return;
+    const sample = samples.find((item) => item.sequence === chartMenu.sequence);
+    if (!sample) return;
+    const selected = new Set(selectedChannelIds);
+    setHover({
+      sequence: sample.sequence,
+      timestamp: formatTimestamp(sample.timestampNanoseconds),
+      x: chartMenu.x,
+      y: chartMenu.y,
+      values: channels.filter((channel) => selected.has(channel.channelId)).map((channel) => ({
+        name: channel.unit ? `${channel.name} (${channel.unit})` : channel.name,
+        value: formatSampleValue(sample, channel.channelId),
+      })),
+    });
+    setChartMenu(null);
+  };
+
+
 
   const toggleTooltips = () => {
     const next = !tooltipsEnabledRef.current;
@@ -597,7 +658,8 @@ export function RecordingChart({
            Math.min(loaded[loaded.length - 1].sequence, Math.round(coords[0])));
        };
 
-       const handleDown = (event: { offsetX: number; offsetY: number }) => {
+       const handleDown = (event: { offsetX: number; offsetY: number; event?: { button?: number } }) => {
+         if (event.event?.button === 2) return;
          const sequence = sequenceAt(event.offsetX, event.offsetY);
          if (sequence === null) return;
          // Only grab near the replay cursor; preserve ordinary chart pan/zoom.
@@ -862,6 +924,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         ) : samples.length > 0 ? (
           <>
+          <Box sx={{ height: "100%", width: "100%" }} onContextMenu={handlePlotContextMenu}>
           <ReactECharts
             key={`${sessionId}:${pageStart}`}
             ref={chartRef}
@@ -875,6 +938,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               cursor: "crosshair",
             }}
           />
+          </Box>
           {tooltipsEnabled && hover && (
             <Box
               sx={{
@@ -924,6 +988,35 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         )}
       </Box>
+      <Menu
+        open={chartMenu !== null}
+        onClose={() => setChartMenu(null)}
+        anchorReference="anchorPosition"
+        anchorPosition={chartMenu ? { top: chartMenu.clientY, left: chartMenu.clientX } : undefined}
+        slotProps={{ list: { 'aria-label': 'Chart sample actions' } }}
+      >
+        <MenuItem disabled>
+          <ListItemText primary={`Sample ${chartMenu?.sequence.toLocaleString() ?? ''}`} secondary={chartMenu?.timestamp ?? ''} />
+        </MenuItem>
+        <Divider />
+        <MenuItem onClick={() => {
+          if (chartMenu) {
+            manualPageRef.current = false;
+            onSeekRef.current(chartMenu.sequence);
+          }
+          setChartMenu(null);
+        }}>Move replay cursor here</MenuItem>
+        <MenuItem onClick={inspectMenuSample}>Inspect sample values</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => {
+          if (chartMenu) void navigator.clipboard.writeText(String(chartMenu.sequence));
+          setChartMenu(null);
+        }}>Copy sequence number</MenuItem>
+        <MenuItem onClick={() => {
+          if (chartMenu) void navigator.clipboard.writeText(chartMenu.timestamp);
+          setChartMenu(null);
+        }}>Copy timestamp</MenuItem>
+      </Menu>
     </Box>
   );
 }
