@@ -1,0 +1,99 @@
+# CountFlow by OpenPark - Consolidated Traffic Study Report
+# Project: Oakridge Pkwy & 4th Ave Intersection Study
+# Project ID: sample-study
+# Recorded Days: Saturday
+# Total Vehicles Counted: 15975
+# Total Motorized Vehicles: 15843
+# Pedestrians & Cyclists: 132
+# Heavy Commercial %: 14.2%
+# Generated At: 2026-11-15T15:21:01.811Z
+
+Intersection,Direction,Code,Counting Zone,Recorded Day,Time Period,Slot Start,Slot End,Cars,Trucks,Buses,Motorcycles,Bicycles,Pedestrians,Total Motorized,Total All
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",07:00,07:15,718,90,34,19,0,0,861,861
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",07:15,07:30,671,77,36,16,0,0,800,800
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",07:30,07:45,696,80,32,11,3,0,819,822
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",07:45,08:00,1228,147,63,39,30,0,1477,1507
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",08:00,08:15,1263,146,75,30,30,0,1514,1544
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",08:15,08:30,1196,137,68,31,30,0,1432,1462
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",08:30,08:45,1322,159,70,43,30,0,1594,1624
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",08:45,09:00,822,95,53,24,9,0,994,1003
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",09:00,09:15,610,71,28,8,0,0,717,717
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",09:15,09:30,729,90,36,21,0,0,876,876
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",09:30,09:45,622,71,33,10,0,0,736,736
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",09:45,10:00,638,72,30,12,0,0,752,752
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",10:00,10:15,762,88,41,26,0,0,917,917
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",10:15,10:30,627,70,30,10,0,0,737,737
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",10:30,10:45,623,69,32,8,0,0,732,732
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","All Zones","Saturday","Weekend",10:45,11:00,738,86,38,23,0,0,885,885
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",07:00,07:15,233,30,15,15,0,0,293,293
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",07:15,07:30,220,25,15,10,0,0,270,270
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",07:30,07:45,239,24,15,9,3,0,287,290
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",07:45,08:00,472,53,24,15,15,0,564,579
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",08:00,08:15,490,57,30,15,15,0,592,607
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",08:15,08:30,457,51,23,15,15,0,546,561
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",08:30,08:45,486,55,25,15,15,0,581,596
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",08:45,09:00,267,30,15,12,6,0,324,330
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",09:00,09:15,198,22,15,7,0,0,242,242
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",09:15,09:30,237,30,15,15,0,0,297,297
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",09:30,09:45,204,22,15,7,0,0,248,248
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",09:45,10:00,210,27,15,12,0,0,264,264
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",10:00,10:15,250,30,15,15,0,0,310,310
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",10:15,10:30,207,25,15,10,0,0,257,257
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",10:30,10:45,203,21,15,6,0,0,245,245
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Northbound Approach","Saturday","Weekend",10:45,11:00,244,30,15,15,0,0,304,304
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",07:00,07:15,199,15,4,4,0,0,222,222
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",07:15,07:30,187,15,6,6,0,0,214,214
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",07:30,07:45,177,15,2,2,0,0,196,196
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",07:45,08:00,326,32,15,15,9,0,388,397
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",08:00,08:15,351,30,15,15,15,0,411,426
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",08:15,08:30,348,30,15,15,15,0,408,423
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",08:30,08:45,397,40,15,15,15,0,467,482
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",08:45,09:00,257,25,12,12,3,0,306,309
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",09:00,09:15,171,15,1,1,0,0,188,188
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",09:15,09:30,201,15,6,6,0,0,228,228
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",09:30,09:45,174,15,3,3,0,0,195,195
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",09:45,10:00,178,15,0,0,0,0,193,193
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",10:00,10:15,212,15,11,11,0,0,249,249
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",10:15,10:30,178,15,0,0,0,0,193,193
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",10:30,10:45,177,15,2,2,0,0,196,196
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Southbound Approach","Saturday","Weekend",10:45,11:00,205,15,8,8,0,0,236,236
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",07:00,07:15,151,30,15,0,0,0,196,196
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",07:15,07:30,143,22,15,0,0,0,180,180
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",07:30,07:45,170,26,15,0,0,0,211,211
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",07:45,08:00,264,40,15,6,6,0,325,331
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",08:00,08:15,245,35,15,0,0,0,295,295
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",08:15,08:30,211,30,15,0,0,0,256,256
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",08:30,08:45,217,34,15,0,0,0,266,266
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",08:45,09:00,136,18,15,0,0,0,169,169
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",09:00,09:15,129,19,12,0,0,0,160,160
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",09:15,09:30,154,30,15,0,0,0,199,199
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",09:30,09:45,134,19,15,0,0,0,168,168
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",09:45,10:00,134,15,15,0,0,0,164,164
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",10:00,10:15,160,28,15,0,0,0,203,203
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",10:15,10:30,135,15,15,0,0,0,165,165
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",10:30,10:45,133,18,15,0,0,0,166,166
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Eastbound Left-Turn Flow","Saturday","Weekend",10:45,11:00,153,26,15,0,0,0,194,194
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",07:00,07:15,135,15,0,0,0,0,150,150
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",07:15,07:30,121,15,0,0,0,0,136,136
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",07:30,07:45,110,15,0,0,0,0,125,125
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",07:45,08:00,166,22,9,3,0,0,200,200
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",08:00,08:15,177,24,15,0,0,0,216,216
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",08:15,08:30,180,26,15,1,0,0,222,222
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",08:30,08:45,222,30,15,13,0,0,280,280
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",08:45,09:00,162,22,11,0,0,0,195,195
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",09:00,09:15,112,15,0,0,0,0,127,127
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",09:15,09:30,137,15,0,0,0,0,152,152
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",09:30,09:45,110,15,0,0,0,0,125,125
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",09:45,10:00,116,15,0,0,0,0,131,131
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",10:00,10:15,140,15,0,0,0,0,155,155
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",10:15,10:30,107,15,0,0,0,0,122,122
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",10:30,10:45,110,15,0,0,0,0,125,125
+"Oakridge Corridor, Junction 14","All Counting Zones","ALL","Westbound Through Lane","Saturday","Weekend",10:45,11:00,136,15,0,0,0,0,151,151
+
+# --- Busiest Hour, Traffic Consistency (PHF) & Counting Zone Summary ---
+Intersection,Direction,Counting Zone,Time Period,Recorded Day,Total Vehicles,Total Motorized,Pedestrians & Cyclists,Traffic Share %,Busiest Hour Window,Busiest Hour Vehicles,Busiest 15-Min Window,Busiest 15-Min Vehicles,PHF,Traffic Consistency
+"Oakridge Corridor, Junction 14","All Counting Zones","All Zones","Weekend","Saturday",15975,15843,132,100.0%,"07:45 - 08:45",6137,"08:30 - 08:45",1624,0.94,"Steady flow (Traffic is evenly spread across the hour)"
+"Oakridge Corridor, Junction 14","All Counting Zones","Northbound Approach","Overall","Saturday",5693,5624,69,35.6%,"07:45 - 08:45",2343,"08:00 - 08:15",607,0.96,"Steady flow (Traffic is evenly spread across the hour)"
+"Oakridge Corridor, Junction 14","All Counting Zones","Southbound Approach","Overall","Saturday",4347,4290,57,27.2%,"07:45 - 08:45",1728,"08:30 - 08:45",482,0.90,"Steady flow (Traffic is evenly spread across the hour)"
+"Oakridge Corridor, Junction 14","All Counting Zones","Eastbound Left-Turn Flow","Overall","Saturday",3323,3317,6,20.8%,"07:45 - 08:45",1148,"07:45 - 08:00",331,0.87,"Moderate surges (Noticeable busy waves during the hour)"
+"Oakridge Corridor, Junction 14","All Counting Zones","Westbound Through Lane","Overall","Saturday",2612,2612,0,16.4%,"07:45 - 08:45",918,"08:30 - 08:45",280,0.82,"Moderate surges (Noticeable busy waves during the hour)"

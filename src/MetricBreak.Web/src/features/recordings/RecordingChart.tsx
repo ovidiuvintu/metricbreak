@@ -438,6 +438,10 @@ export function RecordingChart({
           lineStyle: {
             color: seriesColor,
             width: lineWidth,
+            // Use the stable channel order, not visible-series order, so toggling
+            // channel visibility does not change its line style. Dashed lines
+            // leave gaps that reveal solid lines when two values overlap.
+            type: channelIndex % 2 === 0 ? "solid" as const : "dashed" as const,
             opacity: 1,
           },
 
@@ -547,7 +551,7 @@ export function RecordingChart({
         left: 20,
         right: 12,
         top: 55,
-        bottom: 45,
+        bottom: 55,
         containLabel: true,
       },
 
