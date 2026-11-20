@@ -362,10 +362,8 @@ export function RecordingWorkspace({
                 sx={{
                   flex: 1,
                   minHeight: 0,
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  scrollbarGutter: "stable",
-                  overscrollBehavior: "contain",
+                  // The active inspector tab owns vertical scrolling.
+                  overflow: "hidden",
                   p: 1,
                 }}
               >
