@@ -1032,10 +1032,20 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
           {displayedSample && (
             <Box
+              tabIndex={inspectedSample ? 0 : undefined}
+              role={inspectedSample ? "region" : undefined}
+              aria-label={inspectedSample ? "Inspect sample values" : undefined}
+              onWheel={inspectedSample ? (event) => event.stopPropagation() : undefined}
+              onClick={inspectedSample ? (event) => event.stopPropagation() : undefined}
+              onMouseDown={inspectedSample ? (event) => event.stopPropagation() : undefined}
               sx={{
                 position: "absolute",
                 zIndex: 10,
-                pointerEvents: "none",
+                // Hover previews pass through to the chart; explicitly inspected
+                // samples must receive clicks, focus and wheel scrolling.
+                pointerEvents: inspectedSample ? "auto" : "none",
+                overscrollBehavior: "contain",
+                scrollbarGutter: "stable",
                 left: Math.max(8, Math.min(displayedSample.x + 14, (containerRef.current?.clientWidth ?? 450) - 260)),
                 top: Math.max(8, Math.min(displayedSample.y + 14, (containerRef.current?.clientHeight ?? 400) - 180)),
                 width: 240,

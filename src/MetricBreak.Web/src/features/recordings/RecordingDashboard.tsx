@@ -963,7 +963,7 @@ export function RecordingDashboard() {
         role="tabpanel"
         hidden={inspectorTab !== 0}
         sx={{
-          flex: 1,
+          flex: "1 1 0%",
           minHeight: 0,
           overflowY: "auto",
           overflowX: "hidden",
@@ -983,7 +983,7 @@ export function RecordingDashboard() {
         role="tabpanel"
         hidden={inspectorTab !== 1}
         sx={{
-          flex: 1,
+          flex: "1 1 0%",
           minHeight: 0,
           overflowY: "auto",
           overflowX: "hidden",
@@ -1012,7 +1012,7 @@ export function RecordingDashboard() {
         role="tabpanel"
         hidden={inspectorTab !== 2}
         sx={{
-          flex: 1,
+          flex: "1 1 0%",
           minHeight: 0,
           overflowY: "auto",
           overflowX: "hidden",
