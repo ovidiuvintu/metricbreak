@@ -15,9 +15,10 @@ import {
   Alert,
   Button,
   ButtonGroup,
+  Checkbox,
+  ListItemText,
   Menu,
   MenuItem,
-  ListItemText,
   Divider,
   Box,
   CircularProgress,
@@ -155,6 +156,15 @@ export function RecordingChart({
   const chartRef = useRef<ReactECharts>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const [rightAxisChannelIds, setRightAxisChannelIds] = useState<string[]>([]);
+  const [axisMenuAnchor, setAxisMenuAnchor] = useState<HTMLElement | null>(null);
+  const rightAxisSet = useMemo(() => new Set(rightAxisChannelIds), [rightAxisChannelIds]);
+  const hasRightAxis = selectedChannelIds.some((id) => rightAxisSet.has(id));
+  const toggleRightAxis = (id: string) => {
+    setRightAxisChannelIds((previous) => previous.includes(id)
+      ? previous.filter((value) => value !== id)
+      : [...previous, id]);
+  };
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
   const [pageIndex, setPageIndex] = useState(0);
   const pageCount = Math.ceil(sampleCount / PAGE_SIZE);
@@ -408,6 +418,7 @@ export function RecordingChart({
 
         return {
           id: channel.channelId,
+          yAxisIndex: rightAxisSet.has(channel.channelId) ? 1 : 0,
 
           name: channel.unit
             ? `${channel.name} (${channel.unit})`
@@ -534,7 +545,7 @@ export function RecordingChart({
 
       grid: {
         left: 20,
-        right: 35,
+        right: 12,
         top: 55,
         bottom: 45,
         containLabel: true,
@@ -591,7 +602,7 @@ export function RecordingChart({
         },
       },
 
-      yAxis: {
+      yAxis: [{
         type: "value" as const,
         scale: true,
         axisLine: {
@@ -634,7 +645,24 @@ export function RecordingChart({
             color: chartTheme.gridLineColor,
           },
         },
-      },
+      }, {
+        type: "value" as const,
+        scale: true,
+        position: "right" as const,
+        show: hasRightAxis,
+        axisLine: { show: true, lineStyle: { color: chartTheme.axisTextColor } },
+        axisLabel: {
+          color: chartTheme.axisTextColor,
+          formatter: (value: number) => {
+            const absolute = Math.abs(value);
+            if (absolute >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}G`;
+            if (absolute >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+            if (absolute >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+            return value.toLocaleString();
+          },
+        },
+        splitLine: { show: false },
+      }],
 
       dataZoom: [
         {
@@ -653,6 +681,8 @@ export function RecordingChart({
       channels,
       samples,
       selectedChannelIds,
+      rightAxisSet,
+      hasRightAxis,
       chartTheme,
       currentSequence,
       cursorHovered,
@@ -938,6 +968,30 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         <Button
           size="small"
           variant="outlined"
+          onClick={(event) => setAxisMenuAnchor(event.currentTarget)}
+          disabled={selectedChannelIds.length === 0}
+          aria-label="Configure Y axes"
+          sx={{ bgcolor: "background.paper", flexShrink: 0, whiteSpace: "nowrap" }}
+        >
+          Y Axes{hasRightAxis ? ": 2" : ": 1"}
+        </Button>
+        <Menu
+          anchorEl={axisMenuAnchor}
+          open={Boolean(axisMenuAnchor)}
+          onClose={() => setAxisMenuAnchor(null)}
+          slotProps={{ list: { 'aria-label': 'Channels plotted on right Y axis' } }}
+        >
+          <MenuItem disabled>Plot on right Y-axis</MenuItem>
+          {channels.filter((channel) => selectedChannelIds.includes(channel.channelId) && isNumericChartChannel(samples, channel.channelId)).map((channel) => (
+            <MenuItem key={channel.channelId} onClick={() => toggleRightAxis(channel.channelId)}>
+              <Checkbox size="small" checked={rightAxisSet.has(channel.channelId)} tabIndex={-1} disableRipple />
+              <ListItemText primary={channel.name} secondary={channel.unit || undefined} />
+            </MenuItem>
+          ))}
+        </Menu>
+        <Button
+          size="small"
+          variant="outlined"
           onClick={handleResetZoom}
           disabled={loading || samples.length === 0}
           sx={{ bgcolor: "background.paper", flexShrink: 0, whiteSpace: "nowrap" }}
@@ -1078,6 +1132,22 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                   <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>{entry.value}</Typography>
                 </Box>
               ))}
+              {inspectedSample && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  fullWidth
+                  sx={{ mt: 1.5 }}
+                  onClick={() => {
+                    const sequence = inspectedSample.sequence;
+                    setInspectedSample(null);
+                    manualPageRef.current = false;
+                    onSeekRef.current(sequence);
+                  }}
+                >
+                  Move Replay Cursor Here
+                </Button>
+              )}
             </Box>
           )}
           </>
