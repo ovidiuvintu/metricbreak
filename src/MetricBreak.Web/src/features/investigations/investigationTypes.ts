@@ -5,6 +5,7 @@ export interface InvestigationSummary {
     recordingId?: string;
     relativePath: string;
     exportedAtUtc: string;
+    lastOpenedAtUtc?: string;
     sourceContentHash: string;
     sourceSizeInBytes: number;
 }

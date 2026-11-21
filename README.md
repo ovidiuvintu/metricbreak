@@ -89,7 +89,7 @@ An **investigation** is a named, resumable debugging effort associated with one 
 - Bookmarks, notes, observations, and findings.
 - Selected channels, chart layout, and other relevant inspection context.
 
-Investigation persistence and restoration are **planned MVP work**, building on the existing project/workspace foundation.
+Investigation persistence and restoration are **implemented for the CSV workspace flow** (save, reopen, bookmarks, layout); project-scoped lifecycle and analysis integration remain incremental work.
 
 ### Analysis — examine relationships and evidence
 
@@ -200,7 +200,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 ### Complete the CSV MVP
 
 - [ ] Extend simple/composite breakpoint evaluation and UI to Boolean and categorical conditions.
-- [ ] Complete investigation persistence, restoration, bookmarks, and notes.
+- [x] Investigation persistence, restoration, bookmarks, chart layout in workspace (notes/description supported; project-scoped delete pending).
 - [ ] Add initial Analysis functionality: statistics, time-window inspection, and multi-channel comparison.
 - [ ] Add categorical state timelines and richer breakpoint-hit inspection.
 - [ ] Validate and complete project-free quick analysis and Save as Project.

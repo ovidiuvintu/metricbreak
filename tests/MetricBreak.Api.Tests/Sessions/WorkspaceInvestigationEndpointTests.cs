@@ -112,6 +112,36 @@ public sealed class WorkspaceInvestigationEndpointTests
         Assert.Equal("beta", match.GetProperty("recordingName").GetString());
     }
 
+    [Fact]
+    public async Task DeleteWorkspaceInvestigation_RemovesFromList()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var sessionId = await CreateSessionAsync(client);
+
+        Guid investigationId;
+
+        using (var exportResponse = await client.PostAsync(
+                   $"/api/sessions/{sessionId}/export",
+                   content: null))
+        {
+            Assert.Equal(HttpStatusCode.Created, exportResponse.StatusCode);
+            using var json = await ReadJsonAsync(exportResponse);
+            investigationId = json.RootElement.GetProperty("investigationId").GetGuid();
+        }
+
+        using var deleteResponse = await client.DeleteAsync(
+            $"/api/investigations/{investigationId}");
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        using var list = await client.GetAsync("/api/investigations");
+        using var listJson = await ReadJsonAsync(list);
+        Assert.DoesNotContain(
+            listJson.RootElement.GetProperty("investigations").EnumerateArray(),
+            item => item.GetProperty("investigationId").GetGuid() == investigationId);
+    }
+
     private static async Task<Guid> CreateSessionAsync(
         HttpClient client,
         string csvContent = _csvContent,

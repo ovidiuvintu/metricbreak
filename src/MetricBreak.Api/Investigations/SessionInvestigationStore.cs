@@ -87,20 +87,39 @@ public sealed class SessionInvestigationStore
             var displayName = normalized.Metadata?.Name?.Trim()
                 ?? normalized.Recording.RecordingName;
 
+            var lastOpened = normalized.Metadata?.LastOpenedAtUtc is { } opened &&
+                             opened != default
+                ? opened
+                : normalized.ExportedAtUtc;
+
             results.Add(new WorkspaceInvestigationItemResponse(
                 normalized.InvestigationId,
                 displayName,
                 normalized.Recording.RecordingName,
                 Path.GetFileName(filePath),
                 normalized.ExportedAtUtc,
+                lastOpened,
                 normalized.Recording.SourceContentHash,
                 normalized.Recording.SourceSizeInBytes,
                 normalized.Recording.RecordingId));
         }
 
         return results
-            .OrderByDescending(item => item.ExportedAtUtc)
+            .OrderByDescending(item => item.LastOpenedAtUtc)
             .ToArray();
+    }
+
+    public bool TryDelete(Guid investigationId)
+    {
+        if (investigationId == Guid.Empty)
+            return false;
+
+        var filePath = GetFilePath(investigationId);
+        if (!File.Exists(filePath))
+            return false;
+
+        File.Delete(filePath);
+        return true;
     }
 
     private ExportedInvestigation? TryReadFile(string filePath)

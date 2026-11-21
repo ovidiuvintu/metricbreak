@@ -87,6 +87,7 @@ export function InvestigationPanel({
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
     const [projectId, setProjectId] = useState("");
     const [investigationName, setInvestigationName] = useState("");
+    const [investigationDescription, setInvestigationDescription] = useState("");
     const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
     const [investigationId, setInvestigationId] = useState("");
     const [bookmarks, setBookmarks] = useState<InvestigationBookmark[]>([]);
@@ -135,6 +136,7 @@ export function InvestigationPanel({
                     chartViewport: document.uiState.chartViewport ?? null,
                 });
             }
+            setInvestigationDescription(document.metadata?.description?.trim() ?? "");
         } catch {
             // Selection still works when detail load fails.
         }
@@ -284,6 +286,7 @@ export function InvestigationPanel({
             const response = await investigationApi.exportSession(sessionId, {
                 investigationId: investigationId || null,
                 name,
+                description: investigationDescription.trim() || null,
                 projectId: projectId || null,
                 uiState,
             });
@@ -324,6 +327,8 @@ export function InvestigationPanel({
         try {
             const result = await tryQuickBookmark({
                 recordingName,
+                investigationId,
+                projectId,
                 sampleSequence: currentSequence,
                 timestampNanoseconds: currentTimestampNanoseconds,
             });
@@ -475,6 +480,17 @@ export function InvestigationPanel({
                 onChange={(event) => setInvestigationName(event.target.value)}
                 placeholder={recordingName ?? "Investigation name"}
                 fullWidth
+            />
+
+            <TextField
+                size="small"
+                label="Description / notes"
+                value={investigationDescription}
+                onChange={(event) => setInvestigationDescription(event.target.value)}
+                placeholder="Optional summary of what you are investigating"
+                fullWidth
+                multiline
+                minRows={2}
             />
 
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
