@@ -49,7 +49,6 @@ interface InvestigationPanelProps {
     navigationBusy: boolean;
     setupHint?: string | null;
     selectedChannelIds: string[];
-    rightAxisChannelIds: string[];
     onSeek: (sequence: number) => void;
     onBookmarksChanged?: () => void;
     onRestoreUiState?: (uiState: InvestigationUiState) => void;
@@ -74,7 +73,6 @@ export function InvestigationPanel({
     navigationBusy,
     setupHint,
     selectedChannelIds,
-    rightAxisChannelIds,
     onSeek,
     onBookmarksChanged,
     onRestoreUiState,
@@ -126,6 +124,7 @@ export function InvestigationPanel({
                 onRestoreUiState({
                     selectedChannelIds: document.uiState.selectedChannelIds ?? [],
                     rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+                    axisPins: document.uiState.axisPins,
                     chartViewport: document.uiState.chartViewport ?? null,
                 });
             }
@@ -133,6 +132,7 @@ export function InvestigationPanel({
                 onUiStateBaselineSaved(nextId, {
                     selectedChannelIds: document.uiState.selectedChannelIds ?? [],
                     rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+                    axisPins: document.uiState.axisPins,
                     chartViewport: document.uiState.chartViewport ?? null,
                 });
             }
@@ -280,7 +280,7 @@ export function InvestigationPanel({
 
             const uiState = resolveExportUiState?.() ?? {
                 selectedChannelIds,
-                rightAxisChannelIds,
+                rightAxisChannelIds: [],
             };
 
             const response = await investigationApi.exportSession(sessionId, {

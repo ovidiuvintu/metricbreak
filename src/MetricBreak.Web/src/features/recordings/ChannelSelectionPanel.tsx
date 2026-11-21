@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 
 import {
   Box,
+  Button,
   Checkbox,
   IconButton,
   InputAdornment,
@@ -18,21 +19,26 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import type { ChannelMetadata } from "./channelMetadata";
+import type { AxisPins } from "./chartAxisAssignment";
 
 interface ChannelSelectionPanelProps {
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
-  rightAxisChannelIds?: string[];
+  axisPins?: AxisPins;
+  effectiveRightAxisChannelIds?: string[];
   onSelectionChange: (ids: string[]) => void;
-  onChartAxisChange?: (channelId: string, side: "left" | "right") => void;
+  onAxisPinChange?: (channelId: string, pin: "left" | "right" | "auto") => void;
+  onClearAllAxisPins?: () => void;
 }
 
 export function ChannelSelectionPanel({
   channels,
   selectedChannelIds,
-  rightAxisChannelIds = [],
+  axisPins = {},
+  effectiveRightAxisChannelIds = [],
   onSelectionChange,
-  onChartAxisChange,
+  onAxisPinChange,
+  onClearAllAxisPins,
 }: ChannelSelectionPanelProps) {
   const [search, setSearch] = useState("");
 
@@ -57,11 +63,12 @@ export function ChannelSelectionPanel({
     selectedChannelIds.length === channels.length;
 
   const rightAxisSet = useMemo(
-    () => new Set(rightAxisChannelIds),
-    [rightAxisChannelIds],
+    () => new Set(effectiveRightAxisChannelIds),
+    [effectiveRightAxisChannelIds],
   );
 
   const dualAxisActive = selectedChannelIds.some((id) => rightAxisSet.has(id));
+  const hasPins = Object.keys(axisPins).length > 0;
 
   return (
     <Box
@@ -126,30 +133,41 @@ export function ChannelSelectionPanel({
           </Tooltip>
         </Box>
 
-        {dualAxisActive && (
-          <Typography
-            variant="caption"
-            component="div"
-            sx={{
-              fontSize: "0.72rem",
-              lineHeight: 1.45,
-              color: "text.secondary",
-              bgcolor: "action.hover",
-              borderRadius: 0.75,
-              px: 1,
-              py: 0.5,
-            }}
-          >
-            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
-              L
-            </Box>
-            {" = left axis, solid"}
-            <br />
-            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
-              R
-            </Box>
-            {" = right axis, dashed"}
-          </Typography>
+        {(dualAxisActive || hasPins) && (
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+            <Typography
+              variant="caption"
+              component="div"
+              sx={{
+                fontSize: "0.72rem",
+                lineHeight: 1.45,
+                color: "text.secondary",
+                bgcolor: "action.hover",
+                borderRadius: 0.75,
+                px: 1,
+                py: 0.5,
+              }}
+            >
+              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+                A
+              </Box>
+              {" = auto axis from scale"}
+              <br />
+              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+                L
+              </Box>
+              {" / "}
+              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+                R
+              </Box>
+              {" = pin left (solid) or right (dashed)"}
+            </Typography>
+            {hasPins && onClearAllAxisPins && (
+              <Button size="small" variant="text" onClick={onClearAllAxisPins} sx={{ alignSelf: "flex-start", p: 0, minWidth: 0 }}>
+                Reset all to auto
+              </Button>
+            )}
+          </Box>
         )}
       </Box>
 
@@ -204,13 +222,13 @@ export function ChannelSelectionPanel({
                 )}
               </Box>
 
-              {checked && onChartAxisChange && (
+              {checked && onAxisPinChange && (
                 <ToggleButtonGroup
                   size="small"
                   exclusive
-                  value={rightAxisSet.has(channel.channelId) ? "right" : "left"}
-                  onChange={(_, value: "left" | "right" | null) => {
-                    if (value) onChartAxisChange(channel.channelId, value);
+                  value={axisPins[channel.channelId] ?? "auto"}
+                  onChange={(_, value: "left" | "right" | "auto" | null) => {
+                    if (value) onAxisPinChange(channel.channelId, value);
                   }}
                   aria-label={`Y-axis for ${channel.name}`}
                   sx={{
@@ -226,12 +244,23 @@ export function ChannelSelectionPanel({
                     },
                   }}
                 >
-                  <Tooltip title="Left Y-axis (solid)">
+                  <Tooltip
+                    title={
+                      rightAxisSet.has(channel.channelId)
+                        ? "Auto (currently right)"
+                        : "Auto (currently left)"
+                    }
+                  >
+                    <ToggleButton value="auto" aria-label="Auto Y-axis">
+                      A
+                    </ToggleButton>
+                  </Tooltip>
+                  <Tooltip title="Pin left Y-axis (solid)">
                     <ToggleButton value="left" aria-label="Left Y-axis">
                       L
                     </ToggleButton>
                   </Tooltip>
-                  <Tooltip title="Right Y-axis (dashed)">
+                  <Tooltip title="Pin right Y-axis (dashed)">
                     <ToggleButton value="right" aria-label="Right Y-axis">
                       R
                     </ToggleButton>

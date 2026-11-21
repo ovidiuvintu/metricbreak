@@ -10,9 +10,12 @@ export interface InvestigationSummary {
     sourceSizeInBytes: number;
 }
 
+export type AxisPin = "left" | "right";
+
 export interface InvestigationUiState {
     selectedChannelIds: string[];
     rightAxisChannelIds: string[];
+    axisPins?: Partial<Record<string, AxisPin>>;
     chartViewport?: {
         pageStart: number;
         dataZoomStartPercent: number;

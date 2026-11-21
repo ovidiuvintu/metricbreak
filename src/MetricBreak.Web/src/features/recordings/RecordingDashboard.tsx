@@ -48,7 +48,11 @@ import { formatOpenInvestigationError } from "../investigations/formatOpenInvest
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
-import type { InvestigationUiState } from "../investigations/investigationTypes";
+import type { AxisPin, InvestigationUiState } from "../investigations/investigationTypes";
+import {
+  axisPinsFromLegacyRightAxis,
+  type AxisPins,
+} from "./chartAxisAssignment";
 import type { AppSection } from "../../app/AppSidebar";
 
 import { recordingApi } from "./recordingApi";
@@ -112,27 +116,46 @@ export function RecordingDashboard({
     string[]
   >([]);
 
-  const [rightAxisChannelIds, setRightAxisChannelIds] = useState<string[]>([]);
+  const [axisPins, setAxisPins] = useState<AxisPins>({});
+  const [effectiveRightAxisIds, setEffectiveRightAxisIds] = useState<string[]>([]);
 
-  const toggleRightAxisChannel = (channelId: string) => {
-    setRightAxisChannelIds((previous) =>
-      previous.includes(channelId)
-        ? previous.filter((id) => id !== channelId)
-        : [...previous, channelId],
-    );
+  const setAxisPin = (channelId: string, pin: AxisPin) => {
+    setAxisPins((previous) => ({
+      ...previous,
+      [channelId]: pin,
+    }));
   };
 
-  const setChannelChartAxis = (channelId: string, side: "left" | "right") => {
-    setRightAxisChannelIds((previous) => {
-      if (side === "left") return previous.filter((id) => id !== channelId);
-      if (previous.includes(channelId)) return previous;
-      return [...previous, channelId];
+  const clearAxisPin = (channelId: string) => {
+    setAxisPins((previous) => {
+      const next = { ...previous };
+      delete next[channelId];
+      return next;
     });
   };
 
+  const handleAxisPinChange = (
+    channelId: string,
+    pin: "left" | "right" | "auto",
+  ) => {
+    if (pin === "auto") {
+      clearAxisPin(channelId);
+      return;
+    }
+    setAxisPin(channelId, pin);
+  };
+
+  const clearAllAxisPins = () => setAxisPins({});
+
   const handleChannelSelectionChange = (ids: string[]) => {
     setSelectedChannelIds(ids);
-    setRightAxisChannelIds((previous) => previous.filter((id) => ids.includes(id)));
+    setAxisPins((previous) => {
+      const next = { ...previous };
+      for (const channelId of Object.keys(next)) {
+        if (!ids.includes(channelId)) delete next[channelId];
+      }
+      return next;
+    });
   };
 
   const [breakpoints, setBreakpoints] = useState<Breakpoint[]>(
@@ -207,6 +230,7 @@ export function RecordingDashboard({
     JSON.stringify({
       selectedChannelIds: uiState.selectedChannelIds ?? [],
       rightAxisChannelIds: uiState.rightAxisChannelIds ?? [],
+      axisPins: uiState.axisPins ?? {},
       chartViewport: uiState.chartViewport ?? null,
     });
   const [breakpointHitsRefreshKey, setBreakpointHitsRefreshKey] = useState(0);
@@ -349,7 +373,8 @@ export function RecordingDashboard({
         setInspectorTab(0);
         setBreakpointDialogOpen(false);
         setCompositeDialogOpen(false);
-        setRightAxisChannelIds([]);
+        setAxisPins({});
+        setEffectiveRightAxisIds([]);
       }
 
       loadedSessionIdRef.current = loadedSession.sessionId;
@@ -1150,7 +1175,10 @@ export function RecordingDashboard({
 
   const applyInvestigationUiState = useCallback((uiState: InvestigationUiState) => {
     setSelectedChannelIds(uiState.selectedChannelIds ?? []);
-    setRightAxisChannelIds(uiState.rightAxisChannelIds ?? []);
+    const pins = uiState.axisPins && Object.keys(uiState.axisPins).length > 0
+      ? uiState.axisPins as AxisPins
+      : axisPinsFromLegacyRightAxis(uiState.rightAxisChannelIds ?? []);
+    setAxisPins(pins);
     const viewport = uiState.chartViewport;
     if (viewport) {
       setRestoreChartViewport(viewport);
@@ -1160,9 +1188,10 @@ export function RecordingDashboard({
 
   const resolveExportUiState = useCallback((): InvestigationUiState => ({
     selectedChannelIds,
-    rightAxisChannelIds,
+    rightAxisChannelIds: effectiveRightAxisIds,
+    axisPins,
     chartViewport: chartViewportReaderRef.current?.read() ?? null,
-  }), [selectedChannelIds, rightAxisChannelIds]);
+  }), [selectedChannelIds, effectiveRightAxisIds, axisPins]);
 
   const isInvestigationUiDirty = useCallback(() => {
     const investigationId = context.investigationId;
@@ -1229,8 +1258,10 @@ export function RecordingDashboard({
             sampleCount={session.sampleCount}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
-            rightAxisChannelIds={rightAxisChannelIds}
-            onToggleRightAxis={toggleRightAxisChannel}
+            axisPins={axisPins}
+            onAxisPinChange={handleAxisPinChange}
+            onClearAxisPins={clearAllAxisPins}
+            onEffectiveRightAxisChange={setEffectiveRightAxisIds}
             currentSequence={
               session.currentSample?.sequence ?? null
             }
@@ -1353,9 +1384,11 @@ export function RecordingDashboard({
         <ChannelSelectionPanel
           channels={channels}
           selectedChannelIds={selectedChannelIds}
-          rightAxisChannelIds={rightAxisChannelIds}
+          axisPins={axisPins}
+          effectiveRightAxisChannelIds={effectiveRightAxisIds}
           onSelectionChange={handleChannelSelectionChange}
-          onChartAxisChange={setChannelChartAxis}
+          onAxisPinChange={handleAxisPinChange}
+          onClearAllAxisPins={clearAllAxisPins}
         />
       </Box>
 
@@ -1493,9 +1526,10 @@ export function RecordingDashboard({
       if (!loaded) return;
 
       if (document.uiState) {
-        const uiState = {
+        const uiState: InvestigationUiState = {
           selectedChannelIds: document.uiState.selectedChannelIds ?? [],
           rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+          axisPins: document.uiState.axisPins,
           chartViewport: document.uiState.chartViewport ?? null,
         };
         applyInvestigationUiState(uiState);
@@ -1625,7 +1659,6 @@ export function RecordingDashboard({
         navigationBusy={navigationBusy}
         setupHint={investigationSetupHint}
         selectedChannelIds={selectedChannelIds}
-        rightAxisChannelIds={rightAxisChannelIds}
         onSeek={(sequence) => void handleSeek(sequence)}
         onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
         onRestoreUiState={applyInvestigationUiState}

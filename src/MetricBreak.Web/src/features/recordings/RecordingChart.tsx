@@ -52,6 +52,17 @@ import type { BreakpointDialogDraft } from "./BreakpointDialog";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 import {
+  AXIS_RANGE_MIN_SCALE,
+  AXIS_RANGE_RATIO_THRESHOLD,
+  collectPlottedSeriesRange,
+  isNumericChartChannel,
+  numericPlotValue,
+  resolveEffectiveRightAxisIds,
+  suggestRightAxisChannelIds,
+  type AxisPins,
+  type PlottedSeriesRange,
+} from "./chartAxisAssignment";
+import {
   assignChartSeriesColors,
   createChartTheme,
   getAxisTemperatureAccent,
@@ -225,8 +236,10 @@ interface RecordingChartProps {
   sampleCount: number;
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
-  rightAxisChannelIds: string[];
-  onToggleRightAxis: (channelId: string) => void;
+  axisPins: AxisPins;
+  onAxisPinChange: (channelId: string, pin: "left" | "right" | "auto") => void;
+  onClearAxisPins?: () => void;
+  onEffectiveRightAxisChange?: (rightAxisChannelIds: string[]) => void;
   currentSequence: number | null;
   currentTimestampNanoseconds?: number | string | null;
   timestampOrigin?: "Unix" | "Elapsed";
@@ -314,52 +327,6 @@ function formatSampleValue(sample: SampleRangeItem, channelId: string): string {
   return numeric == null ? "N/A" : numeric.toLocaleString();
 }
 
-// The numeric projection may contain a default zero for a typed Missing value.
-// Always consult the typed representation before drawing a point.
-function numericPlotValue(sample: SampleRangeItem, channelId: string): number | null {
-  const typedSample = sample as SampleRangeItem & {
-    typedChannels?: Record<string, { valueType: string; value: unknown } | undefined>;
-  };
-  if (typedSample.typedChannels?.[channelId]?.valueType === "Missing") return null;
-  const value = sample.channels[channelId];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-// Mark windows where all plotted channels lack data. Individual channel gaps
-// remain visible as broken lines without falsely labeling valid data "No Data".
-type PlottedSeriesRange = {
-  min: number;
-  max: number;
-  span: number;
-  scale: number;
-};
-
-const AXIS_RANGE_RATIO_THRESHOLD = 40;
-const AXIS_RANGE_MIN_SCALE = 1e-9;
-
-function collectPlottedSeriesRange(
-  samples: SampleRangeItem[],
-  channelId: string,
-): PlottedSeriesRange | null {
-  let min = Number.POSITIVE_INFINITY;
-  let max = Number.NEGATIVE_INFINITY;
-
-  for (const sample of samples) {
-    const value = numericPlotValue(sample, channelId);
-    if (value === null) continue;
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-  }
-
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-
-  const span = max - min;
-  const extent = Math.max(Math.abs(min), Math.abs(max));
-  const scale = Math.max(span, extent, AXIS_RANGE_MIN_SCALE);
-
-  return { min, max, span, scale };
-}
-
 function axisHasDivergentRanges(ranges: PlottedSeriesRange[]): boolean {
   if (ranges.length < 2) return false;
 
@@ -402,26 +369,6 @@ function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
   }
   if (start !== null && previous !== null) windows.push({ start, end: previous });
   return windows;
-}
-
-// ChannelMetadata does not currently expose a declared value type. Infer chartable
-// numeric channels from the loaded samples, preferring typed values over the
-// numeric projection (which can contain placeholder zeros for other types).
-function isNumericChartChannel(samples: SampleRangeItem[], channelId: string): boolean {
-  let sawNumeric = false;
-  for (const sample of samples) {
-    const typed = sample.typedChannels?.[channelId];
-    if (typed) {
-      if (typed.valueType === "Boolean" || typed.valueType === "Categorical") return false;
-      if (typed.valueType === "Numeric" && typeof typed.value === "number" && Number.isFinite(typed.value)) {
-        sawNumeric = true;
-      }
-      continue;
-    }
-    const projected = sample.channels[channelId];
-    if (typeof projected === "number" && Number.isFinite(projected)) sawNumeric = true;
-  }
-  return sawNumeric;
 }
 
 const PAGE_SIZE = 5000;
@@ -601,8 +548,10 @@ export function RecordingChart({
   sampleCount,
   channels,
   selectedChannelIds,
-  rightAxisChannelIds,
-  onToggleRightAxis,
+  axisPins,
+  onAxisPinChange,
+  onClearAxisPins,
+  onEffectiveRightAxisChange,
   currentSequence,
   currentTimestampNanoseconds,
   timestampOrigin = "Unix",
@@ -646,9 +595,29 @@ export function RecordingChart({
   const BOX_ZOOM_DRAG_THRESHOLD_PX = 8;
 
   const [axisMenuAnchor, setAxisMenuAnchor] = useState<HTMLElement | null>(null);
-  const rightAxisSet = useMemo(() => new Set(rightAxisChannelIds), [rightAxisChannelIds]);
-  const hasRightAxis = selectedChannelIds.some((id) => rightAxisSet.has(id));
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
+  const suggestedRight = useMemo(
+    () => suggestRightAxisChannelIds(channels, selectedChannelIds, samples),
+    [channels, selectedChannelIds, samples],
+  );
+  const effectiveRightIds = useMemo(
+    () => resolveEffectiveRightAxisIds(
+      suggestedRight,
+      selectedChannelIds,
+      axisPins,
+    ),
+    [suggestedRight, selectedChannelIds, axisPins],
+  );
+  const rightAxisSet = useMemo(
+    () => new Set(effectiveRightIds),
+    [effectiveRightIds],
+  );
+  const hasRightAxis = selectedChannelIds.some((id) => rightAxisSet.has(id));
+
+  useEffect(() => {
+    onEffectiveRightAxisChange?.(effectiveRightIds);
+  }, [effectiveRightIds, onEffectiveRightAxisChange]);
+
   // Keep the current page and its immediate neighbors ready for instant navigation.
   // The cache is session-scoped and bounded to avoid retaining entire recordings.
   const pageCacheRef = useRef(new Map<string, SampleRangeItem[]>());
@@ -2258,21 +2227,36 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           slotProps={{ list: { 'aria-label': 'Channels plotted on right Y axis' } }}
         >
           <MenuItem disabled sx={{ opacity: 1, fontSize: "0.75rem" }}>
-            Checked → right Y-axis (dashed). Unchecked → left (solid).
+            Tap a channel to pin it to the opposite axis. Use A in the channel list for auto.
           </MenuItem>
-          {channels.filter((channel) => selectedChannelIds.includes(channel.channelId) && isNumericChartChannel(samples, channel.channelId)).map((channel) => (
-            <MenuItem key={channel.channelId} onClick={() => onToggleRightAxis(channel.channelId)}>
-              <Checkbox size="small" checked={rightAxisSet.has(channel.channelId)} tabIndex={-1} disableRipple />
+          {Object.keys(axisPins).length > 0 && onClearAxisPins && (
+            <MenuItem
+              onClick={() => {
+                onClearAxisPins();
+                setAxisMenuAnchor(null);
+              }}
+            >
+              Reset all axes to auto
+            </MenuItem>
+          )}
+          {channels.filter((channel) => selectedChannelIds.includes(channel.channelId) && isNumericChartChannel(samples, channel.channelId)).map((channel) => {
+            const onRight = rightAxisSet.has(channel.channelId);
+            const pinned = axisPins[channel.channelId];
+            return (
+            <MenuItem
+              key={channel.channelId}
+              onClick={() => onAxisPinChange(channel.channelId, onRight ? "left" : "right")}
+            >
+              <Checkbox size="small" checked={onRight} tabIndex={-1} disableRipple />
               <ListItemText
                 primary={channel.name}
                 secondary={
-                  rightAxisSet.has(channel.channelId)
-                    ? `Right axis${channel.unit ? ` · ${channel.unit}` : ""}`
-                    : `Left axis${channel.unit ? ` · ${channel.unit}` : ""}`
+                  `${onRight ? "Right" : "Left"} axis${pinned ? " (pinned)" : " (auto)"}${channel.unit ? ` · ${channel.unit}` : ""}`
                 }
               />
             </MenuItem>
-          ))}
+            );
+          })}
         </Menu>
         <Button
           size="small"
