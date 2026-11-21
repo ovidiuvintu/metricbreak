@@ -17,6 +17,7 @@ export interface CreateBreakpointRequest {
   channelId: string;
   operator: ComparisonOperator;
   threshold: number;
+  value?: string;
 }
 
 export interface Breakpoint extends CreateBreakpointRequest {

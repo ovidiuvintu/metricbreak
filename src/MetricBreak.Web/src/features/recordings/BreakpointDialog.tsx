@@ -54,19 +54,22 @@ export function BreakpointDialog({
   const [operator, setOperator] =
     useState<ComparisonOperator>("GreaterThan");
   const [threshold, setThreshold] = useState("");
+  const [typedValue, setTypedValue] = useState("");
 
   const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
   const allowedOperators = operators.filter(o => selectedType === "Numeric" ||
-    (selectedType === "Boolean" && ["Changed", "RisingEdge", "FallingEdge"].includes(o.value)) ||
-    (selectedType === "Categorical" && o.value === "Changed"));
+    (selectedType === "Boolean" && ["Equal", "NotEqual", "Changed", "RisingEdge", "FallingEdge"].includes(o.value)) ||
+    (selectedType === "Categorical" && ["Equal", "NotEqual", "Changed"].includes(o.value)));
   const needsThreshold = selectedType === "Numeric" && operator !== "Changed";
   const numericThreshold = needsThreshold ? Number(threshold) : 0;
 
+  const needsTypedValue = selectedType !== "Numeric" && ["Equal", "NotEqual"].includes(operator);
   const valid =
     channelId !== "" &&
     channels.some((channel) => channel.channelId === channelId) &&
     (!needsThreshold || threshold.trim() !== "") &&
-    Number.isFinite(numericThreshold);
+    Number.isFinite(numericThreshold) &&
+    (!needsTypedValue || (selectedType === "Boolean" ? ["true", "false"].includes(typedValue) : typedValue.length > 0));
 
   const handleCreate = async () => {
     if (!valid || busy) return;
@@ -75,6 +78,7 @@ export function BreakpointDialog({
       channelId,
       operator,
       threshold: numericThreshold,
+      ...(needsTypedValue ? { value: typedValue } : {}),
     });
   };
 
@@ -94,6 +98,7 @@ export function BreakpointDialog({
                 setChannelId(event.target.value);
                 const nextType = channels.find(c => c.channelId === event.target.value)?.valueType ?? "Numeric";
                 if (nextType !== "Numeric") setOperator("Changed");
+                setTypedValue("");
               }}
             >
               {channels.map((channel) => (
@@ -124,6 +129,13 @@ export function BreakpointDialog({
             </Select>
           </FormControl>
 
+          {needsTypedValue && (selectedType === "Boolean" ?
+            <FormControl fullWidth size="small"><InputLabel>Value</InputLabel>
+              <Select label="Value" value={typedValue} onChange={event => setTypedValue(event.target.value)}>
+                <MenuItem value="true">true</MenuItem><MenuItem value="false">false</MenuItem>
+              </Select></FormControl> :
+            <TextField label="Value" size="small" value={typedValue}
+              onChange={event => setTypedValue(event.target.value)} fullWidth />)}
           {needsThreshold && <TextField
             label="Threshold"
             type="number"

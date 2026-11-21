@@ -120,6 +120,11 @@ export function RecordingDashboard() {
   // Cancels scheduled work and prevents older responses from publishing state.
   // Backend generation tokens independently reject stale advances.
   const cancelLocalPlayback = () => {
+    console.trace("PLAYBACK TIMER CANCELLED", {
+      timer: playbackTimerRef.current,
+      epoch: playbackEpochRef.current,
+      running: playbackRunningRef.current,
+    });
     ++playbackEpochRef.current;
     playbackRunningRef.current = false;
     if (playbackTimerRef.current !== null) {
@@ -456,6 +461,13 @@ export function RecordingDashboard() {
        };
 
        const advance = async (current: SessionState): Promise<void> => {
+          console.log("PLAYBACK TICK", {
+            epoch,
+            currentEpoch: playbackEpochRef.current,
+            sequence: current.currentSample?.sequence,
+            running: playbackRunningRef.current,
+          });
+
          if (epoch !== playbackEpochRef.current) return;
          try {
            const sequence = current.currentSample?.sequence ?? 0;
@@ -483,6 +495,18 @@ export function RecordingDashboard() {
            }
 
            if (count === 0) {
+            console.log("PLAYBACK SCHEDULER", {
+              sequence,
+              elapsedMs,
+              recordingStartNs: recordingStartNs.toString(),
+              dueNs: dueNs.toString(),
+              nextTimestamp: nextTimestamp?.toString(),
+              count,
+              delaySeconds:
+                nextTimestamp !== null
+                  ? Number((nextTimestamp - dueNs) / 1_000_000n) / 1000
+                  : null,
+            });
              if (sequence >= lastSequence) {
                playbackRunningRef.current = false;
                playbackStateRef.current = "stopped";
@@ -493,11 +517,27 @@ export function RecordingDashboard() {
              if (epoch !== playbackEpochRef.current) return;
              const remainingNs = nextTimestamp - dueNs;
              const delayMs = remainingNs > 0n ? Number(remainingNs / 1_000_000n) : 0;
-             playbackTimerRef.current = setTimeout(() => {
-               playbackTimerRef.current = null;
-               void advance(current);
-             }, Math.max(1, Math.min(delayMs, 2_147_483_647)));
-             return;
+             const scheduledDelay = Math.max(
+              1,
+              Math.min(delayMs, 2_147_483_647)
+            );
+
+            console.log("PLAYBACK TIMER SCHEDULED", {
+              sequence,
+              scheduledDelay
+            });
+
+            playbackTimerRef.current = setTimeout(() => {
+              console.log("PLAYBACK TIMER FIRED", {
+                sequence,
+                epoch,
+                currentEpoch: playbackEpochRef.current
+              });
+
+              playbackTimerRef.current = null;
+              void advance(current);
+            }, scheduledDelay);
+            return;
            }
 
            const response = await replayApi.advancePlayback(sessionId, generation, count);

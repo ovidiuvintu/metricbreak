@@ -17,7 +17,7 @@ public static class BreakpointEvaluator
             breakpoint.ChannelId,
             breakpoint.Operator,
             breakpoint.Threshold,
-            sample, previous);
+            breakpoint.ExpectedValue, sample, previous);
     }
 
     public static bool Evaluate(
@@ -36,7 +36,7 @@ public static class BreakpointEvaluator
                         condition.ChannelId,
                         condition.Operator,
                         condition.Threshold,
-                        sample, previous)),
+                        condition.ExpectedValue, sample, previous)),
 
             LogicalOperator.Or =>
                 breakpoint.Conditions.Any(condition =>
@@ -44,7 +44,7 @@ public static class BreakpointEvaluator
                         condition.ChannelId,
                         condition.Operator,
                         condition.Threshold,
-                        sample, previous)),
+                        condition.ExpectedValue, sample, previous)),
 
             _ => throw new ArgumentOutOfRangeException(
                 nameof(breakpoint),
@@ -98,7 +98,8 @@ public static class BreakpointEvaluator
             breakpoint.Operator,
             breakpoint.Threshold)
         {
-            TypedObservedValue = typedValue
+            TypedObservedValue = typedValue,
+            ExpectedValue = breakpoint.ExpectedValue
         };
     }
 
@@ -129,7 +130,7 @@ public static class BreakpointEvaluator
                     condition.ChannelId,
                     condition.Operator,
                     condition.Threshold,
-                    sample, previous);
+                    condition.ExpectedValue, sample, previous);
 
                 return new BreakpointConditionHit(
                     condition.ChannelId,
@@ -138,7 +139,8 @@ public static class BreakpointEvaluator
                     condition.Threshold,
                     matched)
                 {
-                    TypedObservedValue = sample.GetTypedValue(condition.ChannelId)
+                    TypedObservedValue = sample.GetTypedValue(condition.ChannelId),
+                    ExpectedValue = condition.ExpectedValue
                 };
             })
             .ToArray();
@@ -190,49 +192,10 @@ public static class BreakpointEvaluator
     }
 
     private static bool EvaluateCondition(
-        Guid channelId,
-        ComparisonOperator comparisonOperator,
-        double threshold,
-        TelemetrySample sample,
-        TelemetrySample? previous = null)
-    {
-        if (comparisonOperator is ComparisonOperator.Changed or ComparisonOperator.RisingEdge or ComparisonOperator.FallingEdge)
-            return EdgeConditionEvaluator.Evaluate(comparisonOperator,
-                previous?.GetTypedValue(channelId), sample.GetTypedValue(channelId), threshold);
-
-        double? observedValue = sample.GetValue(channelId);
-
-        if (observedValue is not double value ||
-            !double.IsFinite(value))
-        {
-            return false;
-        }
-
-        return comparisonOperator switch
-        {
-            ComparisonOperator.GreaterThan =>
-                value > threshold,
-
-            ComparisonOperator.GreaterThanOrEqual =>
-                value >= threshold,
-
-            ComparisonOperator.LessThan =>
-                value < threshold,
-
-            ComparisonOperator.LessThanOrEqual =>
-                value <= threshold,
-
-            ComparisonOperator.Equal =>
-                value == threshold,
-
-            ComparisonOperator.NotEqual =>
-                value != threshold,
-
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(comparisonOperator),
-                "Unsupported comparison operator.")
-        };
-    }
+        Guid channelId, ComparisonOperator comparisonOperator, double threshold,
+        ChannelValue? expectedValue, TelemetrySample sample, TelemetrySample? previous = null)
+        => TypedConditionEvaluator.Evaluate(channelId, comparisonOperator, threshold,
+            expectedValue, sample, previous);
 
     private static void ValidatePosition(
         SamplePosition position,

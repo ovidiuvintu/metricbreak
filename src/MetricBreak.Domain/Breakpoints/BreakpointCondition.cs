@@ -1,3 +1,5 @@
+using MetricBreak.Domain.Recordings;
+
 namespace MetricBreak.Domain.Breakpoints;
 
 /// <summary>
@@ -11,10 +13,13 @@ public sealed record BreakpointCondition
 
     public double Threshold { get; }
 
+    public ChannelValue? ExpectedValue { get; }
+
     public BreakpointCondition(
         Guid channelId,
         ComparisonOperator comparisonOperator,
-        double threshold)
+        double threshold,
+        ChannelValue? expectedValue = null)
     {
         if (channelId == Guid.Empty)
         {
@@ -39,5 +44,6 @@ public sealed record BreakpointCondition
         ChannelId = channelId;
         Operator = comparisonOperator;
         Threshold = threshold;
+        ExpectedValue = expectedValue;
     }
 }

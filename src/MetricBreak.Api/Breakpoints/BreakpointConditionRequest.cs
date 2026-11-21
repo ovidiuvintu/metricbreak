@@ -7,4 +7,5 @@ namespace MetricBreak.Api.Breakpoints;
 public sealed record BreakpointConditionRequest(
     Guid ChannelId,
     string Operator,
-    double Threshold);
+    double Threshold,
+    string? Value = null);

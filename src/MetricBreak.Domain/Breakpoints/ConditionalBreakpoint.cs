@@ -1,3 +1,5 @@
+using MetricBreak.Domain.Recordings;
+
 
 namespace MetricBreak.Domain.Breakpoints;
 
@@ -11,13 +13,16 @@ public sealed class ConditionalBreakpoint : IBreakpoint
 
     public double Threshold { get; }
 
+    public ChannelValue? ExpectedValue { get; }
+
     public bool IsEnabled { get; private set; } = true;
 
     public ConditionalBreakpoint(
         Guid id,
         Guid channelId,
         ComparisonOperator comparisonOperator,
-        double threshold)
+        double threshold,
+        ChannelValue? expectedValue = null)
     {
         if (id == Guid.Empty)
             throw new ArgumentException(
@@ -42,6 +47,7 @@ public sealed class ConditionalBreakpoint : IBreakpoint
         ChannelId = channelId;
         Operator = comparisonOperator;
         Threshold = threshold;
+        ExpectedValue = expectedValue;
     }
 
     public void SetEnabled(bool isEnabled)

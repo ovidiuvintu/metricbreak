@@ -14,4 +14,6 @@ public sealed record BreakpointConditionHit(
     bool Matched)
 {
     public ChannelValue? TypedObservedValue { get; init; }
+
+    public ChannelValue? ExpectedValue { get; init; }
 }
