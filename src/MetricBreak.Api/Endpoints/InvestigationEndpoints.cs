@@ -174,7 +174,128 @@ internal static class InvestigationEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapGet(
+            "/api/investigations/{investigationId:guid}/bookmarks",
+            (
+                Guid investigationId,
+                [FromQuery] Guid? projectId,
+                InvestigationBookmarkService bookmarks) =>
+            {
+                if (!bookmarks.TryList(
+                        projectId,
+                        investigationId,
+                        out var response,
+                        out var error)
+                    || response is null)
+                {
+                    return ToBookmarkErrorResult(error);
+                }
+
+                return Results.Ok(response);
+            })
+            .WithName("ListInvestigationBookmarks")
+            .WithTags(_investigationTag)
+            .Produces<InvestigationBookmarksResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
+        app.MapPost(
+            "/api/investigations/{investigationId:guid}/bookmarks",
+            (
+                Guid investigationId,
+                [FromQuery] Guid? projectId,
+                CreateInvestigationBookmarkRequest request,
+                InvestigationBookmarkService bookmarks) =>
+            {
+                if (!bookmarks.TryCreate(
+                        projectId,
+                        investigationId,
+                        request,
+                        out var bookmark,
+                        out var error)
+                    || bookmark is null)
+                {
+                    return ToBookmarkErrorResult(error);
+                }
+
+                return Results.Created(
+                    $"/api/investigations/{investigationId}/bookmarks/{bookmark.BookmarkId}",
+                    bookmark);
+            })
+            .WithName("CreateInvestigationBookmark")
+            .WithTags(_investigationTag)
+            .Produces<InvestigationBookmarkItemResponse>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
+        app.MapPut(
+            "/api/investigations/{investigationId:guid}/bookmarks/{bookmarkId:guid}",
+            (
+                Guid investigationId,
+                Guid bookmarkId,
+                [FromQuery] Guid? projectId,
+                UpdateInvestigationBookmarkRequest request,
+                InvestigationBookmarkService bookmarks) =>
+            {
+                if (!bookmarks.TryUpdate(
+                        projectId,
+                        investigationId,
+                        bookmarkId,
+                        request,
+                        out var bookmark,
+                        out var error)
+                    || bookmark is null)
+                {
+                    return ToBookmarkErrorResult(error);
+                }
+
+                return Results.Ok(bookmark);
+            })
+            .WithName("UpdateInvestigationBookmark")
+            .WithTags(_investigationTag)
+            .Produces<InvestigationBookmarkItemResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
+        app.MapDelete(
+            "/api/investigations/{investigationId:guid}/bookmarks/{bookmarkId:guid}",
+            (
+                Guid investigationId,
+                Guid bookmarkId,
+                [FromQuery] Guid? projectId,
+                InvestigationBookmarkService bookmarks) =>
+            {
+                if (!bookmarks.TryDelete(
+                        projectId,
+                        investigationId,
+                        bookmarkId,
+                        out var error))
+                {
+                    return ToBookmarkErrorResult(error);
+                }
+
+                return Results.NoContent();
+            })
+            .WithName("DeleteInvestigationBookmark")
+            .WithTags(_investigationTag)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
         return app;
+    }
+
+    private static IResult ToBookmarkErrorResult(ProjectStoreError? error)
+    {
+        if (error is null)
+            return Results.BadRequest(new { Error = "Request failed." });
+
+        if (error.Code is "InvestigationNotFound" or "BookmarkNotFound")
+        {
+            return Results.NotFound(ToErrorBody(error));
+        }
+
+        return Results.BadRequest(ToErrorBody(error));
     }
 
     private static object ToErrorBody(ProjectStoreError error)

@@ -25,6 +25,10 @@ import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
 import { BreakpointDialog } from "./BreakpointDialog";
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
+import { InvestigationPanel } from "../investigations/InvestigationPanel";
+import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
+import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
+import type { AppSection } from "../../app/AppSidebar";
 
 import { recordingApi } from "./recordingApi";
 import { replayApi } from "./replayApi";
@@ -48,7 +52,15 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export function RecordingDashboard() {
+interface RecordingDashboardProps {
+  section: AppSection;
+  onSelectSection: (section: AppSection) => void;
+}
+
+export function RecordingDashboard({
+  section,
+  onSelectSection,
+}: RecordingDashboardProps) {
   const [session, setSession] = useState<SessionState | null>(
     null,
   );
@@ -171,6 +183,11 @@ export function RecordingDashboard() {
     return () => { cancelled = true; };
   }, [inspectorTab, watchSessionId, watchSequence]);
 
+  useEffect(() => {
+    if (!session?.recordingId || session.currentSample == null) return;
+    saveResumeSequence(session.recordingId, session.currentSample.sequence);
+  }, [session?.recordingId, session?.currentSample?.sequence]);
+
   const previousWatchSample =
     previousSampleResult != null &&
     previousSampleResult.sessionId === watchSessionId &&
@@ -239,6 +256,24 @@ export function RecordingDashboard() {
 
       loadedSessionIdRef.current = loadedSession.sessionId;
 
+      if (!isSameSession) {
+        const resumeSequence = getResumeSequence(loadedSession.recordingId);
+        if (
+          resumeSequence !== null &&
+          resumeSequence >= 0 &&
+          resumeSequence < loadedSession.sampleCount &&
+          resumeSequence !== loadedSession.currentSample.sequence
+        ) {
+          const seekResult = await replayApi.seek(
+            loadedSession.sessionId,
+            resumeSequence,
+          );
+          if (version === loadVersionRef.current) {
+            setSession(seekResult.session);
+          }
+        }
+      }
+
       console.debug("Recording loaded:", {
         sessionId: loadedSession.sessionId,
         sampleCount: loadedSession.sampleCount,
@@ -273,6 +308,7 @@ export function RecordingDashboard() {
 
     if (loaded) {
       setImportSuccess("Recording imported successfully.");
+      onSelectSection("dashboard");
     }
   };
 
@@ -1119,6 +1155,74 @@ export function RecordingDashboard() {
     </Box>
   );
 
+  const navigationBusy =
+    loading || seeking || breakpointBusy ||
+    playbackRunningRef.current || playbackBusy;
+
+  const investigationsView = (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        maxWidth: 520,
+      }}
+    >
+      {session ? (
+        <InvestigationPanel
+          sessionId={session.sessionId}
+          recordingName={session.recordingName}
+          currentSequence={session.currentSample?.sequence ?? null}
+          currentTimestampNanoseconds={
+            session.currentSample?.timestampNanoseconds ?? null
+          }
+          timestampOrigin={session.timestampOrigin ?? "Unix"}
+          navigationBusy={navigationBusy}
+          onSeek={(sequence) => void handleSeek(sequence)}
+        />
+      ) : (
+        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
+          Import a recording under Recordings before saving investigation bookmarks.
+        </Typography>
+      )}
+    </Box>
+  );
+
+  const dashboardView = (
+    <RecordingDebuggerDashboard
+      session={session}
+      channelCount={channels.length}
+      breakpoints={breakpoints}
+      compositeBreakpoints={compositeBreakpoints}
+      onImport={() => setDialogOpen(true)}
+      onResumeDebugging={() => onSelectSection("recordings")}
+      onManageBreakpoints={() => {
+        onSelectSection("recordings");
+        setInspectorTab(1);
+      }}
+      onOpenInvestigations={() => onSelectSection("investigations")}
+      onGoToSample={(sequence) => {
+        void handleSeek(sequence).then(() => onSelectSection("recordings"));
+      }}
+    />
+  );
+
+  const sectionPlaceholder = (
+    <Box
+      sx={{
+        display: "flex",
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        px: 2,
+      }}
+    >
+      <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
+        This section is not available yet. Open the Dashboard or Recordings view.
+      </Typography>
+    </Box>
+  );
+
   // --------------------------------------------------
   // Render
   // --------------------------------------------------
@@ -1159,13 +1263,17 @@ export function RecordingDashboard() {
           </Box>
         )}
 
-        <RecordingWorkspace
-          toolbar={toolbar}
-          chart={chart}
-          channels={channelPanel}
-          replayControls={replayControls}
-          details={details}
-        />
+        {section === "dashboard" ? dashboardView
+          : section === "investigations" ? investigationsView
+          : section === "recordings" ? (
+            <RecordingWorkspace
+              toolbar={toolbar}
+              chart={chart}
+              channels={channelPanel}
+              replayControls={replayControls}
+              details={details}
+            />
+          ) : sectionPlaceholder}
       </Box>
 
       <ImportRecordingDialog

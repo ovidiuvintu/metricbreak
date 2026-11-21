@@ -461,6 +461,7 @@ public sealed class ProjectWorkspaceConsistencyTests
                 SequenceNumber: 1,
                 ExecutionState: "Paused",
                 PauseReason: "Test"),
-            Breakpoints: Array.Empty<BreakpointExportSnapshot>());
+            Breakpoints: Array.Empty<BreakpointExportSnapshot>(),
+            Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>());
     }
 }

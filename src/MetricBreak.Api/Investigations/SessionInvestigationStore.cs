@@ -57,7 +57,11 @@ public sealed class SessionInvestigationStore
             json,
             _jsonOptions);
 
-        return investigation is not null;
+        if (investigation is null)
+            return false;
+
+        investigation = InvestigationBookmarkMutations.Normalize(investigation);
+        return true;
     }
 
     private string GetFilePath(Guid investigationId)
