@@ -4,6 +4,8 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
+import NavigateBeforeIcon from "@mui/icons-material/NavigateBefore";
+import NavigateNextIcon from "@mui/icons-material/NavigateNext";
 import type { Breakpoint, CompositeBreakpoint, ComparisonOperator } from "./breakpointApi";
 import type { ChannelMetadata } from "./channelMetadata";
 
@@ -18,6 +20,8 @@ interface BreakpointPanelProps {
   onAddComposite: () => void;
   onSetEnabled: (breakpointId: string, isEnabled: boolean) => void;
   onDelete: (breakpointId: string) => void;
+  onRunTo?: (breakpointId: string, direction: "forward" | "backward") => void;
+  focusedBreakpointId?: string | null;
 }
 
 const symbols: Record<ComparisonOperator, string> = {
@@ -27,7 +31,7 @@ const symbols: Record<ComparisonOperator, string> = {
 
 export function BreakpointPanel({
   breakpoints, compositeBreakpoints, channels, loading, busy, error,
-  onAdd, onAddComposite, onSetEnabled, onDelete,
+  onAdd, onAddComposite, onSetEnabled, onDelete, onRunTo, focusedBreakpointId,
 }: BreakpointPanelProps) {
   const names = new Map(channels.map(c => [c.channelId, c.name]));
   const format = (c: { channelId: string; operator: ComparisonOperator; threshold: number; value?: string }) =>
@@ -35,7 +39,35 @@ export function BreakpointPanel({
   const total = breakpoints.length + compositeBreakpoints.length;
 
   const actions = (id: string, enabled: boolean, label: string) => (
-    <>
+  <>
+      {onRunTo && (
+        <>
+          <Tooltip title="Previous occurrence">
+            <span>
+              <IconButton
+                size="small"
+                disabled={busy}
+                aria-label={`Previous hit for ${label}`}
+                onClick={() => onRunTo(id, "backward")}
+              >
+                <NavigateBeforeIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="Next occurrence">
+            <span>
+              <IconButton
+                size="small"
+                disabled={busy}
+                aria-label={`Next hit for ${label}`}
+                onClick={() => onRunTo(id, "forward")}
+              >
+                <NavigateNextIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </>
+      )}
       <Tooltip title={enabled ? "Disable breakpoint" : "Enable breakpoint"}>
         <span>
           <Switch size="small" checked={enabled} disabled={busy}
@@ -69,17 +101,34 @@ export function BreakpointPanel({
           </Button>
         </Stack>
       </Box>
+      {onRunTo && total > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          Use ◀ ▶ on each breakpoint to jump to previous or next occurrence (like Find Next).
+        </Typography>
+      )}
       {error && <Alert severity="error">{error}</Alert>}
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}><CircularProgress size={24} /></Box>
       ) : total === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-          No breakpoints configured. Add a condition or composite expression to pause replay.
+          No breakpoints configured. Right-click the chart on an interesting sample to add one, or use Add here.
         </Typography>
       ) : (
         <Stack divider={<Divider flexItem />} spacing={0}>
           {breakpoints.map(b => (
-            <Box key={b.breakpointId} sx={{ display: "flex", alignItems: "center", gap: 0.5, py: 1, opacity: b.isEnabled ? 1 : 0.6 }}>
+            <Box
+              key={b.breakpointId}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 0.5,
+                py: 1,
+                opacity: b.isEnabled ? 1 : 0.6,
+                borderRadius: 1,
+                px: focusedBreakpointId === b.breakpointId ? 0.5 : 0,
+                bgcolor: focusedBreakpointId === b.breakpointId ? "action.selected" : "transparent",
+              }}
+            >
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Tooltip title={format(b)}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>{names.get(b.channelId) ?? b.channelId}</Typography>
@@ -92,7 +141,19 @@ export function BreakpointPanel({
           {compositeBreakpoints.map(b => {
             const expression = b.conditions.map(format).join(b.logicalOperator === "And" ? " AND " : " OR ");
             return (
-              <Box key={b.breakpointId} sx={{ display: "flex", alignItems: "center", gap: 0.5, py: 1, opacity: b.isEnabled ? 1 : 0.6 }}>
+              <Box
+                key={b.breakpointId}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 0.5,
+                  py: 1,
+                  opacity: b.isEnabled ? 1 : 0.6,
+                  borderRadius: 1,
+                  px: focusedBreakpointId === b.breakpointId ? 0.5 : 0,
+                  bgcolor: focusedBreakpointId === b.breakpointId ? "action.selected" : "transparent",
+                }}
+              >
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Typography
                     variant="caption"

@@ -29,6 +29,8 @@ import {
 import { useTheme } from "@mui/material/styles";
 
 import { recordingApi } from "./recordingApi";
+import type { CreateBreakpointRequest } from "./breakpointApi";
+import type { BreakpointDialogDraft } from "./BreakpointDialog";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 import {
@@ -51,6 +53,11 @@ interface RecordingChartProps {
   onSeek: (sequence: number) => void;
   onScrubStart: () => void;
   onScrubEnd: (sequence: number) => void;
+  onOpenBreakpointDialog?: (draft: BreakpointDialogDraft) => void;
+  onCreateBreakpointAtSample?: (
+    request: CreateBreakpointRequest,
+    options?: { jumpToNext?: boolean },
+  ) => void;
 }
 
 type HoverDetails = {
@@ -406,6 +413,8 @@ export function RecordingChart({
   onSeek,
   onScrubStart,
   onScrubEnd,
+  onOpenBreakpointDialog,
+  onCreateBreakpointAtSample,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -1407,27 +1416,6 @@ export function RecordingChart({
   // This also handles clicks on empty areas of the plot.
   const handleChartReady = useCallback(
     (chart: EChartsType) => {
-      console.debug("Replay chart ready");
-
-      chart.on("finished", () => {
-        const series = chart.getOption().series as Array<{
-          id?: string;
-          markLine?: {
-            data?: Array<{ xAxis?: number }>;
-          };
-        }>;
-
-        console.debug(
-          "[MetricBreak Chart] Active cursor markers",
-          series.flatMap(s =>
-            (s.markLine?.data ?? []).map(marker => ({
-              series: s.id,
-              sequence: marker.xAxis
-            }))
-          )
-        );
-      });
-
       const renderer = chart.getZr();
              const sequenceAt = (x: number, y: number): number | null => {
          const pixel: [number, number] = [x, y];
@@ -1514,25 +1502,9 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         renderer.off("mousemove", handleMove);
         renderer.off("globalout", handleLeave);
       };
-
-      // Remove only our listener when this chart is
-      // disposed. Avoid renderer.off("click"), which
-      // would remove other registered listeners.
-      chart.on("finished", () => {
-        // Intentionally no option updates here.
-      });
     },
     [],
   );
-
-  console.debug("CHART DIAGNOSTICS", {
-    loadedSamples: samples.length,
-    selectedChannels: selectedChannelIds,
-    currentSequence,
-    seriesCount: option.series.length,
-    chartWidth: containerRef.current?.clientWidth,
-    chartHeight: containerRef.current?.clientHeight,
-  });
 
   return (
     <Box
@@ -1847,6 +1819,32 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                   </Typography>
                 </Box>
               ))}
+              {inspectedSample && onOpenBreakpointDialog && (
+                <Button
+                  size="small"
+                  variant="text"
+                  fullWidth
+                  sx={{ mt: 1, pointerEvents: "auto" }}
+                  onClick={() => {
+                    const sample = samples.find((item) => item.sequence === inspectedSample.sequence);
+                    const plotted = channels.filter((channel) =>
+                      selectedChannelIds.includes(channel.channelId));
+                    const firstNumeric = plotted.find((channel) =>
+                      sample && numericPlotValue(sample, channel.channelId) !== null);
+                    const numericValue = firstNumeric && sample
+                      ? numericPlotValue(sample, firstNumeric.channelId)
+                      : null;
+                    onOpenBreakpointDialog({
+                      channelId: firstNumeric?.channelId,
+                      operator: "GreaterThan",
+                      threshold: numericValue ?? undefined,
+                      caption: `Sample ${inspectedSample.sequence.toLocaleString()} · ${inspectedSample.timestamp}`,
+                    });
+                  }}
+                >
+                  Add breakpoint at this sample…
+                </Button>
+              )}
               {inspectedSample && (
                 <Button
                   size="small"
@@ -1935,6 +1933,79 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           setChartMenu(null);
         }}>Move replay cursor here</MenuItem>
         <MenuItem onClick={inspectMenuSample}>Inspect sample values</MenuItem>
+        {chartMenu && onOpenBreakpointDialog && (() => {
+          const sample = samples.find((item) => item.sequence === chartMenu.sequence);
+          const plotted = channels.filter((channel) =>
+            selectedChannelIds.includes(channel.channelId));
+          const firstNumeric = plotted.find((channel) =>
+            sample && numericPlotValue(sample, channel.channelId) !== null);
+
+          return (
+            <>
+              <Divider />
+              <MenuItem
+                onClick={() => {
+                  const numericValue = firstNumeric && sample
+                    ? numericPlotValue(sample, firstNumeric.channelId)
+                    : null;
+                  onOpenBreakpointDialog({
+                    channelId: firstNumeric?.channelId,
+                    operator: "GreaterThan",
+                    threshold: numericValue ?? undefined,
+                    caption: `Sample ${chartMenu.sequence.toLocaleString()} · ${chartMenu.timestamp}`,
+                  });
+                  setChartMenu(null);
+                }}
+              >
+                Customize breakpoint at sample…
+              </MenuItem>
+              {onCreateBreakpointAtSample && sample && plotted.map((channel) => {
+                const value = numericPlotValue(sample, channel.channelId);
+                if (value === null) return null;
+                return (
+                  <MenuItem
+                    key={channel.channelId}
+                    onClick={() => {
+                      onCreateBreakpointAtSample(
+                        {
+                          channelId: channel.channelId,
+                          operator: "GreaterThan",
+                          threshold: value,
+                        },
+                        { jumpToNext: true },
+                      );
+                      setChartMenu(null);
+                    }}
+                  >
+                    Break when {channel.name} &gt; {value.toLocaleString()}
+                  </MenuItem>
+                );
+              })}
+              {onCreateBreakpointAtSample && sample && plotted.map((channel) => {
+                const value = numericPlotValue(sample, channel.channelId);
+                if (value === null) return null;
+                return (
+                  <MenuItem
+                    key={`${channel.channelId}-changed`}
+                    onClick={() => {
+                      onCreateBreakpointAtSample(
+                        {
+                          channelId: channel.channelId,
+                          operator: "Changed",
+                          threshold: 0,
+                        },
+                        { jumpToNext: true },
+                      );
+                      setChartMenu(null);
+                    }}
+                  >
+                    Break on {channel.name} change
+                  </MenuItem>
+                );
+              })}
+            </>
+          );
+        })()}
         <Divider />
         <MenuItem onClick={() => {
           if (chartMenu) void navigator.clipboard.writeText(String(chartMenu.sequence));
