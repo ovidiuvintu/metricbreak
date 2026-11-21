@@ -82,6 +82,25 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
+    /// Returns a registered breakpoint by id, regardless of enabled state.
+    /// </summary>
+    public bool TryGetBreakpoint(
+        Guid breakpointId,
+        out IBreakpoint? breakpoint)
+    {
+        ValidateId(breakpointId);
+
+        if (_entries.TryGetValue(breakpointId, out var entry))
+        {
+            breakpoint = entry.Breakpoint;
+            return true;
+        }
+
+        breakpoint = null;
+        return false;
+    }
+
+    /// <summary>
     /// Enables a registered breakpoint.
     /// Returns false if it does not exist.
     /// </summary>

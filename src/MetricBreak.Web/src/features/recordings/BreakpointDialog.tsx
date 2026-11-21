@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Dialog,
@@ -12,6 +12,7 @@ import {
   Select,
   Stack,
   TextField,
+  Typography,
 } from "@mui/material";
 
 import type { ChannelMetadata } from "./channelMetadata";
@@ -20,10 +21,18 @@ import type {
   CreateBreakpointRequest,
 } from "./breakpointApi";
 
+export interface BreakpointDialogDraft {
+  channelId?: string;
+  operator?: ComparisonOperator;
+  threshold?: number;
+  caption?: string;
+}
+
 interface BreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
   busy: boolean;
+  draft?: BreakpointDialogDraft | null;
   onClose: () => void;
   onCreate: (request: CreateBreakpointRequest) => Promise<void>;
 }
@@ -47,6 +56,7 @@ export function BreakpointDialog({
   open,
   channels,
   busy,
+  draft,
   onClose,
   onCreate,
 }: BreakpointDialogProps) {
@@ -55,6 +65,18 @@ export function BreakpointDialog({
     useState<ComparisonOperator>("GreaterThan");
   const [threshold, setThreshold] = useState("");
   const [typedValue, setTypedValue] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setChannelId(draft?.channelId ?? "");
+    setOperator(draft?.operator ?? "GreaterThan");
+    setThreshold(
+      draft?.threshold !== undefined && Number.isFinite(draft.threshold)
+        ? String(draft.threshold)
+        : "",
+    );
+    setTypedValue("");
+  }, [open, draft]);
 
   const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
   const allowedOperators = operators.filter(o => selectedType === "Numeric" ||
@@ -89,6 +111,11 @@ export function BreakpointDialog({
 
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
+          {draft?.caption && (
+            <Typography variant="caption" color="text.secondary">
+              {draft.caption}
+            </Typography>
+          )}
           <FormControl fullWidth size="small">
             <InputLabel>Channel</InputLabel>
             <Select

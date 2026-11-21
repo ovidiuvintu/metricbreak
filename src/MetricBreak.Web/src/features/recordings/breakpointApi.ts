@@ -99,4 +99,30 @@ export const breakpointApi = {
       { method: "DELETE" },
     );
   },
+
+  runTo(
+    sessionId: string,
+    breakpointId: string,
+    direction: "forward" | "backward",
+  ): Promise<BreakpointRunResponse> {
+    return apiRequest<BreakpointRunResponse>(
+      `${sessionPath(sessionId)}/${encodeURIComponent(breakpointId)}/run`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          direction: direction === "forward" ? "Forward" : "Backward",
+        }),
+      },
+    );
+  },
 };
+
+export interface BreakpointRunResponse {
+  executed: boolean;
+  hitBreakpoint: boolean;
+  reachedEndOfRecording: boolean;
+  reachedStartOfRecording?: boolean;
+  stop: unknown | null;
+  session: import("./sessionTypes").SessionState;
+}

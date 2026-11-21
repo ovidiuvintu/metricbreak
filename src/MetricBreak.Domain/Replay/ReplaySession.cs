@@ -241,6 +241,18 @@ public sealed class ReplaySession
     }
 
     /// <summary>
+    /// Advances in the requested direction until the breakpoint matches
+    /// or the recording boundary is reached. Ignores global enabled state.
+    /// </summary>
+    public BreakpointStop? RunToBreakpoint(
+        IBreakpoint breakpoint,
+        bool forward)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+        return ExecuteToBreakpoints(new[] { breakpoint }, forward);
+    }
+
+    /// <summary>
     /// Moves backward until any enabled breakpoint matches.
     /// Does not move if none are enabled.
     /// </summary>

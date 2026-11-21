@@ -266,6 +266,41 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryRunToBreakpointWithSnapshot(
+        Guid sessionId,
+        Guid breakpointId,
+        bool forward,
+        out BreakpointStop? stop,
+        out ReplaySessionSnapshot? snapshot,
+        out bool unknownBreakpoint)
+    {
+        stop = null;
+        snapshot = null;
+        unknownBreakpoint = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (!entry.Breakpoints.TryGetBreakpoint(breakpointId, out var breakpoint) ||
+                breakpoint is null)
+            {
+                unknownBreakpoint = true;
+                snapshot = CreateSnapshot(sessionId, entry);
+                return true;
+            }
+
+            InvalidatePlayback(entry);
+            stop = entry.Controller.RunToBreakpoint(breakpoint, forward);
+            snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
+
     public bool TryContinueWithSnapshot(
         Guid sessionId,
         out bool hadActiveBreakpoints,

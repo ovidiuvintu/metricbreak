@@ -298,6 +298,68 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapPost(
+            "/api/sessions/{sessionId:guid}/breakpoints/{breakpointId:guid}/run",
+            (
+                Guid sessionId,
+                Guid breakpointId,
+                RunBreakpointRequest request,
+                ReplaySessionManager manager) =>
+            {
+                var forward = !string.Equals(
+                    request.Direction,
+                    "Backward",
+                    StringComparison.OrdinalIgnoreCase);
+
+                var found = manager.TryRunToBreakpointWithSnapshot(
+                    sessionId,
+                    breakpointId,
+                    forward,
+                    out var stop,
+                    out var snapshot,
+                    out var unknownBreakpoint);
+
+                if (!found || snapshot is null)
+                    return Results.NotFound();
+
+                if (unknownBreakpoint)
+                {
+                    return Results.NotFound(new
+                    {
+                        Error = "UnknownBreakpoint",
+                        Message = "Breakpoint was not found for this session.",
+                    });
+                }
+
+                var session = SessionStateResponseMapper.Map(snapshot);
+                var hitBreakpoint = stop is not null;
+                var reachedEndOfRecording =
+                    !hitBreakpoint &&
+                    forward &&
+                    snapshot.ExecutionState.PauseReason ==
+                    Domain.Replay.ReplayPauseReason.EndOfRecording;
+                var reachedStartOfRecording =
+                    !hitBreakpoint &&
+                    !forward &&
+                    snapshot.ExecutionState.PauseReason ==
+                    Domain.Replay.ReplayPauseReason.StartOfRecording;
+
+                return Results.Ok(new ContinueResponse(
+                    Executed: true,
+                    HitBreakpoint: hitBreakpoint,
+                    ReachedEndOfRecording: reachedEndOfRecording,
+                    Stop: stop is null
+                        ? null
+                        : ContinueResponseMapper.Map(stop),
+                    Session: session,
+                    ReachedStartOfRecording: reachedStartOfRecording));
+            })
+            .WithName("RunSessionBreakpoint")
+            .WithTags(_breakpointTag)
+            .Produces<ContinueResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
         return app;
     }
 }

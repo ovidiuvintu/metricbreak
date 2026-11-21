@@ -23,7 +23,7 @@ import { RecordingChart } from "./RecordingChart";
 import { ImportRecordingDialog } from "./ImportRecordingDialog";
 import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
-import { BreakpointDialog } from "./BreakpointDialog";
+import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog";
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
@@ -142,6 +142,10 @@ export function RecordingDashboard({
 
   const [breakpointDialogOpen, setBreakpointDialogOpen] =
     useState(false);
+  const [breakpointDraft, setBreakpointDraft] =
+    useState<BreakpointDialogDraft | null>(null);
+  const [focusedBreakpointId, setFocusedBreakpointId] =
+    useState<string | null>(null);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
@@ -795,18 +799,63 @@ export function RecordingDashboard({
     }
   };
 
+  const handleRunToBreakpoint = async (
+    breakpointId: string,
+    direction: "forward" | "backward",
+  ) => {
+    await executeReplay(async (sessionId) => {
+      const response = await breakpointApi.runTo(sessionId, breakpointId, direction);
+      setFocusedBreakpointId(breakpointId);
+      setInspectorTab(1);
+      if (!response.hitBreakpoint) {
+        setBreakpointError(
+          direction === "forward"
+            ? "No later occurrences for this breakpoint."
+            : "No earlier occurrences for this breakpoint.",
+        );
+      } else {
+        setBreakpointError(null);
+      }
+      return response.session;
+    }, "Unable to navigate to breakpoint occurrence.");
+  };
+
+  const handleOpenBreakpointDialog = (draft: BreakpointDialogDraft) => {
+    setBreakpointDraft(draft);
+    setBreakpointDialogOpen(true);
+    setInspectorTab(1);
+  };
+
   const handleCreateBreakpoint = async (
     request: CreateBreakpointRequest,
+    options?: { jumpToNext?: boolean },
   ) => {
+    let createdBreakpointId: string | null = null;
     const succeeded = await executeBreakpointMutation(
       async (sessionId) => {
-        await breakpointApi.create(sessionId, request);
+        const created = await breakpointApi.create(sessionId, request);
+        createdBreakpointId = created.breakpointId;
       },
     );
 
     if (succeeded) {
       setBreakpointDialogOpen(false);
+      setBreakpointDraft(null);
+      setInspectorTab(1);
+      if (createdBreakpointId) {
+        setFocusedBreakpointId(createdBreakpointId);
+        if (options?.jumpToNext) {
+          await handleRunToBreakpoint(createdBreakpointId, "forward");
+        }
+      }
     }
+  };
+
+  const handleCreateBreakpointAtSample = (
+    request: CreateBreakpointRequest,
+    options?: { jumpToNext?: boolean },
+  ) => {
+    void handleCreateBreakpoint(request, { jumpToNext: options?.jumpToNext ?? true });
   };
 
   const handleCreateCompositeBreakpoint = async (
@@ -982,6 +1031,8 @@ export function RecordingDashboard({
             onSeek={handleSeek}
             onScrubStart={handleScrubStart}
             onScrubEnd={(sequence) => void handleScrubEnd(sequence)}
+            onOpenBreakpointDialog={handleOpenBreakpointDialog}
+            onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
           />
         </Box>
       ) : (
@@ -1105,7 +1156,14 @@ export function RecordingDashboard({
             loading={loading}
             busy={breakpointBusy || seeking || playbackRunningRef.current || playbackBusy}
             error={breakpointError}
-            onAdd={() => setBreakpointDialogOpen(true)}
+            onAdd={() => {
+              setBreakpointDraft(null);
+              setBreakpointDialogOpen(true);
+            }}
+            onRunTo={(breakpointId, direction) => {
+              void handleRunToBreakpoint(breakpointId, direction);
+            }}
+            focusedBreakpointId={focusedBreakpointId}
             onAddComposite={() => setCompositeDialogOpen(true)}
             onSetEnabled={handleSetBreakpointEnabled}
             onDelete={handleDeleteBreakpoint}
@@ -1315,12 +1373,14 @@ export function RecordingDashboard({
         open={breakpointDialogOpen}
         channels={channels}
         busy={breakpointBusy}
+        draft={breakpointDraft}
         onClose={() => {
           if (!breakpointBusy) {
             setBreakpointDialogOpen(false);
+            setBreakpointDraft(null);
           }
         }}
-        onCreate={handleCreateBreakpoint}
+        onCreate={(request) => handleCreateBreakpoint(request)}
       />
 
       <CompositeBreakpointDialog
