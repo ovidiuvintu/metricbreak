@@ -73,6 +73,29 @@ export function RecordingDashboard({
     string[]
   >([]);
 
+  const [rightAxisChannelIds, setRightAxisChannelIds] = useState<string[]>([]);
+
+  const toggleRightAxisChannel = (channelId: string) => {
+    setRightAxisChannelIds((previous) =>
+      previous.includes(channelId)
+        ? previous.filter((id) => id !== channelId)
+        : [...previous, channelId],
+    );
+  };
+
+  const setChannelChartAxis = (channelId: string, side: "left" | "right") => {
+    setRightAxisChannelIds((previous) => {
+      if (side === "left") return previous.filter((id) => id !== channelId);
+      if (previous.includes(channelId)) return previous;
+      return [...previous, channelId];
+    });
+  };
+
+  const handleChannelSelectionChange = (ids: string[]) => {
+    setSelectedChannelIds(ids);
+    setRightAxisChannelIds((previous) => previous.filter((id) => ids.includes(id)));
+  };
+
   const [breakpoints, setBreakpoints] = useState<Breakpoint[]>(
     [],
   );
@@ -252,6 +275,7 @@ export function RecordingDashboard({
         setInspectorTab(0);
         setBreakpointDialogOpen(false);
         setCompositeDialogOpen(false);
+        setRightAxisChannelIds([]);
       }
 
       loadedSessionIdRef.current = loadedSession.sessionId;
@@ -948,6 +972,8 @@ export function RecordingDashboard({
             sampleCount={session.sampleCount}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
+            rightAxisChannelIds={rightAxisChannelIds}
+            onToggleRightAxis={toggleRightAxisChannel}
             currentSequence={
               session.currentSample?.sequence ?? null
             }
@@ -1052,7 +1078,9 @@ export function RecordingDashboard({
         <ChannelSelectionPanel
           channels={channels}
           selectedChannelIds={selectedChannelIds}
-          onSelectionChange={setSelectedChannelIds}
+          rightAxisChannelIds={rightAxisChannelIds}
+          onSelectionChange={handleChannelSelectionChange}
+          onChartAxisChange={setChannelChartAxis}
         />
       </Box>
 

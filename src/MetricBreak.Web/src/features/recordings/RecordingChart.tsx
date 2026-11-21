@@ -43,6 +43,8 @@ interface RecordingChartProps {
   sampleCount: number;
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
+  rightAxisChannelIds: string[];
+  onToggleRightAxis: (channelId: string) => void;
   currentSequence: number | null;
   currentTimestampNanoseconds?: number | string | null;
   timestampOrigin?: "Unix" | "Elapsed";
@@ -121,6 +123,65 @@ function numericPlotValue(sample: SampleRangeItem, channelId: string): number | 
 
 // Mark windows where all plotted channels lack data. Individual channel gaps
 // remain visible as broken lines without falsely labeling valid data "No Data".
+type PlottedSeriesRange = {
+  min: number;
+  max: number;
+  span: number;
+  scale: number;
+};
+
+const AXIS_RANGE_RATIO_THRESHOLD = 40;
+const AXIS_RANGE_MIN_SCALE = 1e-9;
+
+function collectPlottedSeriesRange(
+  samples: SampleRangeItem[],
+  channelId: string,
+): PlottedSeriesRange | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (const sample of samples) {
+    const value = numericPlotValue(sample, channelId);
+    if (value === null) continue;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+
+  const span = max - min;
+  const extent = Math.max(Math.abs(min), Math.abs(max));
+  const scale = Math.max(span, extent, AXIS_RANGE_MIN_SCALE);
+
+  return { min, max, span, scale };
+}
+
+function axisHasDivergentRanges(ranges: PlottedSeriesRange[]): boolean {
+  if (ranges.length < 2) return false;
+
+  const scales = ranges.map((range) => range.scale);
+  const minScale = Math.min(...scales);
+  const maxScale = Math.max(...scales);
+  if (minScale > 0 && maxScale / minScale >= AXIS_RANGE_RATIO_THRESHOLD) {
+    return true;
+  }
+
+  const ordered = [...ranges].sort((a, b) => a.min - b.min);
+  for (let index = 1; index < ordered.length; index += 1) {
+    const lower = ordered[index - 1];
+    const upper = ordered[index];
+    if (upper.min <= lower.max) continue;
+
+    const gap = upper.min - lower.max;
+    const reference = Math.min(lower.scale, upper.scale);
+    if (gap / reference >= 8 && maxScale / minScale >= 12) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
   const windows: { start: number; end: number }[] = [];
   if (!channelIds.length) return windows;
@@ -206,6 +267,69 @@ function formatNumericTick(value: number): string {
   return value.toLocaleString();
 }
 
+/** Round up to a readable axis ceiling (1.2K, 1.5K, 2K, 5K, 10K, 12K, …). */
+function niceCeilAxisMax(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return value;
+
+  const exponent = Math.floor(Math.log10(value));
+  const base = 10 ** exponent;
+  const mantissa = value / base;
+  const niceMantissas = [1, 1.1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12];
+
+  for (const mantissa of niceMantissas) {
+    if (mantissa * base >= value - 1e-9) return mantissa * base;
+  }
+
+  return 10 * base;
+}
+
+type BuiltChartSeries = {
+  config: {
+    yAxisIndex: number;
+    data: [number, number | null][];
+  };
+};
+
+function computeSeriesAxisExtent(
+  builtSeries: BuiltChartSeries[],
+  axisIndex: number,
+): { dataMin: number; dataMax: number } | null {
+  let dataMin = Number.POSITIVE_INFINITY;
+  let dataMax = Number.NEGATIVE_INFINITY;
+
+  for (const { config } of builtSeries) {
+    if (config.yAxisIndex !== axisIndex) continue;
+    for (const [, y] of config.data) {
+      if (typeof y !== "number" || !Number.isFinite(y)) continue;
+      dataMin = Math.min(dataMin, y);
+      dataMax = Math.max(dataMax, y);
+    }
+  }
+
+  if (!Number.isFinite(dataMax)) return null;
+  if (!Number.isFinite(dataMin)) dataMin = 0;
+  return { dataMin, dataMax };
+}
+
+/**
+ * Extra headroom on the right axis when dual Y-axes are active keeps high-magnitude
+ * series from visually lining up with unrelated left-axis gridlines.
+ */
+function computeRightAxisMax(
+  extent: { dataMin: number; dataMax: number },
+): number {
+  const span = Math.max(
+    extent.dataMax - extent.dataMin,
+    Math.abs(extent.dataMax) * 0.08,
+    AXIS_RANGE_MIN_SCALE,
+  );
+  const paddedMax = Math.max(
+    extent.dataMax + span * 0.28,
+    extent.dataMax * 1.35,
+  );
+  return niceCeilAxisMax(paddedMax);
+}
+
 function buildYAxisTitle(entries: PlottedSeriesMeta[]): string {
   if (entries.length === 0) return "";
 
@@ -274,6 +398,8 @@ export function RecordingChart({
   sampleCount,
   channels,
   selectedChannelIds,
+  rightAxisChannelIds,
+  onToggleRightAxis,
   currentSequence,
   currentTimestampNanoseconds,
   timestampOrigin = "Unix",
@@ -291,15 +417,9 @@ export function RecordingChart({
   const chartRef = useRef<ReactECharts>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [rightAxisChannelIds, setRightAxisChannelIds] = useState<string[]>([]);
   const [axisMenuAnchor, setAxisMenuAnchor] = useState<HTMLElement | null>(null);
   const rightAxisSet = useMemo(() => new Set(rightAxisChannelIds), [rightAxisChannelIds]);
   const hasRightAxis = selectedChannelIds.some((id) => rightAxisSet.has(id));
-  const toggleRightAxis = (id: string) => {
-    setRightAxisChannelIds((previous) => previous.includes(id)
-      ? previous.filter((value) => value !== id)
-      : [...previous, id]);
-  };
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
   // Keep the current page and its immediate neighbors ready for instant navigation.
   // The cache is session-scoped and bounded to avoid retaining entire recordings.
@@ -638,6 +758,31 @@ export function RecordingChart({
 
   const lineWidth = getLineWidth(samples.length);
 
+  const showAxisRangeWarning = useMemo(() => {
+    if (samples.length === 0) return false;
+
+    const plottedChannelIds = channels
+      .filter(
+        (channel) =>
+          selectedChannelIds.includes(channel.channelId) &&
+          isNumericChartChannel(samples, channel.channelId),
+      )
+      .map((channel) => channel.channelId);
+
+    if (plottedChannelIds.length < 2) return false;
+
+    const rangesForAxis = (useRight: boolean) =>
+      plottedChannelIds
+        .filter((channelId) => rightAxisSet.has(channelId) === useRight)
+        .map((channelId) => collectPlottedSeriesRange(samples, channelId))
+        .filter((range): range is PlottedSeriesRange => range !== null);
+
+    return (
+      axisHasDivergentRanges(rangesForAxis(false)) ||
+      axisHasDivergentRanges(rangesForAxis(true))
+    );
+  }, [samples, channels, selectedChannelIds, rightAxisSet]);
+
   const option = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
 
@@ -757,14 +902,23 @@ export function RecordingChart({
     const rightAxisName = hasRightAxis ? rightAxisStyle.name : "";
     const hasYAxisNames = Boolean(leftAxisName || rightAxisName);
 
+    const rightAxisExtent = hasRightAxis
+      ? computeSeriesAxisExtent(builtSeries, 1)
+      : null;
+    const rightAxisMax = rightAxisExtent
+      ? computeRightAxisMax(rightAxisExtent)
+      : undefined;
+
     const makeYAxis = (
       style: ReturnType<typeof buildYAxisStyling>,
       position?: "right",
+      axisMax?: number,
     ) => ({
       type: "value" as const,
       scale: true,
       position,
       show: position === "right" ? hasRightAxis : true,
+      ...(axisMax !== undefined ? { max: axisMax } : {}),
       name: style.name,
       // Horizontal titles at the axis top avoid vertical clipping from rotation.
       nameLocation: "end" as const,
@@ -978,7 +1132,7 @@ export function RecordingChart({
 
       yAxis: [
         makeYAxis(leftAxisStyle),
-        makeYAxis(rightAxisStyle, "right"),
+        makeYAxis(rightAxisStyle, "right", rightAxisMax),
       ],
 
       dataZoom: [
@@ -1464,7 +1618,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             Checked → right Y-axis (dashed). Unchecked → left (solid).
           </MenuItem>
           {channels.filter((channel) => selectedChannelIds.includes(channel.channelId) && isNumericChartChannel(samples, channel.channelId)).map((channel) => (
-            <MenuItem key={channel.channelId} onClick={() => toggleRightAxis(channel.channelId)}>
+            <MenuItem key={channel.channelId} onClick={() => onToggleRightAxis(channel.channelId)}>
               <Checkbox size="small" checked={rightAxisSet.has(channel.channelId)} tabIndex={-1} disableRipple />
               <ListItemText
                 primary={channel.name}
@@ -1657,6 +1811,21 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
                 {displayedSample.timestamp}
               </Typography>
+              {showAxisRangeWarning && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    display: "block",
+                    mb: 1,
+                    color: "warning.main",
+                    opacity: 0.85,
+                    fontSize: "0.68rem",
+                    lineHeight: 1.35,
+                  }}
+                >
+                  Some series have significantly different value ranges. Consider moving a channel to the other Y-axis.
+                </Typography>
+              )}
               {displayedSample.values.map((entry) => (
                 <Box
                   key={entry.name}
