@@ -32,6 +32,7 @@ interface RecordingDebuggerDashboardProps {
     onManageBreakpoints: () => void;
     onOpenInvestigations: () => void;
     onGoToSample: (sequence: number) => void;
+    bookmarkRefreshKey?: number;
 }
 
 function executionLabel(state: string): string {
@@ -55,6 +56,7 @@ export function RecordingDebuggerDashboard({
     onManageBreakpoints,
     onOpenInvestigations,
     onGoToSample,
+    bookmarkRefreshKey = 0,
 }: RecordingDebuggerDashboardProps) {
     const [durationLabel, setDurationLabel] = useState<string | null>(null);
     const [bookmarks, setBookmarks] = useState<InvestigationBookmark[]>([]);
@@ -145,7 +147,7 @@ export function RecordingDebuggerDashboard({
         })();
 
         return () => { cancelled = true; };
-    }, [session]);
+    }, [session, bookmarkRefreshKey]);
 
     const breakpointStats = useMemo(() => {
         const all = [

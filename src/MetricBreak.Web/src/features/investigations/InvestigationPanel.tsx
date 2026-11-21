@@ -30,6 +30,7 @@ import {
     loadInvestigationSelection,
     saveInvestigationSelection,
 } from "./investigationSelectionStorage";
+import { tryQuickBookmark } from "./quickBookmark";
 
 interface InvestigationPanelProps {
     sessionId: string | null;
@@ -38,7 +39,9 @@ interface InvestigationPanelProps {
     currentTimestampNanoseconds: number | null;
     timestampOrigin: "Unix" | "Elapsed";
     navigationBusy: boolean;
+    setupHint?: string | null;
     onSeek: (sequence: number) => void;
+    onBookmarksChanged?: () => void;
 }
 
 export function InvestigationPanel({
@@ -48,7 +51,9 @@ export function InvestigationPanel({
     currentTimestampNanoseconds,
     timestampOrigin,
     navigationBusy,
+    setupHint,
     onSeek,
+    onBookmarksChanged,
 }: InvestigationPanelProps) {
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
     const [projectId, setProjectId] = useState("");
@@ -169,8 +174,38 @@ export function InvestigationPanel({
             setInvestigationId(response.investigationId);
             await loadInvestigations();
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to export investigation.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleQuickBookmarkHere = async () => {
+        if (!recordingName || currentSequence == null || currentTimestampNanoseconds == null) {
+            return;
+        }
+
+        setBusy(true);
+        setError(null);
+
+        try {
+            const result = await tryQuickBookmark({
+                recordingName,
+                sampleSequence: currentSequence,
+                timestampNanoseconds: currentTimestampNanoseconds,
+            });
+
+            if (!result.ok) {
+                setError(result.message);
+                return;
+            }
+
+            await loadBookmarks();
+            onBookmarksChanged?.();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unable to add bookmark.");
         } finally {
             setBusy(false);
         }
@@ -197,6 +232,7 @@ export function InvestigationPanel({
             );
             setEditorOpen(false);
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to add bookmark.");
         } finally {
@@ -220,6 +256,7 @@ export function InvestigationPanel({
             setEditorOpen(false);
             setEditingBookmark(null);
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to update bookmark.");
         } finally {
@@ -240,12 +277,17 @@ export function InvestigationPanel({
                 projectId || null,
             );
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to delete bookmark.");
         } finally {
             setBusy(false);
         }
     };
+
+    const canQuickBookmark = recordingName &&
+        currentSequence != null &&
+        currentTimestampNanoseconds != null;
 
     const canBookmark = investigationId !== "" &&
         currentSequence != null &&
@@ -254,6 +296,17 @@ export function InvestigationPanel({
     return (
         <Stack spacing={1} sx={{ width: "100%", minWidth: 0, p: 1 }}>
             <Typography variant="subtitle2">Investigation</Typography>
+
+            <Alert severity="info" sx={{ py: 0.25, "& .MuiAlert-message": { fontSize: "0.75rem" } }}>
+                Save an investigation for this recording, bookmark 2–3 interesting samples from
+                the chart or breakpoints, then resume from the Dashboard.
+            </Alert>
+
+            {setupHint && (
+                <Alert severity="warning" sx={{ py: 0.25 }}>
+                    {setupHint}
+                </Alert>
+            )}
 
             {error && <Alert severity="error">{error}</Alert>}
 
@@ -313,17 +366,27 @@ export function InvestigationPanel({
                 <Typography variant="subtitle2">
                     Bookmarks ({bookmarks.length})
                 </Typography>
-                <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    disabled={!canBookmark || busy || navigationBusy}
-                    onClick={() => {
-                        setEditingBookmark(null);
-                        setEditorOpen(true);
-                    }}
-                >
-                    Add bookmark
-                </Button>
+                <Stack direction="row" spacing={0.5}>
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={!canQuickBookmark || busy || navigationBusy}
+                        onClick={() => void handleQuickBookmarkHere()}
+                    >
+                        Quick bookmark
+                    </Button>
+                    <Button
+                        size="small"
+                        startIcon={<AddIcon />}
+                        disabled={!canBookmark || busy || navigationBusy}
+                        onClick={() => {
+                            setEditingBookmark(null);
+                            setEditorOpen(true);
+                        }}
+                    >
+                        Add with note…
+                    </Button>
+                </Stack>
             </Box>
 
             {loading ? (

@@ -5,7 +5,9 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   CircularProgress,
+  Snackbar,
   Stack,
   Tab,
   Tabs,
@@ -26,8 +28,10 @@ import { BreakpointPanel } from "./BreakpointPanel";
 import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog";
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
+import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
+import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
 import type { AppSection } from "../../app/AppSidebar";
 
 import { recordingApi } from "./recordingApi";
@@ -146,6 +150,12 @@ export function RecordingDashboard({
     useState<BreakpointDialogDraft | null>(null);
   const [focusedBreakpointId, setFocusedBreakpointId] =
     useState<string | null>(null);
+
+  const [bookmarkRevision, setBookmarkRevision] = useState(0);
+  const [investigationSetupHint, setInvestigationSetupHint] = useState<string | null>(null);
+  const [bookmarkSnackOpen, setBookmarkSnackOpen] = useState(false);
+  const [bookmarkSnackMessage, setBookmarkSnackMessage] = useState("");
+  const [bookmarkSnackPrompt, setBookmarkSnackPrompt] = useState(false);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
@@ -815,6 +825,12 @@ export function RecordingDashboard({
         );
       } else {
         setBreakpointError(null);
+        const hitSequence = response.session.currentSample?.sequence;
+        if (hitSequence != null) {
+          setBookmarkSnackMessage(`Stopped at sample ${hitSequence.toLocaleString()}`);
+          setBookmarkSnackPrompt(true);
+          setBookmarkSnackOpen(true);
+        }
       }
       return response.session;
     }, "Unable to navigate to breakpoint occurrence.");
@@ -857,6 +873,43 @@ export function RecordingDashboard({
   ) => {
     void handleCreateBreakpoint(request, { jumpToNext: options?.jumpToNext ?? true });
   };
+
+  const handleQuickBookmark = async (payload?: {
+    sequence?: number;
+    timestampNanoseconds?: number | string;
+    title?: string;
+    annotation?: string;
+  }) => {
+    if (!session?.currentSample) return;
+
+    const sequence = payload?.sequence ?? session.currentSample.sequence;
+    const timestampNanoseconds =
+      payload?.timestampNanoseconds ?? session.currentSample.timestampNanoseconds;
+
+    const result = await tryQuickBookmark({
+      recordingName: session.recordingName,
+      sampleSequence: sequence,
+      timestampNanoseconds,
+      title: payload?.title,
+      annotation: payload?.annotation,
+    });
+
+    if (!result.ok) {
+      setInvestigationSetupHint(result.message);
+      onSelectSection("investigations");
+      return;
+    }
+
+    setBookmarkRevision((value) => value + 1);
+    setInvestigationSetupHint(null);
+    setBookmarkSnackMessage(`Bookmarked sample ${sequence.toLocaleString()}`);
+    setBookmarkSnackPrompt(false);
+    setBookmarkSnackOpen(true);
+  };
+
+  const activeInvestigationSelection = session
+    ? loadInvestigationSelection(session.recordingName)
+    : null;
 
   const handleCreateCompositeBreakpoint = async (
     request: CreateCompositeBreakpointRequest,
@@ -941,6 +994,17 @@ export function RecordingDashboard({
             {session.sampleCount.toLocaleString()} samples
             {seeking ? " · Seeking..." : ""}
           </Typography>
+        )}
+
+        {session && activeInvestigationSelection && (
+          <Chip
+            size="small"
+            label="Investigation active"
+            variant="outlined"
+            color="primary"
+            onClick={() => onSelectSection("investigations")}
+            sx={{ mt: 0.5, maxWidth: "100%" }}
+          />
         )}
       </Box>
 
@@ -1033,6 +1097,7 @@ export function RecordingDashboard({
             onScrubEnd={(sequence) => void handleScrubEnd(sequence)}
             onOpenBreakpointDialog={handleOpenBreakpointDialog}
             onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
+            onQuickBookmarkSample={(payload) => void handleQuickBookmark(payload)}
           />
         </Box>
       ) : (
@@ -1265,7 +1330,9 @@ export function RecordingDashboard({
           }
           timestampOrigin={session.timestampOrigin ?? "Unix"}
           navigationBusy={navigationBusy}
+          setupHint={investigationSetupHint}
           onSeek={(sequence) => void handleSeek(sequence)}
+          onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
         />
       ) : (
         <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
@@ -1291,6 +1358,7 @@ export function RecordingDashboard({
       onGoToSample={(sequence) => {
         void handleSeek(sequence).then(() => onSelectSection("recordings"));
       }}
+      bookmarkRefreshKey={bookmarkRevision}
     />
   );
 
@@ -1392,6 +1460,31 @@ export function RecordingDashboard({
           if (!breakpointBusy) setCompositeDialogOpen(false);
         }}
         onCreate={handleCreateCompositeBreakpoint}
+      />
+
+      <Snackbar
+        open={bookmarkSnackOpen}
+        autoHideDuration={bookmarkSnackPrompt ? 8000 : 4000}
+        onClose={() => {
+          setBookmarkSnackOpen(false);
+          setBookmarkSnackPrompt(false);
+        }}
+        message={bookmarkSnackMessage}
+        action={
+          bookmarkSnackPrompt ? (
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => {
+                setBookmarkSnackOpen(false);
+                setBookmarkSnackPrompt(false);
+                void handleQuickBookmark();
+              }}
+            >
+              Bookmark hit
+            </Button>
+          ) : undefined
+        }
       />
     </>
   );

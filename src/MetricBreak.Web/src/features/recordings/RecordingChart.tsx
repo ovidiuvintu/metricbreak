@@ -58,6 +58,12 @@ interface RecordingChartProps {
     request: CreateBreakpointRequest,
     options?: { jumpToNext?: boolean },
   ) => void;
+  onQuickBookmarkSample?: (payload: {
+    sequence: number;
+    timestampNanoseconds?: number | string;
+    title?: string;
+    annotation?: string;
+  }) => void;
 }
 
 type HoverDetails = {
@@ -280,7 +286,6 @@ function niceCeilAxisMax(value: number): number {
 
   const exponent = Math.floor(Math.log10(value));
   const base = 10 ** exponent;
-  const mantissa = value / base;
   const niceMantissas = [1, 1.1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12];
 
   for (const mantissa of niceMantissas) {
@@ -415,6 +420,7 @@ export function RecordingChart({
   onScrubEnd,
   onOpenBreakpointDialog,
   onCreateBreakpointAtSample,
+  onQuickBookmarkSample,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -874,10 +880,13 @@ export function RecordingChart({
             },
           },
 
-          data: samples.map((sample) => [
-            sample.sequence,
-            numericPlotValue(sample, channel.channelId),
-          ]),
+          data: samples.map(
+            (sample) =>
+              [
+                sample.sequence,
+                numericPlotValue(sample, channel.channelId),
+              ] as [number, number | null],
+          ),
         };
 
         const meta: PlottedSeriesMeta = {
@@ -1849,6 +1858,20 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                   Add breakpoint at this sample…
                 </Button>
               )}
+              {inspectedSample && onQuickBookmarkSample && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  fullWidth
+                  sx={{ mt: 1, pointerEvents: "auto" }}
+                  onClick={() => {
+                    onQuickBookmarkSample({ sequence: inspectedSample.sequence });
+                    setInspectedSample(null);
+                  }}
+                >
+                  Bookmark this sample
+                </Button>
+              )}
               {inspectedSample && (
                 <Button
                   size="small"
@@ -1937,6 +1960,16 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           setChartMenu(null);
         }}>Move replay cursor here</MenuItem>
         <MenuItem onClick={inspectMenuSample}>Inspect sample values</MenuItem>
+        {chartMenu && onQuickBookmarkSample && (
+          <MenuItem
+            onClick={() => {
+              onQuickBookmarkSample({ sequence: chartMenu.sequence });
+              setChartMenu(null);
+            }}
+          >
+            Bookmark this sample
+          </MenuItem>
+        )}
         {chartMenu && onOpenBreakpointDialog && (() => {
           const sample = samples.find((item) => item.sequence === chartMenu.sequence);
           const plotted = channels.filter((channel) =>
