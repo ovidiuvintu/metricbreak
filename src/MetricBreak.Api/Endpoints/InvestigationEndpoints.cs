@@ -64,6 +64,64 @@ internal static class InvestigationEndpoints
             .Produces<ExportedInvestigation>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapPost(
+            "/api/investigations/{investigationId:guid}/open",
+            (
+                Guid investigationId,
+                [FromQuery] Guid? projectId,
+                [FromQuery] Guid? closeSessionId,
+                SessionInvestigationStore store,
+                ProjectWorkspaceStore projectStore,
+                InvestigationOpenService investigationOpen,
+                ReplaySessionManager sessionManager) =>
+            {
+                ExportedInvestigation? investigation;
+
+                if (projectId is Guid selectedProjectId)
+                {
+                    if (!projectStore.TryLoadInvestigation(
+                            selectedProjectId,
+                            investigationId,
+                            out investigation,
+                            out var error))
+                    {
+                        return error?.Code == "InvestigationNotFound"
+                            ? Results.NotFound(ToErrorBody(error))
+                            : Results.BadRequest(ToErrorBody(
+                                error ?? new ProjectStoreError(
+                                    "InvestigationLoadFailed",
+                                    "Unable to load investigation.")));
+                    }
+                }
+                else if (!store.TryLoad(investigationId, out investigation))
+                {
+                    return Results.NotFound();
+                }
+
+                if (!investigationOpen.TryOpen(
+                        investigation!,
+                        out var response,
+                        out var openError)
+                    || response is null)
+                {
+                    return Results.BadRequest(new { Error = openError });
+                }
+
+                if (closeSessionId is Guid previousSessionId)
+                {
+                    sessionManager.Remove(previousSessionId);
+                }
+
+                return Results.Created(
+                    $"/api/sessions/{response.SessionId}",
+                    response);
+            })
+            .WithName("OpenInvestigation")
+            .WithTags(_investigationTag)
+            .Produces<OpenInvestigationResponse>(StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
         // EXPORT INVESTIGATION
         app.MapPost(
             "/api/sessions/{sessionId:guid}/export",

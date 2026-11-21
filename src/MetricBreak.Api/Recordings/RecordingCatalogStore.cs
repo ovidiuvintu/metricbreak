@@ -53,6 +53,27 @@ public sealed class RecordingCatalogStore
         return entry is not null;
     }
 
+    public bool TryFindBySource(
+        string contentHash,
+        long sizeInBytes,
+        out RecordingCatalogEntry? entry)
+    {
+        entry = null;
+
+        if (string.IsNullOrWhiteSpace(contentHash))
+            return false;
+
+        var document = LoadCatalog();
+        entry = document.Recordings.FirstOrDefault(item =>
+            string.Equals(
+                item.SourceContentHash,
+                contentHash,
+                StringComparison.OrdinalIgnoreCase) &&
+            item.SourceSizeInBytes == sizeInBytes);
+
+        return entry is not null;
+    }
+
     public void RegisterImportedRecording(
         ImportedCsvRecording imported,
         string sourceFilePath)

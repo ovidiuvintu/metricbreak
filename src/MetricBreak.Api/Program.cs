@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<ReplaySessionManager>();
 builder.Services.AddSingleton<RecordingCatalogStore>();
 builder.Services.AddSingleton<CsvRecordingImporter>();
+builder.Services.AddSingleton<InvestigationOpenService>();
 builder.Services.AddSingleton<SessionInvestigationStore>();
 builder.Services.AddSingleton<ProjectWorkspaceStore>();
 builder.Services.AddSingleton<InvestigationBookmarkService>();

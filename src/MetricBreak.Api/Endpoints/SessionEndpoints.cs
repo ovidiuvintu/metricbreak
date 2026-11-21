@@ -139,6 +139,16 @@ internal static class SessionEndpoints
                 StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest);
 
+        group.MapDelete(
+            "/{sessionId:guid}",
+            (Guid sessionId, ReplaySessionManager manager) =>
+                manager.Remove(sessionId)
+                    ? Results.NoContent()
+                    : Results.NotFound())
+            .WithName("CloseReplaySession")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound);
+
         // GET SESSION STATE
         group.MapGet(
             "/{sessionId:guid}",

@@ -38,6 +38,7 @@ import { loadInvestigationSelection } from "../investigations/investigationSelec
 import type { AppSection } from "../../app/AppSidebar";
 
 import { recordingApi } from "./recordingApi";
+import { investigationApi } from "../investigations/investigationApi";
 import { replayApi } from "./replayApi";
 import {
   breakpointApi,
@@ -68,7 +69,7 @@ export function RecordingDashboard({
   section,
   onSelectSection,
 }: RecordingDashboardProps) {
-  const { context, setRecordingSession } = useWorkspace();
+  const { context, setRecordingSession, setActiveInvestigation } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
     null,
   );
@@ -1348,6 +1349,53 @@ export function RecordingDashboard({
     loading || seeking || breakpointBusy ||
     playbackRunningRef.current || playbackBusy;
 
+  const handleOpenInvestigation = async (
+    investigationId: string,
+    projectId: string,
+  ) => {
+    cancelLocalPlayback();
+    setLoadError(null);
+    setLoading(true);
+
+    try {
+      const opened = await investigationApi.openInvestigation(investigationId, {
+        projectId: projectId || null,
+        closeSessionId: session?.sessionId ?? null,
+      });
+
+      const document = await investigationApi.getInvestigation(
+        investigationId,
+        projectId || null,
+      );
+
+      const loaded = await loadRecording(opened.sessionId);
+      if (!loaded) return;
+
+      if (document.uiState) {
+        setSelectedChannelIds(document.uiState.selectedChannelIds ?? []);
+        setRightAxisChannelIds(document.uiState.rightAxisChannelIds ?? []);
+      }
+
+      const name =
+        document.metadata?.name?.trim() ||
+        opened.investigationName ||
+        opened.recordingName;
+
+      setActiveInvestigation({
+        investigationId,
+        investigationName: name,
+        projectId: projectId || null,
+      });
+
+      setBookmarkRevision((value) => value + 1);
+      onSelectSection("recordings");
+    } catch (error) {
+      setLoadError(errorMessage(error, "Unable to open investigation."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const investigationsView = (
     <Box
       sx={{
@@ -1357,31 +1405,26 @@ export function RecordingDashboard({
         maxWidth: 520,
       }}
     >
-      {session ? (
-        <InvestigationPanel
-          sessionId={session.sessionId}
-          recordingName={session.recordingName}
-          currentSequence={session.currentSample?.sequence ?? null}
-          currentTimestampNanoseconds={
-            session.currentSample?.timestampNanoseconds ?? null
-          }
-          timestampOrigin={session.timestampOrigin ?? "Unix"}
-          navigationBusy={navigationBusy}
-          setupHint={investigationSetupHint}
-          selectedChannelIds={selectedChannelIds}
-          rightAxisChannelIds={rightAxisChannelIds}
-          onSeek={(sequence) => void handleSeek(sequence)}
-          onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
-          onRestoreUiState={(uiState) => {
-            setSelectedChannelIds(uiState.selectedChannelIds);
-            setRightAxisChannelIds(uiState.rightAxisChannelIds);
-          }}
-        />
-      ) : (
-        <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
-          Import a recording under Recordings before saving investigation bookmarks.
-        </Typography>
-      )}
+      <InvestigationPanel
+        sessionId={session?.sessionId ?? null}
+        recordingName={session?.recordingName ?? null}
+        currentSequence={session?.currentSample?.sequence ?? null}
+        currentTimestampNanoseconds={
+          session?.currentSample?.timestampNanoseconds ?? null
+        }
+        timestampOrigin={session?.timestampOrigin ?? "Unix"}
+        navigationBusy={navigationBusy}
+        setupHint={investigationSetupHint}
+        selectedChannelIds={selectedChannelIds}
+        rightAxisChannelIds={rightAxisChannelIds}
+        onSeek={(sequence) => void handleSeek(sequence)}
+        onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
+        onRestoreUiState={(uiState) => {
+          setSelectedChannelIds(uiState.selectedChannelIds);
+          setRightAxisChannelIds(uiState.rightAxisChannelIds);
+        }}
+        onOpenInvestigation={handleOpenInvestigation}
+      />
     </Box>
   );
 
