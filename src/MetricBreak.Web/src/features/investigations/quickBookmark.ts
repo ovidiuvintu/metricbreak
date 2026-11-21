@@ -1,0 +1,61 @@
+import { investigationApi } from "./investigationApi";
+import { loadInvestigationSelection } from "./investigationSelectionStorage";
+import type { InvestigationBookmark } from "./investigationTypes";
+
+export type QuickBookmarkFailure =
+  | "no_recording"
+  | "no_selection"
+  | "no_sample";
+
+export type QuickBookmarkResult =
+  | { ok: true; bookmark: InvestigationBookmark }
+  | { ok: false; reason: QuickBookmarkFailure; message: string };
+
+export async function tryQuickBookmark(params: {
+  recordingName: string;
+  sampleSequence: number;
+  timestampNanoseconds: number | string;
+  title?: string | null;
+  annotation?: string | null;
+}): Promise<QuickBookmarkResult> {
+  if (!params.recordingName.trim()) {
+    return {
+      ok: false,
+      reason: "no_recording",
+      message: "No recording is loaded.",
+    };
+  }
+
+  const selection = loadInvestigationSelection(params.recordingName);
+  if (!selection?.investigationId || !selection.projectId) {
+    return {
+      ok: false,
+      reason: "no_selection",
+      message: "Save or select an investigation first (Investigations tab).",
+    };
+  }
+
+  if (!Number.isFinite(params.sampleSequence)) {
+    return {
+      ok: false,
+      reason: "no_sample",
+      message: "No sample position is available to bookmark.",
+    };
+  }
+
+  const bookmark = await investigationApi.createBookmark(
+    selection.investigationId,
+    {
+      sampleSequence: params.sampleSequence,
+      timestampNanoseconds:
+        typeof params.timestampNanoseconds === "string"
+          ? Number(params.timestampNanoseconds)
+          : params.timestampNanoseconds,
+      title: params.title?.trim() || `Sample ${params.sampleSequence.toLocaleString()}`,
+      annotation: params.annotation?.trim() || null,
+    },
+    selection.projectId,
+  );
+
+  return { ok: true, bookmark };
+}

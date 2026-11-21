@@ -30,6 +30,7 @@ import {
     loadInvestigationSelection,
     saveInvestigationSelection,
 } from "./investigationSelectionStorage";
+import { tryQuickBookmark } from "./quickBookmark";
 
 interface InvestigationPanelProps {
     sessionId: string | null;
@@ -38,7 +39,9 @@ interface InvestigationPanelProps {
     currentTimestampNanoseconds: number | null;
     timestampOrigin: "Unix" | "Elapsed";
     navigationBusy: boolean;
+    setupHint?: string | null;
     onSeek: (sequence: number) => void;
+    onBookmarksChanged?: () => void;
 }
 
 export function InvestigationPanel({
@@ -48,7 +51,9 @@ export function InvestigationPanel({
     currentTimestampNanoseconds,
     timestampOrigin,
     navigationBusy,
+    setupHint,
     onSeek,
+    onBookmarksChanged,
 }: InvestigationPanelProps) {
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
     const [projectId, setProjectId] = useState("");
@@ -66,7 +71,22 @@ export function InvestigationPanel({
             const openProjects = await projectApi.getOpenProjects();
             setProjects(openProjects);
 
-            if (openProjects.length === 1 && projectId === "") {
+            if (openProjects.length === 0) {
+                if (projectId !== "") {
+                    setProjectId("");
+                    setInvestigationId("");
+                }
+                return;
+            }
+
+            const projectIsOpen = openProjects.some(
+                (project) => project.projectId === projectId,
+            );
+
+            if (projectId !== "" && !projectIsOpen) {
+                setProjectId("");
+                setInvestigationId("");
+            } else if (projectId === "" && openProjects.length === 1) {
                 setProjectId(openProjects[0].projectId);
             }
         } catch (err) {
@@ -169,8 +189,38 @@ export function InvestigationPanel({
             setInvestigationId(response.investigationId);
             await loadInvestigations();
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to export investigation.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const handleQuickBookmarkHere = async () => {
+        if (!recordingName || currentSequence == null || currentTimestampNanoseconds == null) {
+            return;
+        }
+
+        setBusy(true);
+        setError(null);
+
+        try {
+            const result = await tryQuickBookmark({
+                recordingName,
+                sampleSequence: currentSequence,
+                timestampNanoseconds: currentTimestampNanoseconds,
+            });
+
+            if (!result.ok) {
+                setError(result.message);
+                return;
+            }
+
+            await loadBookmarks();
+            onBookmarksChanged?.();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Unable to add bookmark.");
         } finally {
             setBusy(false);
         }
@@ -197,6 +247,7 @@ export function InvestigationPanel({
             );
             setEditorOpen(false);
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to add bookmark.");
         } finally {
@@ -220,6 +271,7 @@ export function InvestigationPanel({
             setEditorOpen(false);
             setEditingBookmark(null);
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to update bookmark.");
         } finally {
@@ -240,12 +292,17 @@ export function InvestigationPanel({
                 projectId || null,
             );
             await loadBookmarks();
+            onBookmarksChanged?.();
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to delete bookmark.");
         } finally {
             setBusy(false);
         }
     };
+
+    const canQuickBookmark = recordingName &&
+        currentSequence != null &&
+        currentTimestampNanoseconds != null;
 
     const canBookmark = investigationId !== "" &&
         currentSequence != null &&
@@ -255,11 +312,23 @@ export function InvestigationPanel({
         <Stack spacing={1} sx={{ width: "100%", minWidth: 0, p: 1 }}>
             <Typography variant="subtitle2">Investigation</Typography>
 
+            <Alert severity="info" sx={{ py: 0.25, "& .MuiAlert-message": { fontSize: "0.75rem" } }}>
+                Save an investigation for this recording, bookmark 2–3 interesting samples from
+                the chart or breakpoints, then resume from the Dashboard.
+            </Alert>
+
+            {setupHint && (
+                <Alert severity="warning" sx={{ py: 0.25 }}>
+                    {setupHint}
+                </Alert>
+            )}
+
             {error && <Alert severity="error">{error}</Alert>}
 
             {projects.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
-                    Open a project on the API host before saving bookmarks.
+                    No project is open in the API. Create or open one (POST /api/projects or
+                    /api/projects/open via Scalar at localhost:5069), then refresh this page.
                 </Typography>
             ) : (
                 <FormControl size="small" fullWidth>
@@ -292,38 +361,74 @@ export function InvestigationPanel({
             </Stack>
 
             {projectId && (
-                <FormControl size="small" fullWidth>
-                    <InputLabel id="investigation-select-label">Investigation</InputLabel>
-                    <Select
-                        labelId="investigation-select-label"
-                        label="Investigation"
-                        value={investigationId}
-                        onChange={(event) => setInvestigationId(event.target.value)}
-                    >
-                        {investigations.map((item) => (
-                            <MenuItem key={item.investigationId} value={item.investigationId}>
-                                {item.recordingName}
-                            </MenuItem>
-                        ))}
-                    </Select>
-                </FormControl>
+                <>
+                    <FormControl size="small" fullWidth>
+                        <InputLabel id="investigation-select-label">Investigation</InputLabel>
+                        <Select
+                            labelId="investigation-select-label"
+                            label="Investigation"
+                            value={
+                                investigations.some((item) => item.investigationId === investigationId)
+                                    ? investigationId
+                                    : ""
+                            }
+                            onChange={(event) => setInvestigationId(event.target.value)}
+                            displayEmpty
+                            renderValue={(value) => {
+                                if (!value) {
+                                    return investigations.length === 0
+                                        ? "None yet for this recording"
+                                        : "Select investigation";
+                                }
+                                const selected = investigations.find(
+                                    (item) => item.investigationId === value,
+                                );
+                                return selected?.recordingName ?? value;
+                            }}
+                        >
+                            {investigations.map((item) => (
+                                <MenuItem key={item.investigationId} value={item.investigationId}>
+                                    {item.recordingName}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    {recordingName && investigations.length === 0 && !loading && (
+                        <Typography variant="caption" color="text.secondary">
+                            No saved investigation for{" "}
+                            <strong>{recordingName}</strong>. With a CSV loaded on Recordings,
+                            choose the project above and click <strong>Save investigation</strong>{" "}
+                            — it will appear here.
+                        </Typography>
+                    )}
+                </>
             )}
 
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
                 <Typography variant="subtitle2">
                     Bookmarks ({bookmarks.length})
                 </Typography>
-                <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    disabled={!canBookmark || busy || navigationBusy}
-                    onClick={() => {
-                        setEditingBookmark(null);
-                        setEditorOpen(true);
-                    }}
-                >
-                    Add bookmark
-                </Button>
+                <Stack direction="row" spacing={0.5}>
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={!canQuickBookmark || busy || navigationBusy}
+                        onClick={() => void handleQuickBookmarkHere()}
+                    >
+                        Quick bookmark
+                    </Button>
+                    <Button
+                        size="small"
+                        startIcon={<AddIcon />}
+                        disabled={!canBookmark || busy || navigationBusy}
+                        onClick={() => {
+                            setEditingBookmark(null);
+                            setEditorOpen(true);
+                        }}
+                    >
+                        Add with note…
+                    </Button>
+                </Stack>
             </Box>
 
             {loading ? (
