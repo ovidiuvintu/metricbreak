@@ -169,21 +169,25 @@ export function RecordingDebuggerDashboard({
                 sx={{
                     display: "flex",
                     flex: 1,
+                    minHeight: 0,
                     flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: 2,
+                    gap: 1.5,
                     px: 2,
                     textAlign: "center",
+                    overflow: "hidden",
                 }}
             >
-                <Typography variant="h6">Recording Dashboard</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
-                    Import a CSV recording to see replay position, breakpoints, and
-                    investigation bookmarks at a glance.
+                <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    Recording Dashboard
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 380 }}>
+                    Import a CSV recording to see replay position, breakpoints, and bookmarks.
                 </Typography>
                 <Button
                     variant="contained"
+                    size="small"
                     startIcon={<UploadFileIcon />}
                     onClick={onImport}
                 >
@@ -213,135 +217,199 @@ export function RecordingDebuggerDashboard({
             sx={{
                 flex: 1,
                 minHeight: 0,
-                overflowY: "auto",
-                py: 1,
+                height: "100%",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                gap: 1.5,
+                maxWidth: 900,
+                mx: "auto",
+                width: "100%",
+                py: 0.5,
             }}
         >
-            <Stack spacing={2.5} sx={{ maxWidth: 720, mx: "auto", width: "100%" }}>
-                <Box>
-                    <Typography variant="overline" color="text.secondary">
-                        Recording Dashboard
-                    </Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 700 }}>
+            <Box sx={{ flexShrink: 0 }}>
+                <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ letterSpacing: 1, textTransform: "uppercase" }}
+                >
+                    Recording Dashboard
+                </Typography>
+                <Box
+                    sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1,
+                        flexWrap: "wrap",
+                        mt: 0.25,
+                    }}
+                >
+                    <Typography
+                        variant="h6"
+                        sx={{ fontWeight: 700, lineHeight: 1.2 }}
+                        noWrap
+                    >
                         {session.recordingName}
                     </Typography>
                     <Chip
                         label={executionLabel(session.executionState)}
                         size="small"
                         color="info"
-                        sx={{ mt: 1 }}
+                        sx={{ height: 22 }}
                     />
                 </Box>
 
                 <Box
                     sx={{
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-                        gap: 2,
+                        gridTemplateColumns: {
+                            xs: "repeat(2, minmax(0, 1fr))",
+                            sm: "repeat(4, minmax(0, 1fr))",
+                        },
+                        gap: 1,
+                        mt: 1.25,
                     }}
                 >
-                    <StatCard label="Samples" value={session.sampleCount.toLocaleString()} />
-                    <StatCard label="Channels" value={channelCount.toLocaleString()} />
-                    <StatCard label="Duration" value={durationLabel ?? "—"} />
+                    <MetricTile label="Samples" value={session.sampleCount.toLocaleString()} />
+                    <MetricTile label="Channels" value={channelCount.toLocaleString()} />
+                    <MetricTile label="Duration" value={durationLabel ?? "—"} />
+                    <MetricTile label="Timestamps" value={timestampFormatLabel} />
                 </Box>
+            </Box>
 
-                <SectionCard title="Recording overview">
-                    <Typography variant="body2" color="text.secondary">
-                        Timestamp format: {timestampFormatLabel}
-                    </Typography>
-                </SectionCard>
-
-                <SectionCard title="Replay position">
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                        Sample {sequence.toLocaleString()} / {session.sampleCount.toLocaleString()}
-                    </Typography>
-                    <LinearProgress
-                        variant="determinate"
-                        value={Math.min(100, Math.max(0, progress))}
-                        sx={{ my: 1.5, height: 6, borderRadius: 1 }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                        {clockLabel}
-                    </Typography>
-                    <Button
-                        variant="contained"
-                        size="small"
-                        startIcon={<PlayArrowOutlinedIcon />}
-                        onClick={onResumeDebugging}
-                        sx={{ mt: 2 }}
-                    >
-                        Resume debugging
-                    </Button>
+            <Box
+                sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: "grid",
+                    gridTemplateColumns: { xs: "1fr 1fr", md: "1fr 1fr" },
+                    gridTemplateRows: "1fr 1fr",
+                    gap: 1.25,
+                    overflow: "hidden",
+                }}
+            >
+                <SectionCard
+                    title="Replay position"
+                    sx={{ display: "flex", flexDirection: "column", minHeight: 0 }}
+                >
+                    <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, justifyContent: "center" }}>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                            Sample {sequence.toLocaleString()} / {session.sampleCount.toLocaleString()}
+                        </Typography>
+                        <LinearProgress
+                            variant="determinate"
+                            value={Math.min(100, Math.max(0, progress))}
+                            sx={{ height: 5, borderRadius: 1 }}
+                        />
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                            {clockLabel}
+                        </Typography>
+                        <Button
+                            variant="contained"
+                            size="small"
+                            startIcon={<PlayArrowOutlinedIcon />}
+                            onClick={onResumeDebugging}
+                            sx={{ mt: 0.5, alignSelf: "flex-start" }}
+                        >
+                            Resume debugging
+                        </Button>
+                    </Stack>
                 </SectionCard>
 
                 <SectionCard
                     title="Breakpoints"
                     action={(
-                        <Button size="small" endIcon={<ChevronRightIcon />} onClick={onManageBreakpoints}>
-                            Manage breakpoints
+                        <Button
+                            size="small"
+                            sx={{ minWidth: 0, px: 0.5, fontSize: "0.72rem" }}
+                            endIcon={<ChevronRightIcon fontSize="small" />}
+                            onClick={onManageBreakpoints}
+                        >
+                            Manage
                         </Button>
                     )}
                 >
-                    <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                        {breakpointStats.total}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                        {breakpointStats.enabled} enabled · {breakpointStats.disabled} disabled
-                    </Typography>
+                    <Stack spacing={0.25} sx={{ justifyContent: "center", flex: 1 }}>
+                        <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
+                            {breakpointStats.total}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            {breakpointStats.enabled} enabled · {breakpointStats.disabled} disabled
+                        </Typography>
+                    </Stack>
                 </SectionCard>
 
                 <SectionCard
                     title="Investigation"
                     action={(
-                        <Button size="small" endIcon={<ChevronRightIcon />} onClick={onOpenInvestigations}>
-                            Open investigation
+                        <Button
+                            size="small"
+                            sx={{ minWidth: 0, px: 0.5, fontSize: "0.72rem" }}
+                            endIcon={<ChevronRightIcon fontSize="small" />}
+                            onClick={onOpenInvestigations}
+                        >
+                            Open
                         </Button>
                     )}
                 >
-                    <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                        {bookmarks.length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                        Saved bookmarks
-                        {activeInvestigationName ? ` · ${activeInvestigationName}` : ""}
-                    </Typography>
+                    <Stack spacing={0.25} sx={{ justifyContent: "center", flex: 1, minWidth: 0 }}>
+                        <Typography variant="h5" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
+                            {bookmarks.length}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap>
+                            Saved bookmarks
+                            {activeInvestigationName ? ` · ${activeInvestigationName}` : ""}
+                        </Typography>
+                    </Stack>
                 </SectionCard>
 
-                {latestBookmark && (
-                    <SectionCard title="Continue investigating">
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            {latestBookmark.title?.trim() ||
-                                `Sample ${latestBookmark.sampleSequence.toLocaleString()}`}
+                <SectionCard title="Continue investigating">
+                    {latestBookmark ? (
+                        <Stack spacing={0.5} sx={{ justifyContent: "center", flex: 1, minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+                                {latestBookmark.title?.trim() ||
+                                    `Sample ${latestBookmark.sampleSequence.toLocaleString()}`}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                                Sample {latestBookmark.sampleSequence.toLocaleString()} ·{" "}
+                                {formatBookmarkTime(
+                                    latestBookmark.timestampNanoseconds,
+                                    timestampOrigin,
+                                )}
+                            </Typography>
+                            <Button
+                                size="small"
+                                sx={{ alignSelf: "flex-start", mt: 0.25 }}
+                                onClick={() => onGoToSample(latestBookmark.sampleSequence)}
+                            >
+                                Go to bookmark
+                            </Button>
+                        </Stack>
+                    ) : (
+                        <Typography variant="caption" color="text.secondary" sx={{ m: "auto 0" }}>
+                            No bookmarks yet. Save one from Investigations.
                         </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                            Sample {latestBookmark.sampleSequence.toLocaleString()} ·{" "}
-                            {formatBookmarkTime(
-                                latestBookmark.timestampNanoseconds,
-                                timestampOrigin,
-                            )}
-                        </Typography>
-                        <Button
-                            size="small"
-                            sx={{ mt: 1.5, alignSelf: "flex-start" }}
-                            onClick={() => onGoToSample(latestBookmark.sampleSequence)}
-                        >
-                            Go to bookmark
-                        </Button>
-                    </SectionCard>
-                )}
-            </Stack>
+                    )}
+                </SectionCard>
+            </Box>
         </Box>
     );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function MetricTile({ label, value }: { label: string; value: string }) {
     return (
-        <Card variant="outlined">
-            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-                <Typography variant="caption" color="text.secondary">
+        <Card variant="outlined" sx={{ minWidth: 0 }}>
+            <CardContent sx={{ py: 1, px: 1.25, "&:last-child": { pb: 1 } }}>
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
                     {label}
                 </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                <Typography
+                    variant="body2"
+                    sx={{ fontWeight: 700, lineHeight: 1.2 }}
+                    noWrap
+                    title={value}
+                >
                     {value}
                 </Typography>
             </CardContent>
@@ -353,29 +421,54 @@ function SectionCard({
     title,
     children,
     action,
+    sx,
 }: {
     title: string;
     children: ReactNode;
     action?: ReactNode;
+    sx?: object;
 }) {
     return (
-        <Card variant="outlined">
-            <CardContent>
+        <Card
+            variant="outlined"
+            sx={{
+                minHeight: 0,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                ...sx,
+            }}
+        >
+            <CardContent
+                sx={{
+                    py: 1.25,
+                    px: 1.5,
+                    flex: 1,
+                    minHeight: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    "&:last-child": { pb: 1.25 },
+                }}
+            >
                 <Box
                     sx={{
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "space-between",
-                        gap: 1,
-                        mb: 1,
+                        gap: 0.5,
+                        mb: 0.75,
+                        flexShrink: 0,
                     }}
                 >
-                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700, textTransform: "uppercase" }}>
                         {title}
                     </Typography>
                     {action}
                 </Box>
-                {children}
+                <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                    {children}
+                </Box>
             </CardContent>
         </Card>
     );
