@@ -74,7 +74,6 @@ export function InvestigationPanel({
             if (openProjects.length === 0) {
                 if (projectId !== "") {
                     setProjectId("");
-                    setInvestigationId("");
                 }
                 return;
             }
@@ -86,8 +85,6 @@ export function InvestigationPanel({
             if (projectId !== "" && !projectIsOpen) {
                 setProjectId("");
                 setInvestigationId("");
-            } else if (projectId === "" && openProjects.length === 1) {
-                setProjectId(openProjects[0].projectId);
             }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to load projects.");
@@ -95,18 +92,15 @@ export function InvestigationPanel({
     }, [projectId]);
 
     const loadInvestigations = useCallback(async () => {
-        if (!projectId) {
-            setInvestigations([]);
-            setInvestigationId("");
-            return;
-        }
-
         setLoading(true);
         setError(null);
 
         try {
-            const response = await investigationApi.listProjectInvestigations(projectId);
-            const items = recordingName
+            const response = projectId
+                ? await investigationApi.listProjectInvestigations(projectId)
+                : await investigationApi.listWorkspaceInvestigations(recordingName);
+
+            const items = projectId && recordingName
                 ? response.investigations.filter(
                     (item) => item.recordingName === recordingName,
                 )
@@ -170,7 +164,7 @@ export function InvestigationPanel({
     }, [loadBookmarks]);
 
     useEffect(() => {
-        if (!recordingName || !projectId || !investigationId) return;
+        if (!recordingName || !investigationId) return;
         saveInvestigationSelection({
             recordingName,
             projectId,
@@ -179,13 +173,16 @@ export function InvestigationPanel({
     }, [recordingName, projectId, investigationId]);
 
     const handleExport = async () => {
-        if (!sessionId || !projectId) return;
+        if (!sessionId) return;
 
         setBusy(true);
         setError(null);
 
         try {
-            const response = await investigationApi.exportSession(sessionId, projectId);
+            const response = await investigationApi.exportSession(
+                sessionId,
+                projectId || null,
+            );
             setInvestigationId(response.investigationId);
             await loadInvestigations();
             await loadBookmarks();
@@ -313,8 +310,8 @@ export function InvestigationPanel({
             <Typography variant="subtitle2">Investigation</Typography>
 
             <Alert severity="info" sx={{ py: 0.25, "& .MuiAlert-message": { fontSize: "0.75rem" } }}>
-                Save an investigation for this recording, bookmark 2–3 interesting samples from
-                the chart or breakpoints, then resume from the Dashboard.
+                Save this debugging session as an investigation (project optional), bookmark a few
+                interesting samples from the chart or breakpoints, then resume from the Dashboard.
             </Alert>
 
             {setupHint && (
@@ -325,27 +322,31 @@ export function InvestigationPanel({
 
             {error && <Alert severity="error">{error}</Alert>}
 
-            {projects.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                    No project is open in the API. Create or open one (POST /api/projects or
-                    /api/projects/open via Scalar at localhost:5069), then refresh this page.
+            <FormControl size="small" fullWidth>
+                <InputLabel id="investigation-project-label">Project</InputLabel>
+                <Select
+                    labelId="investigation-project-label"
+                    label="Project"
+                    value={projectId}
+                    onChange={(event) => {
+                        setProjectId(event.target.value);
+                        setInvestigationId("");
+                    }}
+                >
+                    <MenuItem value="">No project</MenuItem>
+                    {projects.map((project) => (
+                        <MenuItem key={project.projectId} value={project.projectId}>
+                            {project.projectName}
+                        </MenuItem>
+                    ))}
+                </Select>
+            </FormControl>
+
+            {projects.length === 0 && (
+                <Typography variant="caption" color="text.secondary">
+                    Investigations can be saved without a project. Open a project folder later
+                    (Settings or project API) if you want to file work under one.
                 </Typography>
-            ) : (
-                <FormControl size="small" fullWidth>
-                    <InputLabel id="investigation-project-label">Project</InputLabel>
-                    <Select
-                        labelId="investigation-project-label"
-                        label="Project"
-                        value={projectId}
-                        onChange={(event) => setProjectId(event.target.value)}
-                    >
-                        {projects.map((project) => (
-                            <MenuItem key={project.projectId} value={project.projectId}>
-                                {project.projectName}
-                            </MenuItem>
-                        ))}
-                    </Select>
-                </FormControl>
             )}
 
             <Stack direction="row" spacing={1}>
@@ -353,55 +354,51 @@ export function InvestigationPanel({
                     size="small"
                     variant="outlined"
                     startIcon={<SaveOutlinedIcon />}
-                    disabled={!sessionId || !projectId || busy}
+                    disabled={!sessionId || busy}
                     onClick={() => void handleExport()}
                 >
-                    Save investigation
+                    Save as investigation
                 </Button>
             </Stack>
 
-            {projectId && (
-                <>
-                    <FormControl size="small" fullWidth>
-                        <InputLabel id="investigation-select-label">Investigation</InputLabel>
-                        <Select
-                            labelId="investigation-select-label"
-                            label="Investigation"
-                            value={
-                                investigations.some((item) => item.investigationId === investigationId)
-                                    ? investigationId
-                                    : ""
-                            }
-                            onChange={(event) => setInvestigationId(event.target.value)}
-                            displayEmpty
-                            renderValue={(value) => {
-                                if (!value) {
-                                    return investigations.length === 0
-                                        ? "None yet for this recording"
-                                        : "Select investigation";
-                                }
-                                const selected = investigations.find(
-                                    (item) => item.investigationId === value,
-                                );
-                                return selected?.recordingName ?? value;
-                            }}
-                        >
-                            {investigations.map((item) => (
-                                <MenuItem key={item.investigationId} value={item.investigationId}>
-                                    {item.recordingName}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
-                    {recordingName && investigations.length === 0 && !loading && (
-                        <Typography variant="caption" color="text.secondary">
-                            No saved investigation for{" "}
-                            <strong>{recordingName}</strong>. With a CSV loaded on Recordings,
-                            choose the project above and click <strong>Save investigation</strong>{" "}
-                            — it will appear here.
-                        </Typography>
-                    )}
-                </>
+            <FormControl size="small" fullWidth>
+                <InputLabel id="investigation-select-label">Investigation</InputLabel>
+                <Select
+                    labelId="investigation-select-label"
+                    label="Investigation"
+                    value={
+                        investigations.some((item) => item.investigationId === investigationId)
+                            ? investigationId
+                            : ""
+                    }
+                    onChange={(event) => setInvestigationId(event.target.value)}
+                    displayEmpty
+                    renderValue={(value) => {
+                        if (!value) {
+                            return investigations.length === 0
+                                ? "None yet for this recording"
+                                : "Select investigation";
+                        }
+                        const selected = investigations.find(
+                            (item) => item.investigationId === value,
+                        );
+                        return selected?.recordingName ?? value;
+                    }}
+                >
+                    {investigations.map((item) => (
+                        <MenuItem key={item.investigationId} value={item.investigationId}>
+                            {item.recordingName}
+                            {!projectId ? " (no project)" : ""}
+                        </MenuItem>
+                    ))}
+                </Select>
+            </FormControl>
+            {recordingName && investigations.length === 0 && !loading && (
+                <Typography variant="caption" color="text.secondary">
+                    No saved investigation for{" "}
+                    <strong>{recordingName}</strong>. Load the recording on Recordings and click{" "}
+                    <strong>Save as investigation</strong>.
+                </Typography>
             )}
 
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>

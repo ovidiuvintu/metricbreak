@@ -2,6 +2,7 @@ const STORAGE_KEY = "metricbreak-investigation-selection";
 
 export interface InvestigationSelection {
     recordingName: string;
+    /** Empty when the investigation is not stored under a project. */
     projectId: string;
     investigationId: string;
 }
@@ -15,7 +16,7 @@ export function loadInvestigationSelection(
 
         const parsed = JSON.parse(raw) as InvestigationSelection;
         if (parsed.recordingName !== recordingName) return null;
-        if (!parsed.projectId || !parsed.investigationId) return null;
+        if (!parsed.investigationId) return null;
 
         return parsed;
     } catch {

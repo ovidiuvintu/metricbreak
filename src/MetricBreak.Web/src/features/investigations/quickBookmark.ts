@@ -27,7 +27,7 @@ export async function tryQuickBookmark(params: {
   }
 
   const selection = loadInvestigationSelection(params.recordingName);
-  if (!selection?.investigationId || !selection.projectId) {
+  if (!selection?.investigationId) {
     return {
       ok: false,
       reason: "no_selection",

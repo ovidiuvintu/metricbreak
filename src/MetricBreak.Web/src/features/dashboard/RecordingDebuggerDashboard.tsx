@@ -122,11 +122,15 @@ export function RecordingDebuggerDashboard({
 
         void (async () => {
             try {
+                const investigationsPromise = selection.projectId
+                    ? investigationApi.listProjectInvestigations(selection.projectId)
+                    : investigationApi.listWorkspaceInvestigations(session.recordingName);
+
                 const [investigations, bookmarkResponse] = await Promise.all([
-                    investigationApi.listProjectInvestigations(selection.projectId),
+                    investigationsPromise,
                     investigationApi.listBookmarks(
                         selection.investigationId,
-                        selection.projectId,
+                        selection.projectId || null,
                     ),
                 ]);
 
