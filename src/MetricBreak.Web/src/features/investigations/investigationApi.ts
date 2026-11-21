@@ -25,6 +25,17 @@ export const investigationApi = {
         );
     },
 
+    deleteProjectInvestigation(
+        investigationId: string,
+        projectId: string,
+    ): Promise<void> {
+        const query = `?projectId=${encodeURIComponent(projectId)}`;
+        return apiRequest<void>(
+            `/api/investigations/${encodeURIComponent(investigationId)}${query}`,
+            { method: "DELETE" },
+        );
+    },
+
     listWorkspaceInvestigations(
         recordingName?: string | null,
     ): Promise<{ investigations: InvestigationSummary[] }> {

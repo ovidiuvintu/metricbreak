@@ -53,14 +53,26 @@ export async function apiRequest<T>(
                 ? (body as Record<string, unknown>)
                 : {};
 
-        throw new ApiError(
-            response.status,
+        const errorCode =
             typeof error.code === "string"
                 ? error.code
-                : "RequestFailed",
+                : typeof error.ErrorCode === "string"
+                    ? error.ErrorCode
+                    : "RequestFailed";
+
+        const errorMessage =
             typeof error.message === "string"
                 ? error.message
-                : `Request failed (${response.status}).`,
+                : typeof error.Error === "string"
+                    ? error.Error
+                    : typeof error.error === "string"
+                        ? error.error
+                        : `Request failed (${response.status}).`;
+
+        throw new ApiError(
+            response.status,
+            errorCode,
+            errorMessage,
         );
     }
 

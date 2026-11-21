@@ -658,6 +658,103 @@ public sealed class ProjectWorkspaceStore
         return true;
     }
 
+    public bool TryDeleteInvestigation(
+        Guid projectId,
+        Guid investigationId,
+        out ProjectStoreError? error)
+    {
+        error = null;
+
+        if (!_projectRoots.TryGetValue(projectId, out var rootPath))
+        {
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
+            return false;
+        }
+
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
+            || manifest is null)
+        {
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
+            return false;
+        }
+
+        var indexItem = manifest.Investigations
+            .FirstOrDefault(item => item.InvestigationId == investigationId);
+
+        if (indexItem is null)
+        {
+            error = new ProjectStoreError(
+                "InvestigationNotFound",
+                "Investigation was not found in the project.");
+            return false;
+        }
+
+        var fullPath = Path.Combine(
+            GetProjectDirectory(rootPath),
+            indexItem.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        if (File.Exists(fullPath))
+        {
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch (IOException)
+            {
+                error = new ProjectStoreError(
+                    "InvestigationDeleteFailed",
+                    "Investigation file could not be deleted.");
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                error = new ProjectStoreError(
+                    "InvestigationDeleteFailed",
+                    "Access to investigation file was denied.");
+                return false;
+            }
+        }
+
+        var updatedItems = manifest.Investigations
+            .Where(item => item.InvestigationId != investigationId)
+            .ToArray();
+
+        var updatedManifest = manifest with
+        {
+            SchemaVersion = _manifestSchemaVersion,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            Investigations = updatedItems,
+        };
+
+        try
+        {
+            SaveManifest(rootPath, updatedManifest);
+        }
+        catch (IOException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Investigation was removed, but the project manifest could not be updated.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Access to project manifest storage was denied.");
+            return false;
+        }
+
+        return true;
+    }
+
     private bool TryLoadManifest(
         string rootPath,
         out ProjectManifest? manifest,

@@ -467,12 +467,22 @@ internal static class InvestigationEndpoints
                 SessionInvestigationStore store,
                 ProjectWorkspaceStore projectStore) =>
             {
-                if (projectId is Guid)
+                if (projectId is Guid selectedProjectId)
                 {
-                    return Results.BadRequest(new
+                    if (!projectStore.TryDeleteInvestigation(
+                            selectedProjectId,
+                            investigationId,
+                            out var deleteError))
                     {
-                        Error = "Deleting project-scoped investigations is not supported yet.",
-                    });
+                        return deleteError?.Code == "InvestigationNotFound"
+                            ? Results.NotFound(ToErrorBody(deleteError))
+                            : Results.BadRequest(ToErrorBody(
+                                deleteError ?? new ProjectStoreError(
+                                    "InvestigationDeleteFailed",
+                                    "Unable to delete investigation.")));
+                    }
+
+                    return Results.NoContent();
                 }
 
                 if (!store.TryDelete(investigationId))

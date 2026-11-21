@@ -18,8 +18,20 @@ import { projectApi } from "./projectApi";
 import type { ProjectSummary } from "./projectTypes";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { OpenProjectDialog } from "./OpenProjectDialog";
+import { InvestigationsHomePanel } from "../investigations/InvestigationsHomePanel";
 
-export function ProjectDashboard() {
+interface ProjectDashboardProps {
+  onOpenInvestigation?: (
+    investigationId: string,
+    projectId: string,
+  ) => Promise<void>;
+  openInvestigationBusy?: boolean;
+}
+
+export function ProjectDashboard({
+  onOpenInvestigation,
+  openInvestigationBusy = false,
+}: ProjectDashboardProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -145,6 +157,18 @@ export function ProjectDashboard() {
                 <Typography sx={{ mt: 2 }}>
                   Investigations: {project.investigationCount}
                 </Typography>
+                {onOpenInvestigation && project.investigationCount > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <InvestigationsHomePanel
+                      title={`Investigations in ${project.projectName}`}
+                      projectId={project.projectId}
+                      limit={5}
+                      showDelete
+                      busy={openInvestigationBusy}
+                      onOpen={onOpenInvestigation}
+                    />
+                  </Box>
+                )}
               </CardContent>
               <CardActions>
                 <Button

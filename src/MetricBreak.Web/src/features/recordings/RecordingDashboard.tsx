@@ -7,6 +7,11 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Snackbar,
   Stack,
   Tab,
@@ -38,6 +43,8 @@ import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
 import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
+import { ProjectDashboard } from "../projects/ProjectDashboard";
+import { formatOpenInvestigationError } from "../investigations/formatOpenInvestigationError";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
@@ -63,6 +70,10 @@ import type { SampleRangeItem } from "./sampleTypes";
 type InspectorTab = 0 | 1 | 2;
 type PlaybackState = "stopped" | "playing" | "paused";
 
+type SessionNavigationAction =
+  | { kind: "open"; investigationId: string; projectId: string }
+  | { kind: "import"; result: CreateSessionResponse };
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
@@ -70,11 +81,23 @@ function errorMessage(error: unknown, fallback: string): string {
 interface RecordingDashboardProps {
   section: AppSection;
   onSelectSection: (section: AppSection) => void;
+  deepLinkInvestigation?: {
+    investigationId: string;
+    projectId: string;
+  } | null;
+  onDeepLinkHandled?: () => void;
+  onInvestigationOpened?: (
+    investigationId: string,
+    projectId: string,
+  ) => void;
 }
 
 export function RecordingDashboard({
   section,
   onSelectSection,
+  deepLinkInvestigation = null,
+  onDeepLinkHandled,
+  onInvestigationOpened,
 }: RecordingDashboardProps) {
   const { context, setRecordingSession, setActiveInvestigation } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
@@ -373,7 +396,10 @@ export function RecordingDashboard({
     }
   };
 
-  const handleImportSuccess = async (
+  const [sessionNavDiscardOpen, setSessionNavDiscardOpen] = useState(false);
+  const pendingSessionNavRef = useRef<SessionNavigationAction | null>(null);
+
+  const executeImportSuccess = async (
     result: CreateSessionResponse,
   ) => {
     setDialogOpen(false);
@@ -385,6 +411,27 @@ export function RecordingDashboard({
       setImportSuccess("Recording imported successfully.");
       onSelectSection("dashboard");
     }
+  };
+
+  const runSessionNavigation = async (action: SessionNavigationAction) => {
+    if (action.kind === "open") {
+      await executeOpenInvestigation(action.investigationId, action.projectId);
+      return;
+    }
+    await executeImportSuccess(action.result);
+  };
+
+  const requestSessionNavigation = (action: SessionNavigationAction) => {
+    if (isInvestigationUiDirty()) {
+      pendingSessionNavRef.current = action;
+      setSessionNavDiscardOpen(true);
+      return;
+    }
+    void runSessionNavigation(action);
+  };
+
+  const handleImportSuccess = (result: CreateSessionResponse) => {
+    requestSessionNavigation({ kind: "import", result });
   };
 
   const handleRefresh = async () => {
@@ -1423,7 +1470,7 @@ export function RecordingDashboard({
     loading || seeking || breakpointBusy ||
     playbackRunningRef.current || playbackBusy;
 
-  const handleOpenInvestigation = async (
+  const executeOpenInvestigation = async (
     investigationId: string,
     projectId: string,
   ) => {
@@ -1475,13 +1522,61 @@ export function RecordingDashboard({
       }
 
       setBookmarkRevision((value) => value + 1);
+      onInvestigationOpened?.(investigationId, projectId);
       onSelectSection("recordings");
     } catch (error) {
-      setLoadError(errorMessage(error, "Unable to open investigation."));
+      const message = formatOpenInvestigationError(error);
+      setLoadError(message);
+      if (
+        message.includes("local catalog")
+        || message.includes("Import the CSV")
+      ) {
+        onSelectSection("recordings");
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  const handleOpenInvestigation = async (
+    investigationId: string,
+    projectId: string,
+  ) => {
+    requestSessionNavigation({
+      kind: "open",
+      investigationId,
+      projectId,
+    });
+  };
+
+  const deepLinkStartedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!deepLinkInvestigation) return;
+
+    const { investigationId, projectId } = deepLinkInvestigation;
+    const key = `${investigationId}:${projectId}`;
+    if (deepLinkStartedRef.current === key) return;
+
+    deepLinkStartedRef.current = key;
+    onDeepLinkHandled?.();
+    void handleOpenInvestigation(investigationId, projectId);
+  }, [deepLinkInvestigation, onDeepLinkHandled]);
+
+  const settingsView = (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <ProjectDashboard
+        onOpenInvestigation={handleOpenInvestigation}
+        openInvestigationBusy={navigationBusy}
+      />
+    </Box>
+  );
 
   const investigationsView = (
     <Box
@@ -1655,7 +1750,8 @@ export function RecordingDashboard({
                 />
               </Box>
             )
-          ) : sectionPlaceholder}
+          ) : section === "settings" ? settingsView
+          : sectionPlaceholder}
       </Box>
 
       <ImportRecordingDialog
@@ -1688,6 +1784,45 @@ export function RecordingDashboard({
         }}
         onCreate={handleCreateCompositeBreakpoint}
       />
+
+      <Dialog
+        open={sessionNavDiscardOpen}
+        onClose={() => {
+          setSessionNavDiscardOpen(false);
+          pendingSessionNavRef.current = null;
+        }}
+      >
+        <DialogTitle>Discard unsaved chart layout?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Channel selection or chart zoom changed since the last save.
+            Continue without saving?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setSessionNavDiscardOpen(false);
+              pendingSessionNavRef.current = null;
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="warning"
+            onClick={() => {
+              const pending = pendingSessionNavRef.current;
+              setSessionNavDiscardOpen(false);
+              pendingSessionNavRef.current = null;
+              if (pending) {
+                void runSessionNavigation(pending);
+              }
+            }}
+          >
+            Discard and continue
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={bookmarkSnackOpen}
