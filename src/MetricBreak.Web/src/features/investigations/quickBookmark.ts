@@ -13,6 +13,8 @@ export type QuickBookmarkResult =
 
 export async function tryQuickBookmark(params: {
   recordingName: string;
+  investigationId?: string | null;
+  projectId?: string | null;
   sampleSequence: number;
   timestampNanoseconds: number | string;
   title?: string | null;
@@ -26,8 +28,14 @@ export async function tryQuickBookmark(params: {
     };
   }
 
-  const selection = loadInvestigationSelection(params.recordingName);
-  if (!selection?.investigationId) {
+  const investigationId = params.investigationId?.trim()
+    || loadInvestigationSelection(params.recordingName)?.investigationId;
+
+  const projectId = params.projectId?.trim()
+    ?? loadInvestigationSelection(params.recordingName)?.projectId
+    ?? null;
+
+  if (!investigationId) {
     return {
       ok: false,
       reason: "no_selection",
@@ -44,7 +52,7 @@ export async function tryQuickBookmark(params: {
   }
 
   const bookmark = await investigationApi.createBookmark(
-    selection.investigationId,
+    investigationId,
     {
       sampleSequence: params.sampleSequence,
       timestampNanoseconds:
@@ -54,7 +62,7 @@ export async function tryQuickBookmark(params: {
       title: params.title?.trim() || `Sample ${params.sampleSequence.toLocaleString()}`,
       annotation: params.annotation?.trim() || null,
     },
-    selection.projectId,
+    projectId,
   );
 
   return { ok: true, bookmark };

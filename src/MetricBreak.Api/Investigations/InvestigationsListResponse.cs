@@ -9,6 +9,7 @@ public sealed record WorkspaceInvestigationItemResponse(
     string RecordingName,
     string RelativePath,
     DateTimeOffset ExportedAtUtc,
+    DateTimeOffset LastOpenedAtUtc,
     string SourceContentHash,
     long SourceSizeInBytes,
     Guid RecordingId);

@@ -111,6 +111,49 @@ public sealed class Stage1WorkspaceEndpointTests
         Assert.Equal("Anchor", bookmark.GetProperty("title").GetString());
     }
 
+    [Fact]
+    public async Task Export_PersistsChartViewportInUiState()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var sessionId = await CreateSessionAsync(client);
+
+        using var exportResponse = await client.PostAsJsonAsync(
+            $"/api/sessions/{sessionId}/export",
+            new
+            {
+                name = "Viewport capture",
+                uiState = new
+                {
+                    selectedChannelIds = new[] { "Pressure" },
+                    rightAxisChannelIds = new[] { "Rate" },
+                    chartViewport = new
+                    {
+                        pageStart = 0,
+                        dataZoomStartPercent = 12.5,
+                        dataZoomEndPercent = 88.0,
+                    },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.Created, exportResponse.StatusCode);
+
+        using var exportJson = await ReadJsonAsync(exportResponse);
+        var investigationId = exportJson.RootElement.GetProperty("investigationId").GetGuid();
+
+        using var detail = await client.GetAsync($"/api/investigations/{investigationId}");
+        using var detailJson = await ReadJsonAsync(detail);
+
+        var viewport = detailJson.RootElement
+            .GetProperty("uiState")
+            .GetProperty("chartViewport");
+
+        Assert.Equal(0, viewport.GetProperty("pageStart").GetInt64());
+        Assert.Equal(12.5, viewport.GetProperty("dataZoomStartPercent").GetDouble(), 3);
+        Assert.Equal(88.0, viewport.GetProperty("dataZoomEndPercent").GetDouble(), 3);
+    }
+
     private static async Task<Guid> CreateSessionAsync(HttpClient client)
     {
         using var createSessionResponse = await client.PostAsync(

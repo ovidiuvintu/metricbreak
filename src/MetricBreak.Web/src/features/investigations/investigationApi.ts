@@ -18,6 +18,13 @@ export const investigationApi = {
         );
     },
 
+    deleteWorkspaceInvestigation(investigationId: string): Promise<void> {
+        return apiRequest<void>(
+            `/api/investigations/${encodeURIComponent(investigationId)}`,
+            { method: "DELETE" },
+        );
+    },
+
     listWorkspaceInvestigations(
         recordingName?: string | null,
     ): Promise<{ investigations: InvestigationSummary[] }> {

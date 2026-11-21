@@ -6,6 +6,8 @@ import type { InvestigationBookmark } from "./investigationTypes";
 
 export function useActiveInvestigationBookmarks(
     recordingName: string | null,
+    workspaceInvestigationId: string | null,
+    workspaceProjectId: string | null,
     refreshKey = 0,
 ): InvestigationBookmark[] {
     const [bookmarks, setBookmarks] = useState<InvestigationBookmark[]>([]);
@@ -17,7 +19,17 @@ export function useActiveInvestigationBookmarks(
         }
 
         const selection = loadInvestigationSelection(recordingName);
-        if (!selection) {
+        const investigationId =
+            workspaceInvestigationId?.trim()
+            || selection?.investigationId
+            || null;
+
+        const projectId =
+            workspaceProjectId?.trim()
+            || selection?.projectId
+            || null;
+
+        if (!investigationId) {
             setBookmarks([]);
             return;
         }
@@ -27,8 +39,8 @@ export function useActiveInvestigationBookmarks(
         void (async () => {
             try {
                 const response = await investigationApi.listBookmarks(
-                    selection.investigationId,
-                    selection.projectId,
+                    investigationId,
+                    projectId,
                 );
                 if (!cancelled) {
                     setBookmarks(response.bookmarks);
@@ -43,7 +55,7 @@ export function useActiveInvestigationBookmarks(
         return () => {
             cancelled = true;
         };
-    }, [recordingName, refreshKey]);
+    }, [recordingName, workspaceInvestigationId, workspaceProjectId, refreshKey]);
 
     return bookmarks;
 }

@@ -112,6 +112,22 @@ internal static class InvestigationEndpoints
                     sessionManager.Remove(previousSessionId);
                 }
 
+                var touched = InvestigationPersistence.WithLastOpenedUtc(
+                    investigation!,
+                    DateTimeOffset.UtcNow);
+                if (!InvestigationPersistence.TrySave(
+                        touched,
+                        projectId,
+                        store,
+                        projectStore,
+                        out var persistError))
+                {
+                    return Results.BadRequest(ToErrorBody(
+                        persistError ?? new ProjectStoreError(
+                            "InvestigationSaveFailed",
+                            "Unable to update investigation metadata.")));
+                }
+
                 return Results.Created(
                     $"/api/sessions/{response.SessionId}",
                     response);
@@ -148,11 +164,16 @@ internal static class InvestigationEndpoints
                     return Results.NotFound();
                 }
 
-                investigation = MergeExistingBookmarks(
-                    investigation,
+                var prior = LoadPriorInvestigation(
+                    investigation.InvestigationId,
                     exportRequest.ProjectId ?? projectId,
                     projectStore,
                     store);
+
+                investigation = MergeExistingBookmarks(investigation, prior);
+                investigation = InvestigationPersistence.MergePriorMetadata(
+                    investigation,
+                    prior);
 
                 investigation = InvestigationDocumentNormalizer.Normalize(investigation);
 
@@ -408,6 +429,33 @@ internal static class InvestigationEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status400BadRequest);
 
+        app.MapDelete(
+            "/api/investigations/{investigationId:guid}",
+            (
+                Guid investigationId,
+                [FromQuery] Guid? projectId,
+                SessionInvestigationStore store,
+                ProjectWorkspaceStore projectStore) =>
+            {
+                if (projectId is Guid)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "Deleting project-scoped investigations is not supported yet.",
+                    });
+                }
+
+                if (!store.TryDelete(investigationId))
+                    return Results.NotFound();
+
+                return Results.NoContent();
+            })
+            .WithName("DeleteWorkspaceInvestigation")
+            .WithTags(_investigationTag)
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status400BadRequest);
+
         return app;
     }
 
@@ -433,27 +481,30 @@ internal static class InvestigationEndpoints
         };
     }
 
-    private static ExportedInvestigation MergeExistingBookmarks(
-        ExportedInvestigation investigation,
+    private static ExportedInvestigation? LoadPriorInvestigation(
+        Guid investigationId,
         Guid? projectId,
         ProjectWorkspaceStore projectStore,
         SessionInvestigationStore sessionStore)
     {
-        ExportedInvestigation? previous = null;
-
         if (projectId is Guid selectedProjectId)
         {
             projectStore.TryLoadInvestigation(
                 selectedProjectId,
-                investigation.InvestigationId,
-                out previous,
+                investigationId,
+                out var previous,
                 out _);
-        }
-        else
-        {
-            sessionStore.TryLoad(investigation.InvestigationId, out previous);
+            return previous;
         }
 
+        sessionStore.TryLoad(investigationId, out var workspace);
+        return workspace;
+    }
+
+    private static ExportedInvestigation MergeExistingBookmarks(
+        ExportedInvestigation investigation,
+        ExportedInvestigation? previous)
+    {
         if (previous?.Bookmarks is not { Count: > 0 } bookmarks)
             return investigation;
 

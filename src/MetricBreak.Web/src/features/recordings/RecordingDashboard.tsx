@@ -32,6 +32,8 @@ import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
 import { InvestigationsResumeList } from "../investigations/InvestigationsResumeList";
+import { InvestigationsHomePanel } from "../investigations/InvestigationsHomePanel";
+import { saveInvestigationSelection } from "../investigations/investigationSelectionStorage";
 import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
@@ -926,6 +928,8 @@ export function RecordingDashboard({
 
     const result = await tryQuickBookmark({
       recordingName: session.recordingName,
+      investigationId: context.investigationId,
+      projectId: context.projectId,
       sampleSequence: sequence,
       timestampNanoseconds,
       title: payload?.title,
@@ -951,6 +955,8 @@ export function RecordingDashboard({
 
   const chartInvestigationBookmarks = useActiveInvestigationBookmarks(
     session?.recordingName ?? null,
+    context.investigationId,
+    context.projectId,
     bookmarkRevision,
   );
 
@@ -1460,6 +1466,14 @@ export function RecordingDashboard({
         projectId: projectId || null,
       });
 
+      if (opened.recordingName) {
+        saveInvestigationSelection({
+          recordingName: opened.recordingName,
+          projectId: projectId || "",
+          investigationId,
+        });
+      }
+
       setBookmarkRevision((value) => value + 1);
       onSelectSection("recordings");
     } catch (error) {
@@ -1474,10 +1488,37 @@ export function RecordingDashboard({
       sx={{
         flex: 1,
         minHeight: 0,
-        overflowY: "auto",
-        maxWidth: 520,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: { xs: "column", md: "row" },
+        gap: 2,
+        p: { xs: 0.5, md: 1 },
       }}
     >
+      <Box
+        sx={{
+          flex: { xs: "0 0 auto", md: "0 0 360px" },
+          minHeight: 0,
+          maxHeight: { xs: 280, md: "100%" },
+          overflowY: "auto",
+        }}
+      >
+        <InvestigationsHomePanel
+          title="Workspace investigations"
+          showDelete
+          onOpen={handleOpenInvestigation}
+          busy={loading || navigationBusy}
+          onListChanged={() => setBookmarkRevision((value) => value + 1)}
+        />
+      </Box>
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflowY: "auto",
+        }}
+      >
       <InvestigationPanel
         sessionId={session?.sessionId ?? null}
         recordingName={session?.recordingName ?? null}
@@ -1498,6 +1539,7 @@ export function RecordingDashboard({
         onUiStateBaselineSaved={rememberInvestigationUiBaseline}
         onOpenInvestigation={handleOpenInvestigation}
       />
+      </Box>
     </Box>
   );
 
