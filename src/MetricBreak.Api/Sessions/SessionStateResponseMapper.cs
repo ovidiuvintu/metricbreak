@@ -20,6 +20,7 @@ public static class SessionStateResponseMapper
                 Channels: sample.Values)
             {
                 TypedChannels = TypedChannelResponseMapper.Map(sample)
-            });
+            },
+            TimestampOrigin: snapshot.TimestampOrigin.ToString());
     }
 }

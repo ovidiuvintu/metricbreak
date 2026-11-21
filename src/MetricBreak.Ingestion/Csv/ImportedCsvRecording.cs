@@ -11,14 +11,19 @@ public sealed class ImportedCsvRecording
 
     public ITelemetryReader Reader { get; }
 
+    public TimestampOrigin TimestampOrigin { get; }
+
     public ImportedCsvRecording(
         Recording recording,
         IReadOnlyList<ChannelDefinition> channels,
-        ITelemetryReader reader)
+        ITelemetryReader reader,
+        TimestampOrigin timestampOrigin = TimestampOrigin.Unix)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(channels);
         ArgumentNullException.ThrowIfNull(reader);
+        if (!Enum.IsDefined(timestampOrigin))
+            throw new ArgumentOutOfRangeException(nameof(timestampOrigin));
 
         if (reader.RecordingId != recording.Id)
         {
@@ -30,6 +35,7 @@ public sealed class ImportedCsvRecording
         Recording = recording;
         Channels = Array.AsReadOnly(channels.ToArray());
         Reader = reader;
+        TimestampOrigin = timestampOrigin;
     }
 }
 

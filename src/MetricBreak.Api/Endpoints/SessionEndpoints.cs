@@ -39,13 +39,20 @@ internal static class SessionEndpoints
             "",
             async (
                 IFormFile file,
+                [FromForm] int? timestampColumn,
+                [FromForm] string? timestampFormat,
                 CsvSessionImportService importService,
                 CancellationToken cancellationToken) =>
             {
                 try
                 {
+                    var mapping = TimestampMappingReader.Read(
+                        timestampColumn,
+                        timestampFormat);
+
                     var response = await importService.ImportAsync(
                         file,
+                        mapping,
                         cancellationToken);
 
                     return Results.Created(
@@ -79,6 +86,57 @@ internal static class SessionEndpoints
             .Accepts<IFormFile>("multipart/form-data")
             .Produces<CreateSessionResponse>(
                 StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status400BadRequest);
+
+        group.MapPost(
+            "/timestamp-preview",
+            async (
+                IFormFile file,
+                [FromForm] int? timestampColumn,
+                [FromForm] string? timestampFormat,
+                CsvSessionImportService importService,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var mapping = TimestampMappingReader.Read(
+                        timestampColumn,
+                        timestampFormat);
+
+                    var preview = await importService.PreviewAsync(
+                        file,
+                        mapping,
+                        cancellationToken);
+
+                    return Results.Ok(preview);
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+                catch (FormatException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+                catch (InvalidDataException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+            })
+            .DisableAntiforgery()
+            .WithName("PreviewCsvTimestampMapping")
+            .Accepts<IFormFile>("multipart/form-data")
+            .Produces<TimestampPreviewResponse>(
+                StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest);
 
         // GET SESSION STATE

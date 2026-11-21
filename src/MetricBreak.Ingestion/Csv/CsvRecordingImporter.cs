@@ -7,7 +7,12 @@ namespace MetricBreak.Ingestion.Csv;
 
 public sealed class CsvRecordingImporter
 {
-    public ImportedCsvRecording Import(string filePath)
+    public ImportedCsvRecording Import(string filePath) =>
+        Import(filePath, mapping: null);
+
+    public ImportedCsvRecording Import(
+        string filePath,
+        TimestampMapping? mapping)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
@@ -37,7 +42,7 @@ public sealed class CsvRecordingImporter
             detectEncodingFromByteOrderMarks: true);
 
         var parsed = new IndexedCsvTelemetryParser()
-            .Parse(reader);
+            .Parse(reader, mapping);
 
         var recordingId = Guid.NewGuid();
 
@@ -54,6 +59,7 @@ public sealed class CsvRecordingImporter
         return new ImportedCsvRecording(
             recording,
             parsed.Channels,
-            telemetryReader);
+            telemetryReader,
+            parsed.TimestampOrigin);
     }
 }

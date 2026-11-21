@@ -916,6 +916,7 @@ export function RecordingDashboard() {
               session.currentSample?.sequence ?? null
             }
             currentTimestampNanoseconds={session.currentSample?.timestampNanoseconds ?? null}
+            timestampOrigin={session.timestampOrigin ?? "Unix"}
             onSeek={handleSeek}
             onScrubStart={handleScrubStart}
             onScrubEnd={(sequence) => void handleScrubEnd(sequence)}

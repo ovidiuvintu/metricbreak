@@ -596,7 +596,8 @@ public sealed class ReplaySessionManager
             SampleCount: imported.Reader.SampleCount,
             ExecutionState: controller.State,
             Position: controller.Position,
-            CurrentSample: controller.CurrentSample);
+            CurrentSample: controller.CurrentSample,
+            TimestampOrigin: imported.TimestampOrigin);
     }
 
     public bool TryGetSnapshot(

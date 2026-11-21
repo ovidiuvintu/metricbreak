@@ -15,4 +15,5 @@ export interface SessionState {
   executionState: string;
   pauseReason: string;
   currentSample: CurrentSample;
+  timestampOrigin?: "Unix" | "Elapsed";
 }
