@@ -179,6 +179,23 @@ export function RecordingChart({
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
   const [cursorLabelX, setCursorLabelX] = useState<number | null>(null);
   const dragRef = useRef<{ sequence: number } | null>(null);
+  // Drag visuals are updated imperatively, without a React/ECharts option rebuild
+  // on every pointer event.
+  const cursorHandleRef = useRef<HTMLDivElement>(null);
+  const dragLineRef = useRef<HTMLDivElement>(null);
+  const dragLineVisibleRef = useRef(false);
+  const dragFrameRef = useRef<number | null>(null);
+  const pendingDragXRef = useRef<number | null>(null);
+
+  const renderDragPosition = (x: number, sequence: number) => {
+    const handle = cursorHandleRef.current;
+    const line = dragLineRef.current;
+    if (handle) {
+      handle.style.left = `${x}px`;
+      handle.textContent = sequence.toLocaleString();
+    }
+    if (line) line.style.left = `${x}px`;
+  };
   const suppressClickRef = useRef(false);
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const tooltipsEnabledRef = useRef(true);
@@ -306,6 +323,22 @@ export function RecordingChart({
       setPreviewSequence(null);
     }
 
+    // Manual page browsing must remain independent of ordinary replay updates.
+    // Resume following only when replay crosses an actual page boundary.
+    // This avoids snapping back after clicking Previous/Next while still
+    // allowing forward and reverse playback to transition between pages.
+    const previousReplayPage = previous?.sequence == null
+      ? null
+      : Math.floor(previous.sequence / PAGE_SIZE);
+    const currentReplayPage = currentSequence == null
+      ? null
+      : Math.floor(currentSequence / PAGE_SIZE);
+    const crossedPageBoundary = !sessionChanged && sequenceChanged &&
+      previousReplayPage !== null && currentReplayPage !== null &&
+      previousReplayPage !== currentReplayPage;
+
+    if (crossedPageBoundary) manualPageRef.current = false;
+
     if (dragRef.current || manualPageRef.current) return;
 
     // Manual Next/Previous page navigation does not change either value.
@@ -397,6 +430,8 @@ export function RecordingChart({
   const navigateToPage = (targetPage: number) => {
     if (loading || targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
     manualPageRef.current = true;
+    // Clear the old page's handle before the new chart finishes loading.
+    setCursorLabelX(null);
     setPageIndex(targetPage);
   };
 
@@ -446,7 +481,7 @@ export function RecordingChart({
           },
 
           emphasis: {
-            focus: "series" as const,
+            focus: "none" as const,
             lineStyle: {
               width: Math.max(2, lineWidth + 1),
             },
@@ -549,7 +584,7 @@ export function RecordingChart({
 
       grid: {
         left: 20,
-        right: 12,
+        right:40,
         top: 55,
         bottom: 55,
         containLabel: true,
@@ -696,26 +731,39 @@ export function RecordingChart({
       pageEnd,
   ]);
 
-  // Position the draggable label only after ECharts has a usable coordinate system.
-  // ReactECharts can expose an instance before its axis model is ready.
+  // Keep the HTML handle aligned with ECharts' markLine after zoom/resize.
+  // A datazoom event can fire before ECharts has completed its new layout,
+  // so the finished event is also observed. Neither event rebuilds the series.
   useEffect(() => {
     const chart = chartRef.current?.getEchartsInstance();
-    const sequence = previewSequence ?? currentSequence;
-    if (!chart || chart.isDisposed() || sequence === null ||
-        sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
-      setCursorLabelX(null);
-      return;
-    }
+    if (!chart || chart.isDisposed()) return;
 
     let disposed = false;
     let frame: number | null = null;
     const update = () => {
-      if (disposed || chart.isDisposed()) return;
-      // convertToPixel can throw while ECharts is applying a new option.
-      // Do not use the private getModel() API to check readiness.
+      if (disposed || chart.isDisposed() || dragRef.current) return;
+      const sequence = previewSequence ?? currentSequence;
+      if (sequence === null || sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
+        setCursorLabelX(null);
+        return;
+      }
       try {
         const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
-        setCursorLabelX(Number.isFinite(pixel) ? pixel : null);
+        // A zoom may move the replay position outside the visible plot.
+        // Hide the handle in that case instead of leaving it at a stale X.
+        // containPixel with an xAxis finder and a scalar pixel can report
+        // false even when the X coordinate is valid. Check the rendered
+        // chart's horizontal bounds instead; zoomed-outside positions are
+        // hidden, while visible labels remain draggable.
+        const visible = Number.isFinite(pixel) && pixel >= 0 && pixel <= chart.getWidth();
+        if (!visible) {
+          setCursorLabelX(null);
+          return;
+        }
+        // Move the existing DOM handle immediately; don't depend on a React
+        // render to synchronize with the chart's newly positioned markLine.
+        if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${pixel}px`;
+        setCursorLabelX((previous) => previous === pixel ? previous : pixel);
       } catch {
         setCursorLabelX(null);
       }
@@ -727,8 +775,6 @@ export function RecordingChart({
         update();
       });
     };
-
-    // Defer the initial conversion until ReactECharts has applied the option.
     scheduleUpdate();
     chart.on("finished", scheduleUpdate);
     chart.on("datazoom", scheduleUpdate);
@@ -744,16 +790,29 @@ export function RecordingChart({
   }, [currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
 
   const handleLabelPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || dragRef.current) return;
+    const chart = chartRef.current?.getEchartsInstance();
+    const sequence = previewSequence ?? currentSequence;
+    if (!chart || chart.isDisposed() || sequence === null) return;
     event.preventDefault();
     event.stopPropagation();
-    const sequence = previewSequence ?? currentSequence;
-    if (sequence === null) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = { sequence };
     suppressClickRef.current = true;
     setHover(null);
     setInspectedSample(null);
+
+    // Hide the authoritative ECharts markLine once while dragging. A lightweight
+    // DOM line takes its place; ECharts is not updated again until release.
+    const firstSeriesId = (option.series[0] as { id?: string } | undefined)?.id;
+    if (firstSeriesId) {
+      chart.setOption({ series: [{ id: firstSeriesId, markLine: { data: [] } }] });
+    }
+    const line = dragLineRef.current;
+    if (line) {
+      line.style.display = "block";
+      dragLineVisibleRef.current = true;
+    }
     onScrubStartRef.current();
   };
 
@@ -761,35 +820,94 @@ export function RecordingChart({
     if (!dragRef.current) return;
     const chart = chartRef.current?.getEchartsInstance();
     const loaded = samplesRef.current;
-    if (!chart || !loaded.length) return;
+    if (!chart || chart.isDisposed() || !loaded.length) return;
     const rect = chart.getDom().getBoundingClientRect();
-    let coords: number;
+    const x = event.clientX - rect.left;
+    let rawSequence: number;
     try {
-      coords = chart.convertFromPixel(
-        { xAxisIndex: 0 }, event.clientX - rect.left,
-      ) as number;
+      rawSequence = chart.convertFromPixel({ xAxisIndex: 0 }, x) as number;
     } catch {
-      return; // Axis is being initialized or replaced.
+      return;
     }
-    if (!Number.isFinite(coords)) return;
+    if (!Number.isFinite(rawSequence)) return;
     const sequence = Math.max(loaded[0].sequence,
-      Math.min(loaded[loaded.length - 1].sequence, Math.round(coords)));
+      Math.min(loaded[loaded.length - 1].sequence, Math.round(rawSequence)));
     dragRef.current.sequence = sequence;
-    setPreviewSequence(sequence);
+
+    // Pixel position follows the pointer, clamped to the loaded sample range.
+    // Snap only the recorded sequence; commit the seek on pointer release.
+    let snappedX: number;
+    try {
+      snappedX = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
+    } catch {
+      return;
+    }
+    if (!Number.isFinite(snappedX)) return;
+    pendingDragXRef.current = snappedX;
+    if (dragFrameRef.current === null) {
+      dragFrameRef.current = requestAnimationFrame(() => {
+        dragFrameRef.current = null;
+        if (dragRef.current && pendingDragXRef.current !== null) {
+          renderDragPosition(pendingDragXRef.current, dragRef.current.sequence);
+        }
+      });
+    }
   };
 
-  const handleLabelPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+  const finishLabelDrag = (event: PointerEvent<HTMLDivElement>, cancelled: boolean) => {
     if (!dragRef.current) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    const sequence = dragRef.current.sequence;
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = null;
+    pendingDragXRef.current = null;
+    const sequence = cancelled ? currentSequence : dragRef.current.sequence;
     dragRef.current = null;
-    suppressClickRef.current = false;
+    dragLineVisibleRef.current = false;
+    if (dragLineRef.current) dragLineRef.current.style.display = "none";
+    // React now performs one authoritative chart update, rather than one per move.
     setPreviewSequence(sequence === currentSequence ? null : sequence);
     manualPageRef.current = false;
-    onScrubEndRef.current(sequence);
+    suppressClickRef.current = false;
+    // Restore the visible markLine immediately, including a no-op drag.
+    const restoredChart = chartRef.current?.getEchartsInstance();
+    const restoredSeriesId = (option.series[0] as { id?: string } | undefined)?.id;
+    if (restoredChart && !restoredChart.isDisposed() && restoredSeriesId && sequence !== null) {
+      restoredChart.setOption({ series: [{ id: restoredSeriesId, markLine: {
+        data: [{ xAxis: sequence }], silent: true, symbol: "none",
+        animation: false, label: { show: false },
+        lineStyle: { color: "#F59E0B", width: 2.5, type: "solid" },
+      } }] });
+    }
+    if (cancelled) {
+      // Restore the original cursor after cancellation without seeking.
+      const chart = chartRef.current?.getEchartsInstance();
+      const firstSeriesId = (option.series[0] as { id?: string } | undefined)?.id;
+      if (chart && !chart.isDisposed() && firstSeriesId && currentSequence !== null) {
+        chart.setOption({ series: [{ id: firstSeriesId, markLine: {
+          data: [{ xAxis: currentSequence }],
+          silent: true, symbol: "none", animation: false,
+          label: { show: false },
+          lineStyle: { color: "#F59E0B", width: 2.5, type: "solid" },
+        } }] });
+      }
+      if (cursorHandleRef.current && cursorLabelX !== null) {
+        renderDragPosition(cursorLabelX, currentSequence ?? 0);
+      }
+      return;
+    }
+    if (sequence !== null) onScrubEndRef.current(sequence);
   };
+
+  const handleLabelPointerUp = (event: PointerEvent<HTMLDivElement>) =>
+    finishLabelDrag(event, false);
+  const handleLabelPointerCancel = (event: PointerEvent<HTMLDivElement>) =>
+    finishLabelDrag(event, true);
+
+  useEffect(() => () => {
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+  }, []);
 
   // Detach our ZRender listeners when the chart unmounts.
   useEffect(() => () => listenerCleanupRef.current?.(), []);
@@ -1058,12 +1176,31 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               cursor: "default",
             }}
           />
-          {cursorLabelX !== null && (
+          <Box
+            ref={dragLineRef}
+            aria-hidden="true"
+            sx={{
+              display: "none",
+              position: "absolute",
+              top: 55,
+              bottom: 85,
+              width: "4px",
+              transform: "translateX(-50%)",
+              backgroundColor: "#F59E0B",
+              pointerEvents: "none",
+              zIndex: 11,
+            }}
+          />
+          {cursorLabelX !== null &&
+            (previewSequence ?? currentSequence) !== null &&
+            (previewSequence ?? currentSequence)! >= pageStart &&
+            (previewSequence ?? currentSequence)! < pageEnd && (
             <Box
+              ref={cursorHandleRef}
               onPointerDown={handleLabelPointerDown}
               onPointerMove={handleLabelPointerMove}
               onPointerUp={handleLabelPointerUp}
-              onPointerCancel={handleLabelPointerUp}
+              onPointerCancel={handleLabelPointerCancel}
               sx={{
                 position: "absolute",
                 // Place the handle between the legend and the plot (grid starts at 55px).
