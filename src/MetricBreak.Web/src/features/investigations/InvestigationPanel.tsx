@@ -48,6 +48,10 @@ interface InvestigationPanelProps {
     onSeek: (sequence: number) => void;
     onBookmarksChanged?: () => void;
     onRestoreUiState?: (uiState: InvestigationUiState) => void;
+    onOpenInvestigation?: (
+        investigationId: string,
+        projectId: string,
+    ) => Promise<void>;
 }
 
 export function InvestigationPanel({
@@ -63,6 +67,7 @@ export function InvestigationPanel({
     onSeek,
     onBookmarksChanged,
     onRestoreUiState,
+    onOpenInvestigation,
 }: InvestigationPanelProps) {
     const { setActiveInvestigation } = useWorkspace();
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -415,7 +420,7 @@ export function InvestigationPanel({
                 fullWidth
             />
 
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
                 <Button
                     size="small"
                     variant="outlined"
@@ -424,6 +429,17 @@ export function InvestigationPanel({
                     onClick={() => void handleExport()}
                 >
                     {investigationId ? "Save investigation" : "Save as investigation"}
+                </Button>
+                <Button
+                    size="small"
+                    variant="contained"
+                    disabled={!investigationId || busy || navigationBusy || !onOpenInvestigation}
+                    onClick={() => {
+                        if (!investigationId || !onOpenInvestigation) return;
+                        void onOpenInvestigation(investigationId, projectId);
+                    }}
+                >
+                    Open investigation
                 </Button>
             </Stack>
 

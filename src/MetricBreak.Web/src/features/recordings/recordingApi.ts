@@ -146,4 +146,11 @@ export const recordingApi = {
     `/api/sessions/${encodeURIComponent(sessionId)}/channels`
   );
 },
+
+  closeSession(sessionId: string): Promise<void> {
+    return apiRequest<void>(
+      `/api/sessions/${encodeURIComponent(sessionId)}`,
+      { method: "DELETE" },
+    );
+  },
 };

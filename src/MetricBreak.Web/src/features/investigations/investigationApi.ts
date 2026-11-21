@@ -5,6 +5,7 @@ import type {
     ExportInvestigationResponse,
     InvestigationBookmark,
     InvestigationSummary,
+    OpenInvestigationResponse,
     UpdateBookmarkRequest,
 } from "./investigationTypes";
 
@@ -44,6 +45,28 @@ export const investigationApi = {
                 method: "POST",
                 body: JSON.stringify(request ?? {}),
             },
+        );
+    },
+
+    openInvestigation(
+        investigationId: string,
+        options?: {
+            projectId?: string | null;
+            closeSessionId?: string | null;
+        },
+    ): Promise<OpenInvestigationResponse> {
+        const params = new URLSearchParams();
+        if (options?.projectId?.trim()) {
+            params.set("projectId", options.projectId.trim());
+        }
+        if (options?.closeSessionId?.trim()) {
+            params.set("closeSessionId", options.closeSessionId.trim());
+        }
+        const query = params.size > 0 ? `?${params.toString()}` : "";
+
+        return apiRequest<OpenInvestigationResponse>(
+            `/api/investigations/${encodeURIComponent(investigationId)}/open${query}`,
+            { method: "POST" },
         );
     },
 

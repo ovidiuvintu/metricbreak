@@ -27,6 +27,17 @@ export interface ExportInvestigationRequest {
     uiState?: InvestigationUiState | null;
 }
 
+export interface OpenInvestigationResponse {
+    sessionId: string;
+    investigationId: string;
+    recordingId: string;
+    recordingName: string;
+    investigationName: string | null;
+    sampleCount: number;
+    sequenceNumber: number;
+    status: string;
+}
+
 export interface InvestigationBookmark {
     bookmarkId: string;
     investigationId: string;
