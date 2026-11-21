@@ -26,7 +26,8 @@ public static class TimestampColumnDetector
     [
         TimestampFormat.UnixEpochSeconds,
         TimestampFormat.UnixEpochMilliseconds,
-        TimestampFormat.UnixEpochMicroseconds
+        TimestampFormat.UnixEpochMicroseconds,
+        TimestampFormat.UnixEpochNanoseconds
     ];
 
     public static TimestampDetection Detect(
@@ -381,7 +382,13 @@ public static class TimestampColumnDetector
             ["epochus"] = TimestampFormat.UnixEpochMicroseconds,
             ["unixus"] = TimestampFormat.UnixEpochMicroseconds,
             ["microseconds"] = TimestampFormat.UnixEpochMicroseconds,
-            ["micros"] = TimestampFormat.UnixEpochMicroseconds
+            ["micros"] = TimestampFormat.UnixEpochMicroseconds,
+            ["timestampns"] = TimestampFormat.UnixEpochNanoseconds,
+            ["timens"] = TimestampFormat.UnixEpochNanoseconds,
+            ["epochns"] = TimestampFormat.UnixEpochNanoseconds,
+            ["unixns"] = TimestampFormat.UnixEpochNanoseconds,
+            ["nanoseconds"] = TimestampFormat.UnixEpochNanoseconds,
+            ["nanos"] = TimestampFormat.UnixEpochNanoseconds
         };
 
     private sealed record ScoredColumn(
@@ -400,6 +407,7 @@ internal static class TimestampFormatList
         TimestampFormat.UnixEpochSeconds,
         TimestampFormat.UnixEpochMilliseconds,
         TimestampFormat.UnixEpochMicroseconds,
+        TimestampFormat.UnixEpochNanoseconds,
         TimestampFormat.RelativeElapsedSeconds
     ];
 }

@@ -206,6 +206,61 @@ public sealed class TimestampMappingTests
     }
 
     [Fact]
+    public void UnixEpochNanoseconds_AreStoredDirectly()
+    {
+        var timestamp = TimestampParser.Parse(
+            "1700000000000000000",
+            TimestampFormat.UnixEpochNanoseconds,
+            2);
+
+        Assert.Equal(1_700_000_000_000_000_000L, timestamp.UnixNanoseconds);
+    }
+
+    [Fact]
+    public void UnixEpochNanoseconds_Boundary_MatchesEpochSeconds()
+    {
+        var nanoseconds = TimestampParser.Parse(
+            "1000000000000000000",
+            TimestampFormat.UnixEpochNanoseconds,
+            2);
+        var seconds = TimestampParser.Parse(
+            "1000000000",
+            TimestampFormat.UnixEpochSeconds,
+            2);
+
+        Assert.Equal(seconds, nanoseconds);
+    }
+
+    [Fact]
+    public void UnixEpochNanoseconds_RejectFractionalPrecision()
+    {
+        var error = Assert.Throws<FormatException>(() =>
+            TimestampParser.Parse(
+                "1700000000000000000.1",
+                TimestampFormat.UnixEpochNanoseconds,
+                2));
+
+        Assert.Contains("out of range", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnixEpochNanoseconds_AreDetectedForModernInstants()
+    {
+        const string csv = """
+            time_ns,Pressure
+            1700000000000000000,10
+            1700000000000000001,11
+            """;
+
+        var result = new IndexedCsvTelemetryParser().Parse(new StringReader(csv));
+
+        Assert.Equal(TimestampOrigin.Unix, result.TimestampOrigin);
+        Assert.Equal(1_700_000_000_000_000_000L, result.Samples[0].Timestamp.UnixNanoseconds);
+        Assert.Equal(1_700_000_000_000_000_001L, result.Samples[1].Timestamp.UnixNanoseconds);
+        Assert.Equal(["Pressure"], result.Channels.Select(channel => channel.Name));
+    }
+
+    [Fact]
     public void NumericScale_ThatOverflowsNanoseconds_IsOutOfRange()
     {
         var error = Assert.Throws<FormatException>(() =>

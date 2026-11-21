@@ -77,6 +77,14 @@ public static class TimestampParser
                     allowNegative: true,
                     out timestamp,
                     out failure),
+            TimestampFormat.UnixEpochNanoseconds =>
+                TryParseScaled(
+                    text.Trim(),
+                    nanosecondsPerUnit: 1,
+                    maxFractionDigits: 0,
+                    allowNegative: true,
+                    out timestamp,
+                    out failure),
             TimestampFormat.RelativeElapsedSeconds =>
                 TryParseScaled(
                     text.Trim(),
@@ -116,6 +124,7 @@ public static class TimestampParser
         TimestampFormat.UnixEpochSeconds => "Unix epoch seconds",
         TimestampFormat.UnixEpochMilliseconds => "Unix epoch milliseconds",
         TimestampFormat.UnixEpochMicroseconds => "Unix epoch microseconds",
+        TimestampFormat.UnixEpochNanoseconds => "Unix epoch nanoseconds",
         TimestampFormat.RelativeElapsedSeconds => "relative elapsed seconds",
         _ => format.ToString()
     };
