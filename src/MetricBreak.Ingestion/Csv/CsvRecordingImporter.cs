@@ -12,7 +12,8 @@ public sealed class CsvRecordingImporter
 
     public ImportedCsvRecording Import(
         string filePath,
-        TimestampMapping? mapping)
+        TimestampMapping? mapping,
+        Guid? recordingId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
@@ -44,16 +45,18 @@ public sealed class CsvRecordingImporter
         var parsed = new IndexedCsvTelemetryParser()
             .Parse(reader, mapping);
 
-        var recordingId = Guid.NewGuid();
+        var resolvedRecordingId = recordingId is Guid stableId && stableId != Guid.Empty
+            ? stableId
+            : Guid.NewGuid();
 
         var recording = new Recording(
-            recordingId,
+            resolvedRecordingId,
             Path.GetFileNameWithoutExtension(filePath),
             source,
             DateTimeOffset.UtcNow);
 
         var telemetryReader = new IndexedTelemetryReader(
-            recordingId,
+            resolvedRecordingId,
             parsed.Samples);
 
         return new ImportedCsvRecording(

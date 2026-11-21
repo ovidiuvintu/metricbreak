@@ -1,12 +1,16 @@
 using MetricBreak.Api.Endpoints;
 using MetricBreak.Api.Investigations;
+using MetricBreak.Api.Recordings;
 using MetricBreak.Api.Sessions;
 using MetricBreak.Api.Workspaces;
+using MetricBreak.Ingestion.Csv;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<ReplaySessionManager>();
+builder.Services.AddSingleton<RecordingCatalogStore>();
+builder.Services.AddSingleton<CsvRecordingImporter>();
 builder.Services.AddSingleton<SessionInvestigationStore>();
 builder.Services.AddSingleton<ProjectWorkspaceStore>();
 builder.Services.AddSingleton<InvestigationBookmarkService>();
@@ -27,6 +31,7 @@ _ = app.Services
     .TryRestoreLastOpenedProject(out _);
 
 app.MapProjectEndpoints();
+app.MapRecordingEndpoints();
 app.MapSessionEndpoints();
 app.MapReplayEndpoints();
 app.MapInvestigationEndpoints();

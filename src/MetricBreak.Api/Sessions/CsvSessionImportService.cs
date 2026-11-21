@@ -1,4 +1,5 @@
 using System.Text;
+using MetricBreak.Api.Recordings;
 using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Api.Sessions;
@@ -6,13 +7,17 @@ namespace MetricBreak.Api.Sessions;
 public sealed class CsvSessionImportService
 {
     private readonly ReplaySessionManager _manager;
+    private readonly RecordingCatalogStore _catalog;
     private readonly CsvRecordingImporter _importer = new();
 
     public CsvSessionImportService(
-        ReplaySessionManager manager)
+        ReplaySessionManager manager,
+        RecordingCatalogStore catalog)
     {
         ArgumentNullException.ThrowIfNull(manager);
+        ArgumentNullException.ThrowIfNull(catalog);
         _manager = manager;
+        _catalog = catalog;
     }
 
     public Task<CreateSessionResponse> ImportAsync(
@@ -25,19 +30,22 @@ public sealed class CsvSessionImportService
         TimestampMapping? mapping,
         CancellationToken cancellationToken = default)
     {
-        var imported = await ImportRecordingAsync(
+        return await UseTemporaryFileAsync(
             file,
-            mapping,
+            path =>
+            {
+                var imported = _importer.Import(path, mapping);
+                _catalog.RegisterImportedRecording(imported, path);
+                var sessionId = _manager.Create(imported);
+
+                return Task.FromResult(new CreateSessionResponse(
+                    sessionId,
+                    imported.Recording.Id,
+                    imported.Recording.Name,
+                    imported.Reader.SampleCount,
+                    "Ready"));
+            },
             cancellationToken);
-
-        var sessionId = _manager.Create(imported);
-
-        return new CreateSessionResponse(
-            sessionId,
-            imported.Recording.Id,
-            imported.Recording.Name,
-            imported.Reader.SampleCount,
-            "Ready");
     }
 
     public Task<TimestampPreviewResponse> PreviewAsync(

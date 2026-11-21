@@ -7,14 +7,17 @@ public sealed record ExportedInvestigation(
     RecordingExportSnapshot Recording,
     SessionExportSnapshot Session,
     IReadOnlyList<BreakpointExportSnapshot> Breakpoints,
-    IReadOnlyList<InvestigationBookmarkSnapshot>? Bookmarks = null);
+    IReadOnlyList<InvestigationBookmarkSnapshot>? Bookmarks = null,
+    InvestigationMetadataSnapshot? Metadata = null,
+    InvestigationUiStateSnapshot? UiState = null);
 
 public sealed record RecordingExportSnapshot(
     string SourceName,
     string SourceContentHash,
     long SourceSizeInBytes,
     string RecordingName,
-    long SampleCount);
+    long SampleCount,
+    Guid RecordingId = default);
 
 public sealed record SessionExportSnapshot(
     long SequenceNumber,

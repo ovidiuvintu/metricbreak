@@ -1,10 +1,30 @@
 export interface InvestigationSummary {
     investigationId: string;
+    investigationName?: string;
     recordingName: string;
+    recordingId?: string;
     relativePath: string;
     exportedAtUtc: string;
     sourceContentHash: string;
     sourceSizeInBytes: number;
+}
+
+export interface InvestigationUiState {
+    selectedChannelIds: string[];
+    rightAxisChannelIds: string[];
+    chartViewport?: {
+        pageStart: number;
+        dataZoomStartPercent: number;
+        dataZoomEndPercent: number;
+    } | null;
+}
+
+export interface ExportInvestigationRequest {
+    investigationId?: string | null;
+    name?: string | null;
+    description?: string | null;
+    projectId?: string | null;
+    uiState?: InvestigationUiState | null;
 }
 
 export interface InvestigationBookmark {

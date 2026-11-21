@@ -1,6 +1,7 @@
 import { apiRequest } from "../../shared/api/httpClient";
 import type {
     CreateBookmarkRequest,
+    ExportInvestigationRequest,
     ExportInvestigationResponse,
     InvestigationBookmark,
     InvestigationSummary,
@@ -30,15 +31,49 @@ export const investigationApi = {
 
     exportSession(
         sessionId: string,
-        projectId?: string | null,
+        request?: ExportInvestigationRequest | null,
     ): Promise<ExportInvestigationResponse> {
-        const query = projectId?.trim()
-            ? `?projectId=${encodeURIComponent(projectId.trim())}`
+        const projectId = request?.projectId?.trim();
+        const query = projectId
+            ? `?projectId=${encodeURIComponent(projectId)}`
             : "";
 
         return apiRequest<ExportInvestigationResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/export${query}`,
-            { method: "POST" },
+            {
+                method: "POST",
+                body: JSON.stringify(request ?? {}),
+            },
+        );
+    },
+
+    getInvestigation(
+        investigationId: string,
+        projectId?: string | null,
+    ): Promise<{
+        schemaVersion: number;
+        investigationId: string;
+        metadata?: {
+            name?: string | null;
+            description?: string | null;
+        };
+        uiState?: {
+            selectedChannelIds: string[];
+            rightAxisChannelIds: string[];
+            chartViewport?: {
+                pageStart: number;
+                dataZoomStartPercent: number;
+                dataZoomEndPercent: number;
+            } | null;
+        } | null;
+        session: { sequenceNumber: number };
+    }> {
+        const query = projectId?.trim()
+            ? `?projectId=${encodeURIComponent(projectId.trim())}`
+            : "";
+
+        return apiRequest(
+            `/api/investigations/${encodeURIComponent(investigationId)}${query}`,
         );
     },
 

@@ -12,12 +12,13 @@ public sealed class SessionInvestigationStore
 
     private readonly string _storageDirectory;
 
-    public SessionInvestigationStore()
+    public SessionInvestigationStore(string? storageDirectory = null)
     {
-        _storageDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "metricbreak",
-            "investigations");
+        _storageDirectory = Path.GetFullPath(
+            storageDirectory ?? Path.Combine(
+                Path.GetTempPath(),
+                "metricbreak",
+                "investigations"));
 
         Directory.CreateDirectory(_storageDirectory);
     }
@@ -82,13 +83,19 @@ public sealed class SessionInvestigationStore
                 continue;
             }
 
+            var normalized = InvestigationDocumentNormalizer.Normalize(investigation);
+            var displayName = normalized.Metadata?.Name?.Trim()
+                ?? normalized.Recording.RecordingName;
+
             results.Add(new WorkspaceInvestigationItemResponse(
-                investigation.InvestigationId,
-                investigation.Recording.RecordingName,
+                normalized.InvestigationId,
+                displayName,
+                normalized.Recording.RecordingName,
                 Path.GetFileName(filePath),
-                investigation.ExportedAtUtc,
-                investigation.Recording.SourceContentHash,
-                investigation.Recording.SourceSizeInBytes));
+                normalized.ExportedAtUtc,
+                normalized.Recording.SourceContentHash,
+                normalized.Recording.SourceSizeInBytes,
+                normalized.Recording.RecordingId));
         }
 
         return results
@@ -108,7 +115,7 @@ public sealed class SessionInvestigationStore
             if (investigation is null)
                 return null;
 
-            return InvestigationBookmarkMutations.Normalize(investigation);
+            return InvestigationDocumentNormalizer.Normalize(investigation);
         }
         catch
         {

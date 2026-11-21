@@ -12,6 +12,7 @@ import {
     MenuItem,
     Select,
     Stack,
+    TextField,
     Tooltip,
     Typography,
 } from "@mui/material";
@@ -31,6 +32,8 @@ import {
     saveInvestigationSelection,
 } from "./investigationSelectionStorage";
 import { tryQuickBookmark } from "./quickBookmark";
+import type { InvestigationUiState } from "./investigationTypes";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
 interface InvestigationPanelProps {
     sessionId: string | null;
@@ -40,8 +43,11 @@ interface InvestigationPanelProps {
     timestampOrigin: "Unix" | "Elapsed";
     navigationBusy: boolean;
     setupHint?: string | null;
+    selectedChannelIds: string[];
+    rightAxisChannelIds: string[];
     onSeek: (sequence: number) => void;
     onBookmarksChanged?: () => void;
+    onRestoreUiState?: (uiState: InvestigationUiState) => void;
 }
 
 export function InvestigationPanel({
@@ -52,11 +58,16 @@ export function InvestigationPanel({
     timestampOrigin,
     navigationBusy,
     setupHint,
+    selectedChannelIds,
+    rightAxisChannelIds,
     onSeek,
     onBookmarksChanged,
+    onRestoreUiState,
 }: InvestigationPanelProps) {
+    const { setActiveInvestigation } = useWorkspace();
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
     const [projectId, setProjectId] = useState("");
+    const [investigationName, setInvestigationName] = useState("");
     const [investigations, setInvestigations] = useState<InvestigationSummary[]>([]);
     const [investigationId, setInvestigationId] = useState("");
     const [bookmarks, setBookmarks] = useState<InvestigationBookmark[]>([]);
@@ -179,11 +190,26 @@ export function InvestigationPanel({
         setError(null);
 
         try {
-            const response = await investigationApi.exportSession(
-                sessionId,
-                projectId || null,
-            );
+            const name = investigationName.trim() ||
+                recordingName ||
+                "Investigation";
+
+            const response = await investigationApi.exportSession(sessionId, {
+                investigationId: investigationId || null,
+                name,
+                projectId: projectId || null,
+                uiState: {
+                    selectedChannelIds,
+                    rightAxisChannelIds,
+                },
+            });
             setInvestigationId(response.investigationId);
+            setInvestigationName(name);
+            setActiveInvestigation({
+                investigationId: response.investigationId,
+                investigationName: name,
+                projectId: projectId || null,
+            });
             await loadInvestigations();
             await loadBookmarks();
             onBookmarksChanged?.();
@@ -191,6 +217,37 @@ export function InvestigationPanel({
             setError(err instanceof Error ? err.message : "Unable to export investigation.");
         } finally {
             setBusy(false);
+        }
+    };
+
+    const handleSelectInvestigation = async (nextId: string) => {
+        setInvestigationId(nextId);
+        if (!nextId) return;
+
+        const summary = investigations.find((item) => item.investigationId === nextId);
+        const displayName = summary?.investigationName ?? summary?.recordingName ?? "";
+        setInvestigationName(displayName);
+
+        setActiveInvestigation({
+            investigationId: nextId,
+            investigationName: displayName,
+            projectId: projectId || null,
+        });
+
+        try {
+            const document = await investigationApi.getInvestigation(
+                nextId,
+                projectId || null,
+            );
+            if (document.uiState && onRestoreUiState) {
+                onRestoreUiState({
+                    selectedChannelIds: document.uiState.selectedChannelIds ?? [],
+                    rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+                    chartViewport: document.uiState.chartViewport ?? null,
+                });
+            }
+        } catch {
+            // Selection still works when detail load fails.
         }
     };
 
@@ -349,6 +406,15 @@ export function InvestigationPanel({
                 </Typography>
             )}
 
+            <TextField
+                size="small"
+                label="Investigation name"
+                value={investigationName}
+                onChange={(event) => setInvestigationName(event.target.value)}
+                placeholder={recordingName ?? "Investigation name"}
+                fullWidth
+            />
+
             <Stack direction="row" spacing={1}>
                 <Button
                     size="small"
@@ -357,7 +423,7 @@ export function InvestigationPanel({
                     disabled={!sessionId || busy}
                     onClick={() => void handleExport()}
                 >
-                    Save as investigation
+                    {investigationId ? "Save investigation" : "Save as investigation"}
                 </Button>
             </Stack>
 
@@ -371,7 +437,7 @@ export function InvestigationPanel({
                             ? investigationId
                             : ""
                     }
-                    onChange={(event) => setInvestigationId(event.target.value)}
+                    onChange={(event) => void handleSelectInvestigation(event.target.value)}
                     displayEmpty
                     renderValue={(value) => {
                         if (!value) {
@@ -382,12 +448,14 @@ export function InvestigationPanel({
                         const selected = investigations.find(
                             (item) => item.investigationId === value,
                         );
-                        return selected?.recordingName ?? value;
+                        return selected?.investigationName ??
+                            selected?.recordingName ??
+                            value;
                     }}
                 >
                     {investigations.map((item) => (
                         <MenuItem key={item.investigationId} value={item.investigationId}>
-                            {item.recordingName}
+                            {item.investigationName ?? item.recordingName}
                             {!projectId ? " (no project)" : ""}
                         </MenuItem>
                     ))}

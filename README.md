@@ -215,7 +215,9 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 
 ## Contributing
 
-MetricBreak is under active development. Development setup and contribution guidelines will be expanded as the architecture stabilizes. Use GitHub Issues to propose changes or report problems once issue tracking is enabled.
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup and pull request expectations.
+
+All changes must follow **[docs/ORIGINATION.md](docs/ORIGINATION.md)** (original authorship, no pasted third-party source, vendored files documented in [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md)). Pull requests use the checklist in [.github/pull_request_template.md](.github/pull_request_template.md).
 
 ## License
 
