@@ -168,7 +168,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 5. **Projects are optional.** Debugging a recording should not require a project; workspaces add persistence and organization.
 6. **Typed data remains typed.** Numeric, Boolean, and categorical values retain their semantics throughout ingestion, inspection, and rule evaluation.
 7. **Breakpoint correctness over rendering speed.** High-speed playback may throttle UI updates but must not skip breakpoint evaluation.
-8. **AI is optional.** Any future assistant must run locally; deterministic engines remain authoritative for calculations, rules, and evidence. No cloud inference fallback.
+8. **No LLM in the product.** Replay, breakpoints, and investigations are deterministic; the app does not call language models or expose assistant chat. See [docs/PRODUCT.md](docs/PRODUCT.md).
 9. **Independent implementation.** MetricBreak code is designed and written independently, not copied or adapted from external codebases.
 
 ## Technology
@@ -211,7 +211,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 - [ ] Add two-recording comparison, alignment, and divergence rules.
 - [ ] Expand telemetry search and data-quality diagnostics.
 - [ ] Evaluate other recording and streaming data sources behind stable ingestion abstractions.
-- [ ] Evaluate optional external integrations and local-only AI separately.
+- [ ] Evaluate optional external integrations (excluding LLM inference; see [docs/PRODUCT.md](docs/PRODUCT.md)).
 
 ## Contributing
 

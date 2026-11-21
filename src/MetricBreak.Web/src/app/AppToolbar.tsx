@@ -15,6 +15,8 @@ import { useTheme } from "@mui/material/styles";
 import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
 import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 
+import { useWorkspace } from "../workspace/WorkspaceProvider";
+
 interface AppToolbarProps {
   onToggleTheme: () => void;
   onOpenSidebar: () => void;
@@ -26,6 +28,14 @@ export function AppToolbar({
 }: AppToolbarProps) {
   const theme = useTheme();
   const isDark = theme.palette.mode === "dark";
+  const { context } = useWorkspace();
+
+  const workspaceLine =
+    context.recordingName
+      ? context.investigationName
+        ? `${context.recordingName} · ${context.investigationName}`
+        : context.recordingName
+      : null;
 
   return (
     <AppBar
@@ -58,7 +68,22 @@ export function AppToolbar({
           MetricBreak
         </Typography>
 
-        {/* Push toolbar actions to the far right */}
+        {workspaceLine && (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            noWrap
+            sx={{
+              ml: 2,
+              maxWidth: { xs: 160, sm: 360, md: 520 },
+              display: { xs: "none", sm: "block" },
+            }}
+            title={workspaceLine}
+          >
+            {workspaceLine}
+          </Typography>
+        )}
+
         <Box sx={{ flexGrow: 1 }} />
 
         <Tooltip

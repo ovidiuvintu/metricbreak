@@ -57,7 +57,18 @@ import {
   getAxisTemperatureAccent,
   getSeriesColor,
 } from "../../theme/chartTheme";
-import type { InvestigationBookmark } from "../investigations/investigationTypes";
+import type {
+  InvestigationBookmark,
+  InvestigationUiState,
+} from "../investigations/investigationTypes";
+
+export type ChartViewportSnapshot = NonNullable<
+  InvestigationUiState["chartViewport"]
+>;
+
+export type ChartViewportReader = {
+  read: () => ChartViewportSnapshot | null;
+};
 
 type ChartMarkLine = {
   silent?: boolean;
@@ -237,6 +248,9 @@ interface RecordingChartProps {
   /** Bumped when the parent wants the chart viewport zoomed (not the replay cursor). */
   viewportFocusRequestId?: number;
   viewportFocusSequence?: number | null;
+  restoreChartViewport?: ChartViewportSnapshot | null;
+  restoreChartViewportRequestId?: number;
+  registerChartViewportReader?: (reader: ChartViewportReader | null) => void;
   breakpoints?: Breakpoint[];
   compositeBreakpoints?: CompositeBreakpoint[];
   breakpointHitsRefreshKey?: number;
@@ -601,6 +615,9 @@ export function RecordingChart({
   investigationBookmarks = [],
   viewportFocusRequestId = 0,
   viewportFocusSequence = null,
+  restoreChartViewport = null,
+  restoreChartViewportRequestId = 0,
+  registerChartViewportReader,
   breakpoints = [],
   compositeBreakpoints = [],
   breakpointHitsRefreshKey = 0,
@@ -1764,6 +1781,56 @@ export function RecordingChart({
       zoomViewportToSequence(chart, ps, pe, viewportFocusSequence, 0.12);
     });
   }, [viewportFocusRequestId, viewportFocusSequence]);
+
+  const pendingViewportRestoreRef = useRef<ChartViewportSnapshot | null>(null);
+
+  useEffect(() => {
+    if (restoreChartViewportRequestId <= 0 || !restoreChartViewport) return;
+    pendingViewportRestoreRef.current = restoreChartViewport;
+    const targetPage = Math.floor(restoreChartViewport.pageStart / PAGE_SIZE);
+    manualPageRef.current = true;
+    setPageIndex(targetPage);
+  }, [restoreChartViewportRequestId, restoreChartViewport]);
+
+  useEffect(() => {
+    const pending = pendingViewportRestoreRef.current;
+    if (!pending || loading || samples.length === 0 || pageStart !== pending.pageStart) {
+      return;
+    }
+
+    pendingViewportRestoreRef.current = null;
+    withChart((chart) => {
+      applyViewportPercents(
+        chart,
+        pending.dataZoomStartPercent,
+        pending.dataZoomEndPercent,
+      );
+    });
+    manualPageRef.current = false;
+  }, [loading, samples, pageStart]);
+
+  useEffect(() => {
+    if (!registerChartViewportReader) return;
+
+    registerChartViewportReader({
+      read: () => {
+        const chart = chartRef.current?.getEchartsInstance();
+        if (!chart || chart.isDisposed()) return null;
+        const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+        const viewport = readSequenceViewport(chart, ps, pe);
+        if (!viewport) return null;
+        return {
+          pageStart: ps,
+          dataZoomStartPercent: viewport.startPercent,
+          dataZoomEndPercent: viewport.endPercent,
+        };
+      },
+    });
+
+    return () => {
+      registerChartViewportReader(null);
+    };
+  }, [registerChartViewportReader]);
 
   useEffect(() => {
     const root = containerRef.current;
