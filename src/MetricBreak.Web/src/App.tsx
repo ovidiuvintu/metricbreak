@@ -10,6 +10,7 @@ import {
 import { createMetricBreakTheme } from "./theme/theme";
 import { AppShell } from "./app/AppShell";
 import type { AppSection } from "./app/AppSidebar";
+import { readAppUrlState, writeAppUrlState } from "./app/appNavigationUrl";
 import { RecordingDashboard } from "./features/recordings/RecordingDashboard";
 import { WorkspaceProvider } from "./workspace/WorkspaceProvider";
 
@@ -39,7 +40,26 @@ export default function App() {
     getInitialThemeMode
   );
 
-  const [section, setSection] = useState<AppSection>("dashboard");
+  const initialUrl = readAppUrlState();
+  const [section, setSection] = useState<AppSection>(
+    initialUrl.section ?? "dashboard",
+  );
+  const [deepLinkInvestigation, setDeepLinkInvestigation] = useState<{
+    investigationId: string;
+    projectId: string;
+  } | null>(
+    initialUrl.investigationId
+      ? {
+          investigationId: initialUrl.investigationId,
+          projectId: initialUrl.projectId ?? "",
+        }
+      : null,
+  );
+
+  const selectSection = (next: AppSection) => {
+    setSection(next);
+    writeAppUrlState({ section: next });
+  };
 
   const theme = useMemo(
     () => createMetricBreakTheme(mode),
@@ -83,11 +103,21 @@ export default function App() {
           <AppShell
             onToggleTheme={toggleTheme}
             selected={section}
-            onSelectSection={setSection}
+            onSelectSection={selectSection}
           >
             <RecordingDashboard
               section={section}
-              onSelectSection={setSection}
+              onSelectSection={selectSection}
+              deepLinkInvestigation={deepLinkInvestigation}
+              onDeepLinkHandled={() => setDeepLinkInvestigation(null)}
+              onInvestigationOpened={(investigationId, projectId) => {
+                setDeepLinkInvestigation({ investigationId, projectId });
+                writeAppUrlState({
+                  section: "recordings",
+                  investigationId,
+                  projectId,
+                });
+              }}
             />
           </AppShell>
         </WorkspaceProvider>

@@ -37,6 +37,7 @@ interface InvestigationsHomePanelProps {
     limit?: number;
     title?: string;
     showDelete?: boolean;
+    projectId?: string;
     onListChanged?: () => void;
 }
 
@@ -46,6 +47,7 @@ export function InvestigationsHomePanel({
     limit,
     title = "Investigations",
     showDelete = false,
+    projectId = "",
     onListChanged,
 }: InvestigationsHomePanelProps) {
     const [items, setItems] = useState<InvestigationSummary[]>([]);
@@ -59,7 +61,9 @@ export function InvestigationsHomePanel({
         setLoading(true);
         setError(null);
         try {
-            const response = await investigationApi.listWorkspaceInvestigations();
+            const response = projectId
+                ? await investigationApi.listProjectInvestigations(projectId)
+                : await investigationApi.listWorkspaceInvestigations();
             const sorted = sortInvestigations(response.investigations);
             setItems(limit ? sorted.slice(0, limit) : sorted);
         } catch (err) {
@@ -67,7 +71,7 @@ export function InvestigationsHomePanel({
         } finally {
             setLoading(false);
         }
-    }, [limit]);
+    }, [limit, projectId]);
 
     useEffect(() => {
         void load();
@@ -76,7 +80,7 @@ export function InvestigationsHomePanel({
     const handleOpen = async (investigationId: string) => {
         setOpeningId(investigationId);
         try {
-            await onOpen(investigationId, "");
+            await onOpen(investigationId, projectId);
         } finally {
             setOpeningId(null);
         }
@@ -86,7 +90,16 @@ export function InvestigationsHomePanel({
         if (!deleteTarget) return;
         setDeleting(true);
         try {
-            await investigationApi.deleteWorkspaceInvestigation(deleteTarget.investigationId);
+            if (projectId) {
+                await investigationApi.deleteProjectInvestigation(
+                    deleteTarget.investigationId,
+                    projectId,
+                );
+            } else {
+                await investigationApi.deleteWorkspaceInvestigation(
+                    deleteTarget.investigationId,
+                );
+            }
             setDeleteTarget(null);
             await load();
             onListChanged?.();
@@ -169,7 +182,9 @@ export function InvestigationsHomePanel({
                 <DialogContent>
                     <DialogContentText>
                         {deleteTarget
-                            ? `Remove "${deleteTarget.investigationName ?? deleteTarget.recordingName}" from the workspace store. This cannot be undone.`
+                            ? projectId
+                                ? `Remove "${deleteTarget.investigationName ?? deleteTarget.recordingName}" from this project. This cannot be undone.`
+                                : `Remove "${deleteTarget.investigationName ?? deleteTarget.recordingName}" from the workspace store. This cannot be undone.`
                             : ""}
                     </DialogContentText>
                 </DialogContent>

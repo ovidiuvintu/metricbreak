@@ -468,8 +468,8 @@ export function InvestigationPanel({
 
             {projects.length === 0 && (
                 <Typography variant="caption" color="text.secondary">
-                    Investigations can be saved without a project. Open a project folder later
-                    (Settings or project API) if you want to file work under one.
+                    Investigations can be saved without a project. Use Settings → New Project
+                    to create or open a project folder when you want investigations filed on disk.
                 </Typography>
             )}
 
