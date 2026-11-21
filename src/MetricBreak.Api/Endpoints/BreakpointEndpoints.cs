@@ -360,6 +360,46 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status400BadRequest);
 
+        app.MapGet(
+            "/api/sessions/{sessionId:guid}/breakpoint-hits",
+            (
+                Guid sessionId,
+                long from,
+                long to,
+                int? maxHits,
+                ReplaySessionManager manager) =>
+            {
+                if (to <= from)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "InvalidRange",
+                        Message = "Parameter 'to' must be greater than 'from'.",
+                    });
+                }
+
+                var limit = maxHits is > 0 and <= 10_000 ? maxHits.Value : 2000;
+
+                if (!manager.TryListBreakpointHitsInRange(
+                        sessionId,
+                        from,
+                        to,
+                        limit,
+                        out var response)
+                    || response is null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(response);
+            })
+            .WithName("ListSessionBreakpointHits")
+            .WithTags(_breakpointTag)
+            .Produces<BreakpointHitsResponse>(
+                StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
         return app;
     }
 }

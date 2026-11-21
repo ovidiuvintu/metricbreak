@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Box,
@@ -13,6 +13,11 @@ import type { AppSection } from "./app/AppSidebar";
 import { RecordingDashboard } from "./features/recordings/RecordingDashboard";
 
 const THEME_STORAGE_KEY = "metricbreak-theme";
+const CHART_PLOT_CONTEXT_ATTR = "data-chart-plot";
+
+function isChartPlotContextMenu(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest(`[${CHART_PLOT_CONTEXT_ATTR}]`));
+}
 
 function getInitialThemeMode(): PaletteMode {
   try {
@@ -39,6 +44,16 @@ export default function App() {
     () => createMetricBreakTheme(mode),
     [mode]
   );
+
+  useEffect(() => {
+    const onContextMenu = (event: MouseEvent) => {
+      if (isChartPlotContextMenu(event.target)) return;
+      event.preventDefault();
+    };
+
+    document.addEventListener("contextmenu", onContextMenu, { capture: true });
+    return () => document.removeEventListener("contextmenu", onContextMenu, { capture: true });
+  }, []);
 
   const toggleTheme = () => {
     const next = mode === "light" ? "dark" : "light";
