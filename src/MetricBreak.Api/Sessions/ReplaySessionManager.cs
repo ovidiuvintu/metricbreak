@@ -190,6 +190,16 @@ public sealed class ReplaySessionManager
                 return false;
             }
 
+            try
+            {
+                BreakpointOperatorValidation.Validate(channel.ValueType, comparisonOperator);
+            }
+            catch (ArgumentException exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+
             var breakpoint = new ConditionalBreakpoint(
                 exportedBreakpoint.BreakpointId,
                 channel.Id,
@@ -339,6 +349,9 @@ public sealed class ReplaySessionManager
                 return true;
             }
 
+            var channel = entry.Imported.Channels.Single(c => c.Id == channelId);
+            BreakpointOperatorValidation.Validate(channel.ValueType, comparisonOperator);
+
             breakpoint = new ConditionalBreakpoint(
                 Guid.NewGuid(),
                 channelId,
@@ -448,6 +461,12 @@ public sealed class ReplaySessionManager
             {
                 unknownChannel = true;
                 return true;
+            }
+
+            foreach (var condition in conditions)
+            {
+                var channel = entry.Imported.Channels.Single(c => c.Id == condition.ChannelId);
+                BreakpointOperatorValidation.Validate(channel.ValueType, condition.Operator);
             }
 
             // Validate all conditions before modifying the collection.

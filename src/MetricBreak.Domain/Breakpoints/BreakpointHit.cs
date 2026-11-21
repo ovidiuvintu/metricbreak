@@ -20,6 +20,8 @@ public sealed record BreakpointHit
 
     public double ObservedValue { get; }
 
+    public ChannelValue? TypedObservedValue { get; init; }
+
     public ComparisonOperator Operator { get; }
 
     public double Threshold { get; }

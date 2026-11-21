@@ -7,7 +7,8 @@ public static class BreakpointEvaluator
 {
     public static bool Evaluate(
         ConditionalBreakpoint breakpoint,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
         ArgumentNullException.ThrowIfNull(sample);
@@ -16,12 +17,13 @@ public static class BreakpointEvaluator
             breakpoint.ChannelId,
             breakpoint.Operator,
             breakpoint.Threshold,
-            sample);
+            sample, previous);
     }
 
     public static bool Evaluate(
         CompositeBreakpoint breakpoint,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
         ArgumentNullException.ThrowIfNull(sample);
@@ -34,7 +36,7 @@ public static class BreakpointEvaluator
                         condition.ChannelId,
                         condition.Operator,
                         condition.Threshold,
-                        sample)),
+                        sample, previous)),
 
             LogicalOperator.Or =>
                 breakpoint.Conditions.Any(condition =>
@@ -42,7 +44,7 @@ public static class BreakpointEvaluator
                         condition.ChannelId,
                         condition.Operator,
                         condition.Threshold,
-                        sample)),
+                        sample, previous)),
 
             _ => throw new ArgumentOutOfRangeException(
                 nameof(breakpoint),
@@ -52,17 +54,18 @@ public static class BreakpointEvaluator
 
     public static bool Evaluate(
         IBreakpoint breakpoint,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
         return breakpoint switch
         {
             ConditionalBreakpoint conditional =>
-                Evaluate(conditional, sample),
+                Evaluate(conditional, sample, previous),
 
             CompositeBreakpoint composite =>
-                Evaluate(composite, sample),
+                Evaluate(composite, sample, previous),
 
             _ => throw new NotSupportedException(
                 $"Unsupported breakpoint type: {breakpoint.GetType().Name}")
@@ -72,18 +75,19 @@ public static class BreakpointEvaluator
     public static BreakpointHit? EvaluateHit(
         ConditionalBreakpoint breakpoint,
         SamplePosition position,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
         ArgumentNullException.ThrowIfNull(sample);
 
         ValidatePosition(position, sample);
 
-        if (!Evaluate(breakpoint, sample))
+        if (!Evaluate(breakpoint, sample, previous))
             return null;
 
-        double observedValue =
-            sample.GetValue(breakpoint.ChannelId)!.Value;
+        var typedValue = sample.GetTypedValue(breakpoint.ChannelId);
+        double observedValue = typedValue is ChannelValue.Numeric n ? n.Value : 0d;
 
         return new BreakpointHit(
             breakpoint.Id,
@@ -92,13 +96,17 @@ public static class BreakpointEvaluator
             breakpoint.ChannelId,
             observedValue,
             breakpoint.Operator,
-            breakpoint.Threshold);
+            breakpoint.Threshold)
+        {
+            TypedObservedValue = typedValue
+        };
     }
 
     public static BreakpointHit? EvaluateHit(
         CompositeBreakpoint breakpoint,
         SamplePosition position,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
         ArgumentNullException.ThrowIfNull(sample);
@@ -121,14 +129,17 @@ public static class BreakpointEvaluator
                     condition.ChannelId,
                     condition.Operator,
                     condition.Threshold,
-                    sample);
+                    sample, previous);
 
                 return new BreakpointConditionHit(
                     condition.ChannelId,
                     observedValue,
                     condition.Operator,
                     condition.Threshold,
-                    matched);
+                    matched)
+                {
+                    TypedObservedValue = sample.GetTypedValue(condition.ChannelId)
+                };
             })
             .ToArray();
 
@@ -160,17 +171,18 @@ public static class BreakpointEvaluator
     public static BreakpointHit? EvaluateHit(
         IBreakpoint breakpoint,
         SamplePosition position,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         ArgumentNullException.ThrowIfNull(breakpoint);
 
         return breakpoint switch
         {
             ConditionalBreakpoint conditional =>
-                EvaluateHit(conditional, position, sample),
+                EvaluateHit(conditional, position, sample, previous),
 
             CompositeBreakpoint composite =>
-                EvaluateHit(composite, position, sample),
+                EvaluateHit(composite, position, sample, previous),
 
             _ => throw new NotSupportedException(
                 $"Unsupported breakpoint type: {breakpoint.GetType().Name}")
@@ -181,8 +193,13 @@ public static class BreakpointEvaluator
         Guid channelId,
         ComparisonOperator comparisonOperator,
         double threshold,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
+        if (comparisonOperator is ComparisonOperator.Changed or ComparisonOperator.RisingEdge or ComparisonOperator.FallingEdge)
+            return EdgeConditionEvaluator.Evaluate(comparisonOperator,
+                previous?.GetTypedValue(channelId), sample.GetTypedValue(channelId), threshold);
+
         double? observedValue = sample.GetValue(channelId);
 
         if (observedValue is not double value ||
@@ -219,7 +236,8 @@ public static class BreakpointEvaluator
 
     private static void ValidatePosition(
         SamplePosition position,
-        TelemetrySample sample)
+        TelemetrySample sample,
+        TelemetrySample? previous = null)
     {
         if (position.RecordingId == Guid.Empty ||
             position.SequenceNumber != sample.SequenceNumber)

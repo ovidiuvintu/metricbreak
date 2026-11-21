@@ -6,7 +6,10 @@ export type ComparisonOperator =
   | "LessThan"
   | "LessThanOrEqual"
   | "Equal"
-  | "NotEqual";
+  | "NotEqual"
+  | "Changed"
+  | "RisingEdge"
+  | "FallingEdge";
 
 export type LogicalOperator = "And" | "Or";
 

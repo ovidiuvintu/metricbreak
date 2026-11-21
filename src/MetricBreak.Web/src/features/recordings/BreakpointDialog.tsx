@@ -38,6 +38,9 @@ const operators: {
   { value: "LessThanOrEqual", label: "<=" },
   { value: "Equal", label: "==" },
   { value: "NotEqual", label: "!=" },
+  { value: "Changed", label: "Changed" },
+  { value: "RisingEdge", label: "Rising Edge" },
+  { value: "FallingEdge", label: "Falling Edge" },
 ];
 
 export function BreakpointDialog({
@@ -52,12 +55,17 @@ export function BreakpointDialog({
     useState<ComparisonOperator>("GreaterThan");
   const [threshold, setThreshold] = useState("");
 
-  const numericThreshold = Number(threshold);
+  const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
+  const allowedOperators = operators.filter(o => selectedType === "Numeric" ||
+    (selectedType === "Boolean" && ["Changed", "RisingEdge", "FallingEdge"].includes(o.value)) ||
+    (selectedType === "Categorical" && o.value === "Changed"));
+  const needsThreshold = selectedType === "Numeric" && operator !== "Changed";
+  const numericThreshold = needsThreshold ? Number(threshold) : 0;
 
   const valid =
     channelId !== "" &&
     channels.some((channel) => channel.channelId === channelId) &&
-    threshold.trim() !== "" &&
+    (!needsThreshold || threshold.trim() !== "") &&
     Number.isFinite(numericThreshold);
 
   const handleCreate = async () => {
@@ -82,7 +90,11 @@ export function BreakpointDialog({
             <Select
               label="Channel"
               value={channelId}
-              onChange={(event) => setChannelId(event.target.value)}
+              onChange={(event) => {
+                setChannelId(event.target.value);
+                const nextType = channels.find(c => c.channelId === event.target.value)?.valueType ?? "Numeric";
+                if (nextType !== "Numeric") setOperator("Changed");
+              }}
             >
               {channels.map((channel) => (
                 <MenuItem
@@ -104,7 +116,7 @@ export function BreakpointDialog({
                 setOperator(event.target.value as ComparisonOperator)
               }
             >
-              {operators.map((item) => (
+              {allowedOperators.map((item) => (
                 <MenuItem key={item.value} value={item.value}>
                   {item.label}
                 </MenuItem>
@@ -112,14 +124,14 @@ export function BreakpointDialog({
             </Select>
           </FormControl>
 
-          <TextField
+          {needsThreshold && <TextField
             label="Threshold"
             type="number"
             size="small"
             value={threshold}
             onChange={(event) => setThreshold(event.target.value)}
             fullWidth
-          />
+          />}
         </Stack>
       </DialogContent>
 
