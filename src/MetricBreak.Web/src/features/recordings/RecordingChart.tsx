@@ -177,7 +177,18 @@ export function RecordingChart({
   const [inspectedSample, setInspectedSample] = useState<HoverDetails | null>(null);
   const [cursorHovered, setCursorHovered] = useState(false);
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
-  const [cursorLabelX, setCursorLabelX] = useState<number | null>(null);
+  // Tag the label position with the page whose ECharts coordinate system
+  // produced it. A position from the previous page must never be rendered.
+  const [cursorLabelPosition, setCursorLabelPosition] = useState<{
+    pageStart: number;
+    x: number;
+  } | null>(null);
+  const cursorLabelX = cursorLabelPosition?.pageStart === pageStart
+    ? cursorLabelPosition.x
+    : null;
+  const setCursorLabelX = (x: number | null) => {
+    setCursorLabelPosition(x === null ? null : { pageStart, x });
+  };
   const dragRef = useRef<{ sequence: number } | null>(null);
   // Drag visuals are updated imperatively, without a React/ECharts option rebuild
   // on every pointer event.
@@ -743,11 +754,21 @@ export function RecordingChart({
     const update = () => {
       if (disposed || chart.isDisposed() || dragRef.current) return;
       const sequence = previewSequence ?? currentSequence;
-      if (sequence === null || sequence < pageStart || sequence >= pageEnd || samples.length === 0) {
+      if (sequence === null || sequence < pageStart || sequence >= pageEnd ||
+          samples.length === 0 || samples[0].sequence < pageStart ||
+          samples[0].sequence >= pageEnd) {
         setCursorLabelX(null);
         return;
       }
       try {
+        // During a page transition ReactECharts may still expose the old
+        // chart instance. Never interpret a new-page sequence with old axes.
+        const axis = (chart.getOption().xAxis as Array<{ min?: number; max?: number }> | undefined)?.[0];
+        if (Number(axis?.min) !== pageStart ||
+            Number(axis?.max) !== Math.max(pageStart + 1, pageEnd - 1)) {
+          setCursorLabelX(null);
+          return;
+        }
         const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
         // A zoom may move the replay position outside the visible plot.
         // Hide the handle in that case instead of leaving it at a stale X.
