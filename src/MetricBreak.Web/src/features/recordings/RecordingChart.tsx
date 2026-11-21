@@ -953,9 +953,11 @@ export function RecordingChart({
         },
       },
       axisLabel: {
-        color: style.accentColor,
+        show: true,
+        color: chartTheme.axisTextColor,
         opacity: style.labelOpacity,
         formatter: formatNumericTick,
+        margin: 6,
       },
       splitLine: {
         show: position !== "right",
@@ -1081,8 +1083,8 @@ export function RecordingChart({
       },
 
       grid: {
-        left: 8,
-        right: hasRightAxis ? 12 : 8,
+        left: hasRightAxis ? 12 : 16,
+        right: hasRightAxis ? 16 : 12,
         top: hasYAxisNames ? 52 : 42,
         bottom: 40,
         containLabel: true,
@@ -1139,10 +1141,12 @@ export function RecordingChart({
         },
       },
 
-      yAxis: [
-        makeYAxis(leftAxisStyle),
-        makeYAxis(rightAxisStyle, "right", rightAxisMax),
-      ],
+      yAxis: hasRightAxis
+        ? [
+            makeYAxis(leftAxisStyle),
+            makeYAxis(rightAxisStyle, "right", rightAxisMax),
+          ]
+        : makeYAxis(leftAxisStyle),
 
       dataZoom: [
         {
@@ -1676,7 +1680,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             ref={chartRef}
             option={option}
             notMerge={false}
-            replaceMerge={["series"]}
+            replaceMerge={["series", "yAxis", "xAxis", "grid"]}
             onChartReady={handleChartReady}
             style={{
               height: "100%",
