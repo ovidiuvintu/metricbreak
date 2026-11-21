@@ -159,6 +159,7 @@ export function RecordingDashboard({
   const [bookmarkSnackPrompt, setBookmarkSnackPrompt] = useState(false);
   const [viewportFocusRequestId, setViewportFocusRequestId] = useState(0);
   const [viewportFocusSequence, setViewportFocusSequence] = useState<number | null>(null);
+  const [breakpointHitsRefreshKey, setBreakpointHitsRefreshKey] = useState(0);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
@@ -273,6 +274,7 @@ export function RecordingDashboard({
       setChannels(loadedChannels);
       setBreakpoints(loadedBreakpoints.breakpoints);
       setCompositeBreakpoints(loadedBreakpoints.compositeBreakpoints ?? []);
+      setBreakpointHitsRefreshKey((value) => value + 1);
 
       setSelectedChannelIds((current) => {
         if (!isSameSession) {
@@ -771,6 +773,7 @@ export function RecordingDashboard({
 
     if (activeSessionIdRef.current === sessionId) {
       setBreakpoints(response.breakpoints);
+      setBreakpointHitsRefreshKey((value) => value + 1);
       setCompositeBreakpoints(response.compositeBreakpoints ?? []);
     }
   };
@@ -1111,6 +1114,15 @@ export function RecordingDashboard({
             investigationBookmarks={chartInvestigationBookmarks}
             viewportFocusRequestId={viewportFocusRequestId}
             viewportFocusSequence={viewportFocusSequence}
+            breakpoints={breakpoints}
+            compositeBreakpoints={compositeBreakpoints}
+            breakpointHitsRefreshKey={breakpointHitsRefreshKey}
+            onBreakpointTimelineHit={(sequence, breakpointId) => {
+              setFocusedBreakpointId(breakpointId);
+              setInspectorTab(1);
+              setViewportFocusSequence(sequence);
+              setViewportFocusRequestId((value) => value + 1);
+            }}
           />
         </Box>
       ) : (

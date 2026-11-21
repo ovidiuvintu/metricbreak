@@ -54,6 +54,26 @@ public sealed class ReplaySessionBreakpointTests
     }
 
     [Fact]
+    public void FindBreakpointHitsInRange_ListsHitsWithoutMovingCursor()
+    {
+        var session = CreateSession(
+            8500, 9200, 8800, 9500);
+
+        var breakpoint = PressureAbove(9000);
+        var initial = session.Position.SequenceNumber;
+
+        var hits = session.FindBreakpointHitsInRange(
+            new IBreakpoint[] { breakpoint },
+            fromSequenceInclusive: 0,
+            toSequenceExclusive: 4);
+
+        Assert.Equal(initial, session.Position.SequenceNumber);
+        Assert.Equal(2, hits.Count);
+        Assert.Contains(hits, h => h.SampleSequence == 1);
+        Assert.Contains(hits, h => h.SampleSequence == 3);
+    }
+
+    [Fact]
     public void RunToBreakpoint_StopsAtFirstMatchingSample()
     {
         var session = CreateSession(

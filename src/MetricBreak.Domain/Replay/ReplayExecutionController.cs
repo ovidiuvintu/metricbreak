@@ -89,4 +89,19 @@ public sealed class ReplayExecutionController
         _session.PausePlayback();
     }
 
+    public IReadOnlyList<BreakpointHitOccurrence> FindBreakpointHitsInRange(
+        BreakpointCollection breakpoints,
+        long fromSequenceInclusive,
+        long toSequenceExclusive,
+        int maxHits = 2000)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        return _session.FindBreakpointHitsInRange(
+            breakpoints.GetAllActive(),
+            fromSequenceInclusive,
+            toSequenceExclusive,
+            maxHits);
+    }
+
 }

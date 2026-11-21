@@ -34,12 +34,20 @@ import CenterFocusStrongOutlinedIcon from "@mui/icons-material/CenterFocusStrong
 import { recordingApi } from "./recordingApi";
 import {
   applyViewportPercents,
+  readSequenceViewport,
   resetViewport,
+  sequenceInZoomedViewport,
   sequencesToViewportPercents,
+  zoomViewportAtAnchor,
   zoomViewportByFactor,
   zoomViewportToSequence,
 } from "./chartDataZoom";
-import type { CreateBreakpointRequest } from "./breakpointApi";
+import type {
+  Breakpoint,
+  CompositeBreakpoint,
+  CreateBreakpointRequest,
+} from "./breakpointApi";
+import { BreakpointHitTimeline } from "./BreakpointHitTimeline";
 import type { BreakpointDialogDraft } from "./BreakpointDialog";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
@@ -59,6 +67,25 @@ type ChartMarkLine = {
   data: Array<Record<string, unknown>>;
 };
 
+function nearestLoadedSampleSequence(
+  loaded: SampleRangeItem[],
+  rawSequence: number,
+): number | null {
+  if (!loaded.length || !Number.isFinite(rawSequence)) return null;
+
+  let closest = loaded[0];
+  let distance = Math.abs(closest.sequence - rawSequence);
+  for (let i = 1; i < loaded.length; i++) {
+    const candidate = loaded[i];
+    const nextDistance = Math.abs(candidate.sequence - rawSequence);
+    if (nextDistance < distance) {
+      closest = candidate;
+      distance = nextDistance;
+    }
+  }
+  return closest.sequence;
+}
+
 function buildFirstSeriesMarkLine(params: {
   cursorSequence: number | null;
   pageStart: number;
@@ -68,14 +95,27 @@ function buildFirstSeriesMarkLine(params: {
   previewSequence: number | null;
   paletteMode: "light" | "dark";
   bookmarks: InvestigationBookmark[];
+  visibleMin?: number;
+  visibleMax?: number;
 }): ChartMarkLine | undefined {
   const bookmarkColor = params.paletteMode === "dark" ? "#C792EA" : "#6D28D9";
   const data: Array<Record<string, unknown>> = [];
+  const zoomClips =
+    params.visibleMin !== undefined && params.visibleMax !== undefined;
 
-  const cursorInView =
+  const cursorOnPage =
     params.cursorSequence !== null &&
     params.cursorSequence >= params.pageStart &&
     params.cursorSequence < params.pageEnd;
+
+  const cursorInView =
+    cursorOnPage &&
+    (!zoomClips ||
+      sequenceInZoomedViewport(
+        params.cursorSequence!,
+        params.visibleMin!,
+        params.visibleMax!,
+      ));
 
   if (cursorInView && params.seriesLength > 0) {
     data.push({
@@ -93,6 +133,16 @@ function buildFirstSeriesMarkLine(params: {
     if (
       bookmark.sampleSequence < params.pageStart ||
       bookmark.sampleSequence >= params.pageEnd
+    ) {
+      continue;
+    }
+    if (
+      zoomClips &&
+      !sequenceInZoomedViewport(
+        bookmark.sampleSequence,
+        params.visibleMin!,
+        params.visibleMax!,
+      )
     ) {
       continue;
     }
@@ -141,6 +191,24 @@ function buildFirstSeriesMarkLine(params: {
   };
 }
 
+function markLineViewportFromChart(
+  chart: EChartsType | undefined,
+  pageStart: number,
+  pageEnd: number,
+): Pick<
+  Parameters<typeof buildFirstSeriesMarkLine>[0],
+  "visibleMin" | "visibleMax"
+> {
+  if (!chart || chart.isDisposed()) return {};
+  try {
+    const viewport = readSequenceViewport(chart, pageStart, pageEnd);
+    if (!viewport) return {};
+    return { visibleMin: viewport.visibleMin, visibleMax: viewport.visibleMax };
+  } catch {
+    return {};
+  }
+}
+
 interface RecordingChartProps {
   sessionId: string;
   sampleCount: number;
@@ -169,6 +237,10 @@ interface RecordingChartProps {
   /** Bumped when the parent wants the chart viewport zoomed (not the replay cursor). */
   viewportFocusRequestId?: number;
   viewportFocusSequence?: number | null;
+  breakpoints?: Breakpoint[];
+  compositeBreakpoints?: CompositeBreakpoint[];
+  breakpointHitsRefreshKey?: number;
+  onBreakpointTimelineHit?: (sampleSequence: number, breakpointId: string) => void;
 }
 
 type HoverDetails = {
@@ -529,6 +601,10 @@ export function RecordingChart({
   investigationBookmarks = [],
   viewportFocusRequestId = 0,
   viewportFocusSequence = null,
+  breakpoints = [],
+  compositeBreakpoints = [],
+  breakpointHitsRefreshKey = 0,
+  onBreakpointTimelineHit,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -544,7 +620,9 @@ export function RecordingChart({
   const boxZoomRef = useRef<{
     pointerId: number;
     originX: number;
+    originY: number;
     active: boolean;
+    dragging: boolean;
     applied: boolean;
   } | null>(null);
 
@@ -641,8 +719,15 @@ export function RecordingChart({
     y: number;
   } | null>(null);
 
-  // Only the chart plot opens the menu. Merely opening it never seeks.
+  const suppressBrowserContextMenu = (event: ReactMouseEvent) => {
+    event.preventDefault();
+  };
+
+  // Sample menu only inside the plot grid; elsewhere on the chart block the browser menu.
   const handlePlotContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
     const chart = chartRef.current?.getEchartsInstance();
     if (!chart || chart.isDisposed()) return;
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -651,8 +736,6 @@ export function RecordingChart({
     if (!chart.containPixel({ gridIndex: 0 }, [x, y])) return;
     const coordinates = chart.convertFromPixel({ gridIndex: 0 }, [x, y]) as number[];
     if (!Number.isFinite(coordinates?.[0]) || samples.length === 0) return;
-    event.preventDefault();
-    event.stopPropagation();
     const nearest = samples.reduce((best, item) =>
       Math.abs(item.sequence - coordinates[0]) < Math.abs(best.sequence - coordinates[0])
         ? item : best,
@@ -735,6 +818,16 @@ export function RecordingChart({
     });
   };
 
+  const handleBreakpointTimelineHit = (sequence: number, breakpointId: string) => {
+    manualPageRef.current = false;
+    onSeek(sequence);
+    withChart((chart) => {
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      zoomViewportToSequence(chart, ps, pe, sequence, 0.12);
+    });
+    onBreakpointTimelineHit?.(sequence, breakpointId);
+  };
+
   const hideZoomSelection = () => {
     const band = zoomSelectRef.current;
     if (band) band.style.display = "none";
@@ -755,6 +848,33 @@ export function RecordingChart({
     band.style.display = width < 2 ? "none" : "block";
     band.style.left = `${left}px`;
     band.style.width = `${width}px`;
+  };
+
+  const seekAtClientPosition = (clientX: number, clientY: number) => {
+    const chart = chartRef.current?.getEchartsInstance();
+    const plot = plotAreaRef.current;
+    if (!chart || chart.isDisposed() || !plot) return;
+
+    const rect = plot.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    if (!chart.containPixel({ gridIndex: 0 }, [localX, localY])) return;
+
+    const coordinates = chart.convertFromPixel(
+      { gridIndex: 0 },
+      [localX, localY],
+    ) as number[];
+    const loaded = samplesRef.current;
+    if (!loaded.length || !Number.isFinite(coordinates[0])) return;
+
+    const sequence = nearestLoadedSampleSequence(loaded, coordinates[0]);
+    if (sequence == null) return;
+
+    setInspectedSample(null);
+    if (sequence !== currentSequenceRef.current) {
+      manualPageRef.current = false;
+      onSeekRef.current(sequence);
+    }
   };
 
   const applyBoxZoom = (clientX: number) => {
@@ -817,31 +937,46 @@ export function RecordingChart({
     const localY = event.clientY - rect.top;
     if (!chart.containPixel({ gridIndex: 0 }, [localX, localY])) return;
 
-    event.currentTarget.setPointerCapture(event.pointerId);
     boxZoomRef.current = {
       pointerId: event.pointerId,
       originX: event.clientX,
+      originY: event.clientY,
       active: true,
+      dragging: false,
       applied: false,
     };
   };
 
   const handlePlotPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const box = boxZoomRef.current;
-    if (!box?.active) return;
-    updateZoomSelection(event.clientX);
+    if (!box?.active || box.pointerId !== event.pointerId) return;
+
+    const deltaX = Math.abs(event.clientX - box.originX);
+    if (!box.dragging && deltaX >= BOX_ZOOM_DRAG_THRESHOLD_PX) {
+      box.dragging = true;
+      plotAreaRef.current?.setPointerCapture(event.pointerId);
+    }
+
+    if (box.dragging) {
+      updateZoomSelection(event.clientX);
+    }
   };
 
   const finishPlotPointer = (event: PointerEvent<HTMLDivElement>, cancelled: boolean) => {
     const box = boxZoomRef.current;
-    if (!box?.active) return;
+    if (!box?.active || box.pointerId !== event.pointerId) return;
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    if (plotAreaRef.current?.hasPointerCapture(event.pointerId)) {
+      plotAreaRef.current.releasePointerCapture(event.pointerId);
     }
 
     if (!cancelled) {
-      box.applied = applyBoxZoom(event.clientX);
+      if (box.dragging) {
+        box.applied = applyBoxZoom(event.clientX);
+      } else {
+        seekAtClientPosition(event.clientX, event.clientY);
+        suppressClickRef.current = true;
+      }
     }
 
     boxZoomRef.current = null;
@@ -854,6 +989,27 @@ export function RecordingChart({
 
   const handlePlotPointerCancel = (event: PointerEvent<HTMLDivElement>) => {
     finishPlotPointer(event, true);
+  };
+
+  const handlePlotDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.shiftKey) return;
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart || chart.isDisposed()) return;
+
+    const plot = plotAreaRef.current;
+    if (!plot) return;
+
+    const rect = plot.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (!chart.containPixel({ gridIndex: 0 }, [localX, localY])) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickRef.current = true;
+    boxZoomRef.current = null;
+    hideZoomSelection();
+    handleResetZoom();
   };
 
   const listenerCleanupRef = useRef<(() => void) | null>(null);
@@ -1192,10 +1348,6 @@ export function RecordingChart({
       hasRightAxis ? getAxisTemperatureAccent(theme.palette.mode, "warm") : undefined,
     );
 
-    const leftAxisName = leftAxisStyle.name;
-    const rightAxisName = hasRightAxis ? rightAxisStyle.name : "";
-    const hasYAxisNames = Boolean(leftAxisName || rightAxisName);
-
     const rightAxisExtent = hasRightAxis
       ? computeSeriesAxisExtent(builtSeries, 1)
       : null;
@@ -1213,17 +1365,7 @@ export function RecordingChart({
       position,
       show: position === "right" ? hasRightAxis : true,
       ...(axisMax !== undefined ? { max: axisMax } : {}),
-      name: style.name,
-      // Horizontal titles at the axis top avoid vertical clipping from rotation.
-      nameLocation: "end" as const,
-      nameGap: 10,
-      nameRotate: 0,
-      nameTextStyle: {
-        color: style.accentColor,
-        fontSize: 11,
-        fontWeight: 600,
-        align: position === "right" ? "right" : "left",
-      },
+      name: "",
       axisLine: {
         show: true,
         lineStyle: {
@@ -1253,6 +1395,8 @@ export function RecordingChart({
     });
 
     const cursorSequence = previewSequence ?? currentSequence;
+    // Viewport clipping for mark lines is applied after mount via dataZoom sync;
+    // do not read the ECharts instance here (disposed during page changes).
     const seriesMarkLine =
       series.length === 0
         ? undefined
@@ -1362,7 +1506,7 @@ export function RecordingChart({
       grid: {
         left: hasRightAxis ? 12 : 16,
         right: hasRightAxis ? 16 : 12,
-        top: hasYAxisNames ? 52 : 42,
+        top: 42,
         bottom: 40,
         containLabel: true,
       },
@@ -1430,8 +1574,8 @@ export function RecordingChart({
           type: "inside" as const,
           xAxisIndex: 0,
           filterMode: "none" as const,
-          zoomOnMouseWheel: true,
-          // Box-drag zoom on plot; Shift+drag pans. Wheel zooms the viewport only.
+          zoomOnMouseWheel: false,
+          // Wheel zoom is handled on the plot (anchored to pointer). Shift+drag pans.
           moveOnMouseMove: "shift",
           moveOnMouseWheel: false,
         },
@@ -1493,17 +1637,46 @@ export function RecordingChart({
           return;
         }
 
-        const zoom = (chart.getOption().dataZoom as Array<{
-          start?: number; end?: number;
-        }> | undefined)?.[0];
-        const startPercent = Math.max(0, Math.min(100, Number(zoom?.start ?? 0)));
-        const endPercent = Math.max(startPercent, Math.min(100, Number(zoom?.end ?? 100)));
-        const fullMin = pageStart;
-        const fullMax = Math.max(pageStart + 1, pageEnd - 1);
-        const fullWidth = fullMax - fullMin;
-        const visibleMin = fullMin + fullWidth * startPercent / 100;
-        const visibleMax = fullMin + fullWidth * endPercent / 100;
-        const visibleWidth = visibleMax - visibleMin;
+        const viewport = readSequenceViewport(chart, pageStart, pageEnd);
+        if (!viewport) {
+          setCursorLabelX(null);
+          return;
+        }
+        const {
+          visibleMin,
+          visibleMax,
+          visibleWidth,
+          fullMin,
+          fullMax,
+        } = viewport;
+        const fullWidth = Math.max(0.001, fullMax - fullMin);
+
+        if (!dragRef.current) {
+          const seriesId = (option.series?.[0] as { id?: string } | undefined)?.id;
+          if (seriesId && (option.series as unknown[]).length > 0) {
+            const markLine = buildFirstSeriesMarkLine({
+              cursorSequence: previewSequence ?? currentSequence,
+              pageStart,
+              pageEnd,
+              seriesLength: (option.series as unknown[]).length,
+              cursorHovered,
+              previewSequence,
+              paletteMode: theme.palette.mode,
+              bookmarks: investigationBookmarks,
+              visibleMin,
+              visibleMax,
+            });
+            chart.setOption(
+              {
+                series: [{
+                  id: seriesId,
+                  markLine: markLine ?? { data: [] },
+                }],
+              },
+              { lazyUpdate: true },
+            );
+          }
+        }
 
         if (followPending) {
           followPending = false;
@@ -1724,6 +1897,7 @@ export function RecordingChart({
         previewSequence: ui.previewSequence,
         paletteMode: ui.paletteMode,
         bookmarks: investigationBookmarksRef.current,
+        ...markLineViewportFromChart(chart, ps, pe),
       });
       chart.setOption({
         series: [{
@@ -1765,6 +1939,67 @@ export function RecordingChart({
   // This also handles clicks on empty areas of the plot.
   const handleChartReady = useCallback(
     (chart: EChartsType) => {
+      const chartDom = chart.getDom();
+
+      const handleWheel = (event: WheelEvent) => {
+        if (chart.isDisposed()) return;
+
+        const rect = chartDom.getBoundingClientRect();
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        if (!chart.containPixel({ gridIndex: 0 }, [localX, localY])) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const coordinates = chart.convertFromPixel(
+          { gridIndex: 0 },
+          [localX, localY],
+        ) as number[];
+        const loaded = samplesRef.current;
+        if (!loaded.length || !Number.isFinite(coordinates[0])) return;
+
+        const anchor = nearestLoadedSampleSequence(loaded, coordinates[0]);
+        if (anchor == null) return;
+
+        const factor = event.deltaY < 0 ? 0.85 : 1.18;
+        const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+        zoomViewportAtAnchor(chart, ps, pe, anchor, factor);
+        requestAnimationFrame(() => {
+          if (chart.isDisposed() || dragRef.current) return;
+          const seriesId = (
+            chart.getOption().series as Array<{ id?: string }> | undefined
+          )?.[0]?.id;
+          if (!seriesId) return;
+          const vp = readSequenceViewport(chart, ps, pe);
+          if (!vp) return;
+          const ui = cursorUiRef.current;
+          const markLine = buildFirstSeriesMarkLine({
+            cursorSequence: ui.previewSequence ?? currentSequenceRef.current,
+            pageStart: ps,
+            pageEnd: pe,
+            seriesLength: 1,
+            cursorHovered: ui.cursorHovered,
+            previewSequence: ui.previewSequence,
+            paletteMode: ui.paletteMode,
+            bookmarks: investigationBookmarksRef.current,
+            visibleMin: vp.visibleMin,
+            visibleMax: vp.visibleMax,
+          });
+          chart.setOption(
+            {
+              series: [{
+                id: seriesId,
+                markLine: markLine ?? { data: [] },
+              }],
+            },
+            { lazyUpdate: true },
+          );
+        });
+      };
+
+      chartDom.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+
       const renderer = chart.getZr();
              const sequenceAt = (x: number, y: number): number | null => {
          const pixel: [number, number] = [x, y];
@@ -1772,13 +2007,10 @@ export function RecordingChart({
          const coords = chart.convertFromPixel({ gridIndex: 0 }, pixel) as number[];
          const loaded = samplesRef.current;
          if (!loaded.length || !Number.isFinite(coords[0])) return null;
-         // Sequence is authoritative even when timestamps are identical.
-         return Math.max(loaded[0].sequence,
-           Math.min(loaded[loaded.length - 1].sequence, Math.round(coords[0])));
+         return nearestLoadedSampleSequence(loaded, coords[0]);
        };
 
        const handleClick = (event: { offsetX: number; offsetY: number }) => {
-         setInspectedSample(null);
          if (suppressClickRef.current) {
            suppressClickRef.current = false;
            return;
@@ -1787,6 +2019,8 @@ export function RecordingChart({
          if (domEvent?.shiftKey) return;
          const sequence = sequenceAt(event.offsetX, event.offsetY);
          if (sequence !== null && sequence !== currentSequenceRef.current) {
+           setInspectedSample(null);
+           manualPageRef.current = false;
            onSeekRef.current(sequence);
          }
        };
@@ -1849,6 +2083,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
       renderer.on("mousemove", handleMove);
       renderer.on("globalout", handleLeave);
       listenerCleanupRef.current = () => {
+        chartDom.removeEventListener("wheel", handleWheel, true);
         renderer.off("click", handleClick);
         renderer.off("mousemove", handleMove);
         renderer.off("globalout", handleLeave);
@@ -1861,6 +2096,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
     <Box
       ref={containerRef}
       tabIndex={0}
+      onContextMenu={suppressBrowserContextMenu}
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -2053,15 +2289,17 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           <>
           <Box
             ref={plotAreaRef}
+            data-chart-plot="true"
             sx={{
               height: "100%",
               width: "100%",
               position: "relative",
               "& canvas": {
-                cursor: "crosshair",
+                cursor: "default",
               },
             }}
             onContextMenu={handlePlotContextMenu}
+            onDoubleClick={handlePlotDoubleClick}
             onPointerDown={handlePlotPointerDown}
             onPointerMove={handlePlotPointerMove}
             onPointerUp={handlePlotPointerUp}
@@ -2322,6 +2560,21 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
       </Box>
 
       {sampleCount > 0 && (
+        <BreakpointHitTimeline
+          sessionId={sessionId}
+          pageStart={pageStart}
+          pageEnd={pageEnd}
+          sampleCount={sampleCount}
+          currentSequence={currentSequence}
+          breakpoints={breakpoints}
+          compositeBreakpoints={compositeBreakpoints}
+          channels={channels}
+          refreshKey={breakpointHitsRefreshKey}
+          onHitClick={handleBreakpointTimelineHit}
+        />
+      )}
+
+      {sampleCount > 0 && (
         <Box
           sx={{
             display: "flex",
@@ -2341,7 +2594,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             {visibleInvestigationBookmarkCount > 0
               ? ` · ${visibleInvestigationBookmarkCount} bookmark${visibleInvestigationBookmarkCount === 1 ? "" : "s"} (dashed violet — click to seek)`
               : ""}
-            {" · Drag zoom · Shift+drag pan · Wheel zoom"}
+            {" · Click seek · Drag zoom · Shift+pan · Wheel at pointer · Dbl-click reset"}
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>

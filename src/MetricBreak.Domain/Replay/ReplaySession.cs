@@ -499,4 +499,55 @@ public sealed class ReplaySession
             null,
             null);
     }
+
+    /// <summary>
+  /// Scans a sequence range for breakpoint matches without moving the replay cursor.
+  /// </summary>
+    public IReadOnlyList<BreakpointHitOccurrence> FindBreakpointHitsInRange(
+        IEnumerable<IBreakpoint> breakpoints,
+        long fromSequenceInclusive,
+        long toSequenceExclusive,
+        int maxHits = 2000)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        if (maxHits <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxHits));
+
+        var active = breakpoints as IReadOnlyList<IBreakpoint>
+            ?? breakpoints.Where(b => b is not null).ToArray();
+
+        if (active.Count == 0)
+            return Array.Empty<BreakpointHitOccurrence>();
+
+        var from = Math.Max(0, fromSequenceInclusive);
+        var to = Math.Min(SampleCount, Math.Max(from, toSequenceExclusive));
+
+        var results = new List<BreakpointHitOccurrence>(Math.Min(maxHits, 64));
+        for (var sequence = from; sequence < to && results.Count < maxHits; sequence++)
+        {
+            var sample = _reader.Read(sequence);
+            var previous = sequence > 0 ? _reader.Read(sequence - 1) : null;
+            var position = new SamplePosition(RecordingId, sequence);
+
+            foreach (var breakpoint in active)
+            {
+                if (results.Count >= maxHits)
+                    break;
+
+                if (BreakpointEvaluator.EvaluateHit(
+                        breakpoint,
+                        position,
+                        sample,
+                        previous) is null)
+                {
+                    continue;
+                }
+
+                results.Add(new BreakpointHitOccurrence(breakpoint.Id, sequence));
+            }
+        }
+
+        return results;
+    }
 }

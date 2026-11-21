@@ -42,6 +42,16 @@ export interface BreakpointsResponse {
   compositeBreakpoints: CompositeBreakpoint[];
 }
 
+export interface BreakpointHitOccurrence {
+  breakpointId: string;
+  sampleSequence: number;
+}
+
+export interface BreakpointHitsResponse {
+  hits: BreakpointHitOccurrence[];
+  truncated: boolean;
+}
+
 const sessionPath = (sessionId: string) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/breakpoints`;
 
@@ -97,6 +107,22 @@ export const breakpointApi = {
     return apiRequest<void>(
       `${sessionPath(sessionId)}/${encodeURIComponent(breakpointId)}`,
       { method: "DELETE" },
+    );
+  },
+
+  listHits(
+    sessionId: string,
+    fromSequence: number,
+    toSequence: number,
+    maxHits = 2000,
+  ): Promise<BreakpointHitsResponse> {
+    const query = new URLSearchParams({
+      from: String(fromSequence),
+      to: String(toSequence),
+      maxHits: String(maxHits),
+    });
+    return apiRequest<BreakpointHitsResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/breakpoint-hits?${query}`,
     );
   },
 

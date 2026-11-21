@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MetricBreak.Api.Breakpoints;
 using MetricBreak.Api.Investigations;
 using MetricBreak.Domain.Breakpoints;
 using MetricBreak.Domain.Replay;
@@ -855,6 +856,49 @@ public sealed class ReplaySessionManager
             InvalidatePlayback(entry);
             entry.Controller.PausePlayback();
             snapshot = CreateSnapshot(sessionId, entry);
+            return true;
+        }
+    }
+
+    public bool TryListBreakpointHitsInRange(
+        Guid sessionId,
+        long fromSequenceInclusive,
+        long toSequenceExclusive,
+        int maxHits,
+        out BreakpointHitsResponse? response)
+    {
+        response = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (maxHits <= 0)
+                maxHits = 2000;
+
+            const int maxRange = 100_000;
+            if (toSequenceExclusive - fromSequenceInclusive > maxRange)
+            {
+                return false;
+            }
+
+            var hits = entry.Controller.FindBreakpointHitsInRange(
+                entry.Breakpoints,
+                fromSequenceInclusive,
+                toSequenceExclusive,
+                maxHits);
+
+            response = new BreakpointHitsResponse(
+                hits.Select(static hit =>
+                    new BreakpointHitOccurrenceResponse(
+                        hit.BreakpointId,
+                        hit.SampleSequence)).ToArray(),
+                hits.Count >= maxHits);
+
             return true;
         }
     }
