@@ -65,8 +65,8 @@ export function AppShell({
             flex: 1,
             minWidth: 0,
             minHeight: 0,
-            px: { xs: 1, md: 2 },
-            py: 1,
+            px: { xs: 0.5, md: 1 },
+            py: 0.5,
             overflow: "hidden",
             bgcolor: "background.default",
           }}

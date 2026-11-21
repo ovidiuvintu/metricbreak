@@ -107,14 +107,14 @@ export function RecordingWorkspace({
         height: "100%",
         minHeight: 0,
         minWidth: 0,
-        gap: 1,
+        gap: 0.5,
       }}
     >
       {/* Toolbar */}
       <Box
         sx={{
           flexShrink: 0,
-          minHeight: 40,
+          minHeight: 32,
           display: "flex",
           alignItems: "center",
         }}
@@ -153,7 +153,7 @@ export function RecordingWorkspace({
               minWidth: 0,
               minHeight: 0,
               overflow: "hidden",
-              p: 1,
+              p: 0.5,
             }}
           >
             {chart}
@@ -166,8 +166,8 @@ export function RecordingWorkspace({
               <Box
                 sx={{
                   flexShrink: 0,
-                  px: 2,
-                  py: 1,
+                  px: 1,
+                  py: 0.5,
                 }}
               >
                 {replayControls}
@@ -186,14 +186,14 @@ export function RecordingWorkspace({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  px: 2,
-                  minHeight: 40,
+                  px: 1,
+                  minHeight: 32,
                   bgcolor: "background.paper",
                 }}
               >
                 <Typography
                   variant="subtitle2"
-                  sx={{ fontWeight: 600 }}
+                  sx={{ fontWeight: 600, fontSize: "0.8rem" }}
                 >
                   Current Values
                 </Typography>
@@ -312,16 +312,16 @@ export function RecordingWorkspace({
               justifyContent: channelsCollapsed
                 ? "center"
                 : "space-between",
-              px: 1,
-              py: 0.5,
-              minHeight: 44,
+              px: 0.75,
+              py: 0.25,
+              minHeight: 36,
               flexShrink: 0,
             }}
           >
             {!channelsCollapsed && (
               <Typography
                 variant="subtitle2"
-                sx={{ fontWeight: 600 }}
+                sx={{ fontWeight: 600, fontSize: "0.8rem" }}
               >
                 Inspector
               </Typography>

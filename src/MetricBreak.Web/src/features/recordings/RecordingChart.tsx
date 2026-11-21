@@ -31,7 +31,12 @@ import { useTheme } from "@mui/material/styles";
 import { recordingApi } from "./recordingApi";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
-import { createChartTheme, getSeriesColor } from "../../theme/chartTheme";
+import {
+  assignChartSeriesColors,
+  createChartTheme,
+  getAxisTemperatureAccent,
+  getSeriesColor,
+} from "../../theme/chartTheme";
 
 interface RecordingChartProps {
   sessionId: string;
@@ -155,6 +160,107 @@ function isNumericChartChannel(samples: SampleRangeItem[], channelId: string): b
 }
 
 const PAGE_SIZE = 5000;
+const CHART_TOOLTIP_WIDTH = 340;
+
+type PlottedSeriesMeta = {
+  yAxisIndex: number;
+  color: string;
+  channelName: string;
+  unit: string | null;
+};
+
+// Axis side: left = solid, right = dashed (always). Additional series on the
+// same axis vary width and opacity so overlaps stay visible without breaking
+// the solid/dashed axis rule.
+function seriesLineStyleForAxis(
+  yAxisIndex: number,
+  indexOnAxis: number,
+  baseWidth: number,
+) {
+  const tier = Math.min(indexOnAxis, 2);
+  const widthScale = [1, 0.82, 0.68][tier];
+  const opacity = [1, 0.82, 0.68][tier];
+
+  return {
+    type: (yAxisIndex === 1 ? "dashed" : "solid") as "solid" | "dashed",
+    width: Math.max(0.75, baseWidth * widthScale),
+    opacity,
+  };
+}
+
+function formatNumericTick(value: number): string {
+  const absolute = Math.abs(value);
+
+  if (absolute >= 1_000_000_000) {
+    return `${(value / 1_000_000_000).toFixed(1)}G`;
+  }
+
+  if (absolute >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+
+  if (absolute >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}K`;
+  }
+
+  return value.toLocaleString();
+}
+
+function buildYAxisTitle(entries: PlottedSeriesMeta[]): string {
+  if (entries.length === 0) return "";
+
+  if (entries.length === 1) {
+    const entry = entries[0];
+    return entry.unit
+      ? `${entry.channelName} (${entry.unit})`
+      : entry.channelName;
+  }
+
+  const units = [
+    ...new Set(
+      entries
+        .map((entry) => entry.unit?.trim())
+        .filter((unit): unit is string => !!unit),
+    ),
+  ];
+
+  if (units.length === 1) return units[0];
+  if (units.length > 1) return units.join(" · ");
+  return "";
+}
+
+function buildYAxisStyling(
+  entries: PlottedSeriesMeta[],
+  neutralColor: string,
+  sharedAxisGroupAccent?: string,
+) {
+  const shared = entries.length > 1;
+  const accentColor = shared
+    ? (sharedAxisGroupAccent ?? neutralColor)
+    : entries[0]?.color ?? neutralColor;
+
+  return {
+    name: buildYAxisTitle(entries),
+    accentColor,
+    axisLineOpacity: shared ? 0.35 : 0.7,
+    labelOpacity: shared ? 1 : 1,
+  };
+}
+
+function formatChannelSeriesLabel(
+  channel: ChannelMetadata,
+  onRightAxis: boolean,
+  includeAxisSide: boolean,
+): string {
+  const base = channel.unit
+    ? `${channel.name} (${channel.unit})`
+    : channel.name;
+
+  if (!includeAxisSide) return base;
+
+  const side = onRightAxis ? "Right Y-axis" : "Left Y-axis";
+  return `${base} — ${side}`;
+}
 
 function getLineWidth(sampleCount: number): number {
   if (sampleCount <= 100) return 2.5;
@@ -322,7 +428,11 @@ export function RecordingChart({
       x: chartMenu.x,
       y: chartMenu.y,
       values: channels.filter((channel) => selected.has(channel.channelId)).map((channel) => ({
-        name: channel.unit ? `${channel.name} (${channel.unit})` : channel.name,
+        name: formatChannelSeriesLabel(
+          channel,
+          rightAxisSet.has(channel.channelId),
+          hasRightAxis,
+        ),
         value: formatSampleValue(sample, channel.channelId),
       })),
     });
@@ -362,6 +472,8 @@ export function RecordingChart({
   const currentSequenceRef = useRef(currentSequence);
   const channelsRef = useRef(channels);
   const selectedIdsRef = useRef(selectedChannelIds);
+  const rightAxisSetRef = useRef(rightAxisSet);
+  const hasRightAxisRef = useRef(hasRightAxis);
 
   onSeekRef.current = onSeek;
   onScrubStartRef.current = onScrubStart;
@@ -370,6 +482,8 @@ export function RecordingChart({
   currentSequenceRef.current = currentSequence;
   channelsRef.current = channels;
   selectedIdsRef.current = selectedChannelIds;
+  rightAxisSetRef.current = rightAxisSet;
+  hasRightAxisRef.current = hasRightAxis;
 
   // Track the last replay position independently of manual chart paging.
   // A page change must never be interpreted as a replay cursor movement.
@@ -527,31 +641,60 @@ export function RecordingChart({
   const option = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
 
-    const series = channels
+    const plotCandidates = channels
       .map((channel, channelIndex) => ({
         channel,
         channelIndex,
       }))
       .filter(({ channel }) =>
         selectedIds.has(channel.channelId) && isNumericChartChannel(samples, channel.channelId),
-      )
-      .map(({ channel, channelIndex }) => {
-        const seriesColor = getSeriesColor(theme.palette.mode, channelIndex);
+      );
 
-        return {
+    const indexOnYAxis = new Map<string, number>();
+    let leftAxisSeriesCount = 0;
+    let rightAxisSeriesCount = 0;
+    for (const { channel } of plotCandidates) {
+      const yAxisIndex = rightAxisSet.has(channel.channelId) ? 1 : 0;
+      const indexOnAxis =
+        yAxisIndex === 1 ? rightAxisSeriesCount++ : leftAxisSeriesCount++;
+      indexOnYAxis.set(channel.channelId, indexOnAxis);
+    }
+
+    const seriesColorByChannelId = assignChartSeriesColors(
+      theme.palette.mode,
+      plotCandidates.map(({ channel, channelIndex }) => ({
+        channelId: channel.channelId,
+        channelName: channel.name,
+        channelIndex,
+        yAxisIndex: (rightAxisSet.has(channel.channelId) ? 1 : 0) as 0 | 1,
+      })),
+      hasRightAxis,
+    );
+
+    const builtSeries = plotCandidates.map(({ channel, channelIndex }) => {
+        const yAxisIndex = rightAxisSet.has(channel.channelId) ? 1 : 0;
+        const indexOnAxis = indexOnYAxis.get(channel.channelId) ?? 0;
+        const seriesColor =
+          seriesColorByChannelId.get(channel.channelId) ??
+          getSeriesColor(theme.palette.mode, channelIndex);
+        const axisLineStyle = seriesLineStyleForAxis(
+          yAxisIndex,
+          indexOnAxis,
+          lineWidth,
+        );
+        const legendName = formatChannelSeriesLabel(channel, yAxisIndex === 1, false);
+
+        const config = {
           id: channel.channelId,
-          yAxisIndex: rightAxisSet.has(channel.channelId) ? 1 : 0,
-
-          name: channel.unit
-            ? `${channel.name} (${channel.unit})`
-            : channel.name,
+          yAxisIndex,
+          name: legendName,
 
           type: "line" as const,
           showSymbol: false,
           connectNulls: false,
           smooth: false,
           silent: false,
-          cursor: 'default',
+          cursor: "default" as const,
 
           itemStyle: {
             color: seriesColor,
@@ -559,18 +702,21 @@ export function RecordingChart({
 
           lineStyle: {
             color: seriesColor,
-            width: lineWidth,
-            // Use the stable channel order, not visible-series order, so toggling
-            // channel visibility does not change its line style. Dashed lines
-            // leave gaps that reveal solid lines when two values overlap.
-            type: channelIndex % 2 === 0 ? "solid" as const : "dashed" as const,
-            opacity: 1,
+            width: axisLineStyle.width,
+            type: axisLineStyle.type,
+            opacity: axisLineStyle.opacity,
           },
 
           emphasis: {
             focus: "none" as const,
             lineStyle: {
-              width: Math.max(2, lineWidth + 1),
+              width: Math.max(2, axisLineStyle.width + 0.75),
+              color: seriesColor,
+              type: axisLineStyle.type,
+              opacity: 1,
+            },
+            itemStyle: {
+              color: seriesColor,
             },
           },
 
@@ -579,7 +725,82 @@ export function RecordingChart({
             numericPlotValue(sample, channel.channelId),
           ]),
         };
+
+        const meta: PlottedSeriesMeta = {
+          yAxisIndex,
+          color: seriesColor,
+          channelName: channel.name,
+          unit: channel.unit,
+        };
+
+        return { config, meta };
       });
+
+    const series = builtSeries.map((item) => item.config);
+    const seriesMetaByYAxis = (axisIndex: number) =>
+      builtSeries
+        .filter((item) => item.meta.yAxisIndex === axisIndex)
+        .map((item) => item.meta);
+
+    const leftAxisStyle = buildYAxisStyling(
+      seriesMetaByYAxis(0),
+      chartTheme.axisTextColor,
+      hasRightAxis ? getAxisTemperatureAccent(theme.palette.mode, "cool") : undefined,
+    );
+    const rightAxisStyle = buildYAxisStyling(
+      seriesMetaByYAxis(1),
+      chartTheme.axisTextColor,
+      hasRightAxis ? getAxisTemperatureAccent(theme.palette.mode, "warm") : undefined,
+    );
+
+    const leftAxisName = leftAxisStyle.name;
+    const rightAxisName = hasRightAxis ? rightAxisStyle.name : "";
+    const hasYAxisNames = Boolean(leftAxisName || rightAxisName);
+
+    const makeYAxis = (
+      style: ReturnType<typeof buildYAxisStyling>,
+      position?: "right",
+    ) => ({
+      type: "value" as const,
+      scale: true,
+      position,
+      show: position === "right" ? hasRightAxis : true,
+      name: style.name,
+      // Horizontal titles at the axis top avoid vertical clipping from rotation.
+      nameLocation: "end" as const,
+      nameGap: 10,
+      nameRotate: 0,
+      nameTextStyle: {
+        color: style.accentColor,
+        fontSize: 11,
+        fontWeight: 600,
+        align: position === "right" ? "right" : "left",
+      },
+      axisLine: {
+        show: true,
+        lineStyle: {
+          color: style.accentColor,
+          opacity: style.axisLineOpacity,
+        },
+      },
+      axisTick: {
+        lineStyle: {
+          color: style.accentColor,
+          opacity: style.axisLineOpacity,
+        },
+      },
+      axisLabel: {
+        color: style.accentColor,
+        opacity: style.labelOpacity,
+        formatter: formatNumericTick,
+      },
+      splitLine: {
+        show: position !== "right",
+        lineStyle: {
+          color: chartTheme.gridLineColor,
+        },
+      },
+    });
 
     // The cursor position comes from backend replay state.
     // Attach it to the first visible telemetry series.
@@ -645,17 +866,44 @@ export function RecordingChart({
 
       legend: {
         show: true,
-        data: series.map((item) => item.name),
+        data: series.map((item) => ({
+          name: item.name,
+          itemStyle: {
+            color: item.lineStyle.color,
+            borderColor: item.lineStyle.color,
+          },
+          lineStyle: {
+            color: item.lineStyle.color,
+            type: item.lineStyle.type,
+            width: 2.5,
+          },
+        })),
+        ...(hasRightAxis
+          ? {
+              tooltip: {
+                show: true,
+                confine: true,
+                formatter: (param: { name?: string }) => {
+                  const label = param.name ?? "";
+                  const match = series.find((item) => item.name === label);
+                  if (!match) return label;
+                  const side =
+                    match.yAxisIndex === 1 ? "Right Y-axis" : "Left Y-axis";
+                  return `${label}<br/>${side}`;
+                },
+              },
+            }
+          : {}),
         type: "scroll" as const,
         orient: "horizontal" as const,
 
-        top: 8,
+        top: 4,
         left: "center",
-        right: 140,
+        right: 120,
 
-        itemWidth: 18,
+        itemWidth: 32,
         itemHeight: 3,
-        itemGap: 14,
+        itemGap: 10,
 
         textStyle: {
           color: chartTheme.axisTextColor,
@@ -670,10 +918,10 @@ export function RecordingChart({
       },
 
       grid: {
-        left: 20,
-        right:40,
-        top: 55,
-        bottom: 55,
+        left: 8,
+        right: hasRightAxis ? 12 : 8,
+        top: hasYAxisNames ? 52 : 42,
+        bottom: 40,
         containLabel: true,
       },
 
@@ -685,7 +933,7 @@ export function RecordingChart({
         max: Math.max(pageStart + 1, pageEnd - 1),
 
         nameLocation: "middle" as const,
-        nameGap: 30,
+        nameGap: 22,
         minInterval: 1,
 
         nameTextStyle: {
@@ -728,67 +976,10 @@ export function RecordingChart({
         },
       },
 
-      yAxis: [{
-        type: "value" as const,
-        scale: true,
-        axisLine: {
-          lineStyle: {
-            color: chartTheme.axisTextColor,
-          },
-        },
-
-        axisTick: {
-          lineStyle: {
-            color: chartTheme.axisTextColor,
-          },
-        },
-
-        axisLabel: {
-          color: chartTheme.axisTextColor,
-
-          formatter: (value: number) => {
-            const absolute = Math.abs(value);
-
-            if (absolute >= 1_000_000_000) {
-              return `${(value / 1_000_000_000).toFixed(1)}G`;
-            }
-
-            if (absolute >= 1_000_000) {
-              return `${(value / 1_000_000).toFixed(1)}M`;
-            }
-
-            if (absolute >= 1_000) {
-              return `${(value / 1_000).toFixed(1)}K`;
-            }
-
-            return value.toLocaleString();
-          },
-        },
-
-        splitLine: {
-          show: true,
-          lineStyle: {
-            color: chartTheme.gridLineColor,
-          },
-        },
-      }, {
-        type: "value" as const,
-        scale: true,
-        position: "right" as const,
-        show: hasRightAxis,
-        axisLine: { show: true, lineStyle: { color: chartTheme.axisTextColor } },
-        axisLabel: {
-          color: chartTheme.axisTextColor,
-          formatter: (value: number) => {
-            const absolute = Math.abs(value);
-            if (absolute >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}G`;
-            if (absolute >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-            if (absolute >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-            return value.toLocaleString();
-          },
-        },
-        splitLine: { show: false },
-      }],
+      yAxis: [
+        makeYAxis(leftAxisStyle),
+        makeYAxis(rightAxisStyle, "right"),
+      ],
 
       dataZoom: [
         {
@@ -816,6 +1007,7 @@ export function RecordingChart({
       lineWidth,
       pageStart,
       pageEnd,
+      theme.palette.mode,
   ]);
 
   // Follow replay within a zoomed viewport without changing the zoom width.
@@ -1138,7 +1330,11 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         const values = channelsRef.current
           .filter((channel) => selected.has(channel.channelId))
           .map((channel) => ({
-            name: channel.unit ? `${channel.name} (${channel.unit})` : channel.name,
+            name: formatChannelSeriesLabel(
+              channel,
+              rightAxisSetRef.current.has(channel.channelId),
+              hasRightAxisRef.current,
+            ),
             value: formatSampleValue(closest, channel.channelId),
           }));
         setHover({
@@ -1214,25 +1410,25 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         sx={{
           display: "flex",
           alignItems: "center",
-          gap: 1,
-          px: 1,
-          py: 0.5,
+          gap: 0.5,
+          px: 0.5,
+          py: 0.25,
           flexShrink: 0,
           flexWrap: "nowrap",
           overflowX: "auto",
         }}
       >
         {sampleCount > 0 && (
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ mr: "auto", flexShrink: 0 }}>
-            Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
-            {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
-          </Typography>
-        )}
-        {sampleCount > 0 && (
           <Typography
             variant="body2"
             noWrap
-            sx={{ fontWeight: 400, color: "warning.main", fontVariantNumeric: "tabular-nums", flexShrink: 0, mx: 1 }}
+            sx={{
+              fontWeight: 400,
+              color: "warning.main",
+              fontVariantNumeric: "tabular-nums",
+              flexShrink: 0,
+              mr: "auto",
+            }}
             title="Actual replay position (independent of chart page)"
           >
             Current sample: {currentSequence?.toLocaleString() ?? "—"}
@@ -1247,12 +1443,6 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               } catch { return ""; }
             })()}
           </Typography>
-        )}
-        {sampleCount > 0 && (
-          <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
-            <Button disabled={loading || activePage === 0} onClick={() => navigateToPage(activePage - 1)}>Previous</Button>
-            <Button disabled={loading || activePage >= pageCount - 1} onClick={() => navigateToPage(activePage + 1)}>Next</Button>
-          </ButtonGroup>
         )}
         <Button
           size="small"
@@ -1270,11 +1460,20 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           onClose={() => setAxisMenuAnchor(null)}
           slotProps={{ list: { 'aria-label': 'Channels plotted on right Y axis' } }}
         >
-          <MenuItem disabled>Plot on right Y-axis</MenuItem>
+          <MenuItem disabled sx={{ opacity: 1, fontSize: "0.75rem" }}>
+            Checked → right Y-axis (dashed). Unchecked → left (solid).
+          </MenuItem>
           {channels.filter((channel) => selectedChannelIds.includes(channel.channelId) && isNumericChartChannel(samples, channel.channelId)).map((channel) => (
             <MenuItem key={channel.channelId} onClick={() => toggleRightAxis(channel.channelId)}>
               <Checkbox size="small" checked={rightAxisSet.has(channel.channelId)} tabIndex={-1} disableRipple />
-              <ListItemText primary={channel.name} secondary={channel.unit || undefined} />
+              <ListItemText
+                primary={channel.name}
+                secondary={
+                  rightAxisSet.has(channel.channelId)
+                    ? `Right axis${channel.unit ? ` · ${channel.unit}` : ""}`
+                    : `Left axis${channel.unit ? ` · ${channel.unit}` : ""}`
+                }
+              />
             </MenuItem>
           ))}
         </Menu>
@@ -1298,6 +1497,22 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           Tooltips: {tooltipsEnabled ? "On" : "Off"}
         </Button>
       </Box>
+
+      {hasRightAxis && sampleCount > 0 && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{
+            flexShrink: 0,
+            px: 0.5,
+            fontSize: "0.65rem",
+            letterSpacing: 0.2,
+            opacity: 0.85,
+          }}
+        >
+          Left Y-axis: solid · Right Y-axis: dashed
+        </Typography>
+      )}
 
       <Box
         sx={{
@@ -1349,8 +1564,8 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             sx={{
               display: "none",
               position: "absolute",
-              top: 55,
-              bottom: 85,
+              top: 42,
+              bottom: 48,
               width: "4px",
               transform: "translateX(-50%)",
               backgroundColor: "#F59E0B",
@@ -1370,8 +1585,8 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               onPointerCancel={handleLabelPointerCancel}
               sx={{
                 position: "absolute",
-                // Place the handle between the legend and the plot (grid starts at 55px).
-                top: 30,
+                // Place the handle between the legend and the plot (grid starts at 42px).
+                top: 22,
                 left: cursorLabelX,
                 transform: "translateX(-50%)",
                 zIndex: 12,
@@ -1408,9 +1623,17 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 pointerEvents: inspectedSample ? "auto" : "none",
                 overscrollBehavior: "contain",
                 scrollbarGutter: "stable",
-                left: Math.max(8, Math.min(displayedSample.x + 14, (containerRef.current?.clientWidth ?? 450) - 260)),
+                left: Math.max(
+                  8,
+                  Math.min(
+                    displayedSample.x + 14,
+                    (containerRef.current?.clientWidth ?? 450) -
+                      (CHART_TOOLTIP_WIDTH + 16),
+                  ),
+                ),
                 top: Math.max(8, Math.min(displayedSample.y + 14, (containerRef.current?.clientHeight ?? 400) - 180)),
-                width: 240,
+                width: CHART_TOOLTIP_WIDTH,
+                maxWidth: "min(92%, 420px)",
                 maxHeight: "70%",
                 overflowY: "auto",
                 p: 1.5,
@@ -1435,9 +1658,24 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 {displayedSample.timestamp}
               </Typography>
               {displayedSample.values.map((entry) => (
-                <Box key={entry.name} sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
-                  <Typography variant="caption" sx={{ overflowWrap: "anywhere" }}>{entry.name}</Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>{entry.value}</Typography>
+                <Box
+                  key={entry.name}
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 2,
+                    alignItems: "flex-start",
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                  >
+                    {entry.name}
+                  </Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>
+                    {entry.value}
+                  </Typography>
                 </Box>
               ))}
               {inspectedSample && (
@@ -1474,6 +1712,41 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
         )}
       </Box>
+
+      {sampleCount > 0 && (
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 0.5,
+            px: 0.5,
+            py: 0.25,
+            flexShrink: 0,
+            borderTop: 1,
+            borderColor: "divider",
+          }}
+        >
+          <Typography variant="caption" color="text.secondary" noWrap>
+            Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
+            {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
+          </Typography>
+          {pageCount > 1 && (
+            <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
+              <Button disabled={loading || activePage === 0} onClick={() => navigateToPage(activePage - 1)}>
+                Previous
+              </Button>
+              <Button
+                disabled={loading || activePage >= pageCount - 1}
+                onClick={() => navigateToPage(activePage + 1)}
+              >
+                Next
+              </Button>
+            </ButtonGroup>
+          )}
+        </Box>
+      )}
+
       <Menu
         open={chartMenu !== null}
         onClose={() => setChartMenu(null)}
