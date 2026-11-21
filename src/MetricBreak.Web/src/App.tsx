@@ -108,6 +108,8 @@ export default function App() {
             <RecordingDashboard
               section={section}
               onSelectSection={selectSection}
+              themeMode={mode}
+              onToggleTheme={toggleTheme}
               deepLinkInvestigation={deepLinkInvestigation}
               onDeepLinkHandled={() => setDeepLinkInvestigation(null)}
               onInvestigationOpened={(investigationId, projectId) => {

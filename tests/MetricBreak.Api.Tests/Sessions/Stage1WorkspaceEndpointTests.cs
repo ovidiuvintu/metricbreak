@@ -99,7 +99,7 @@ public sealed class Stage1WorkspaceEndpointTests
         using var detail = await client.GetAsync($"/api/investigations/{investigationId}");
         using var detailJson = await ReadJsonAsync(detail);
 
-        Assert.Equal(2, detailJson.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, detailJson.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("Checkout drop", detailJson.RootElement
             .GetProperty("metadata")
             .GetProperty("name")

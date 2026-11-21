@@ -18,6 +18,7 @@ import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import StorageOutlinedIcon from "@mui/icons-material/StorageOutlined";
 import ManageSearchOutlinedIcon from "@mui/icons-material/ManageSearchOutlined";
 import AnalyticsOutlinedIcon from "@mui/icons-material/AnalyticsOutlined";
+import FolderOpenOutlinedIcon from "@mui/icons-material/FolderOpenOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
@@ -27,6 +28,7 @@ export type AppSection =
   | "recordings"
   | "investigations"
   | "analysis"
+  | "projects"
   | "settings";
 
 const navigation = [
@@ -34,6 +36,7 @@ const navigation = [
   { id: "recordings", label: "Recordings", icon: StorageOutlinedIcon },
   { id: "investigations", label: "Investigations", icon: ManageSearchOutlinedIcon },
   { id: "analysis", label: "Analysis", icon: AnalyticsOutlinedIcon },
+  { id: "projects", label: "Projects", icon: FolderOpenOutlinedIcon },
   { id: "settings", label: "Settings", icon: SettingsOutlinedIcon },
 ] as const;
 

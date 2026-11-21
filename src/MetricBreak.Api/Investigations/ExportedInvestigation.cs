@@ -9,7 +9,8 @@ public sealed record ExportedInvestigation(
     IReadOnlyList<BreakpointExportSnapshot> Breakpoints,
     IReadOnlyList<InvestigationBookmarkSnapshot>? Bookmarks = null,
     InvestigationMetadataSnapshot? Metadata = null,
-    InvestigationUiStateSnapshot? UiState = null);
+    InvestigationUiStateSnapshot? UiState = null,
+    RecordingTimelineSnapshot? Timeline = null);
 
 public sealed record RecordingExportSnapshot(
     string SourceName,

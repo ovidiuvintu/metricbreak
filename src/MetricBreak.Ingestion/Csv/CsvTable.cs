@@ -39,6 +39,9 @@ internal sealed class CsvTable
         List<string>? fields;
         while ((fields = CsvRecordReader.ReadRecord(reader)) is not null)
         {
+            if (IsBlankRow(fields))
+                break;
+
             var recordNumber = rows.Count + 2;
             if (fields.Count != header.Count)
             {
@@ -54,4 +57,7 @@ internal sealed class CsvTable
 
         return new CsvTable(header, rows);
     }
+
+    private static bool IsBlankRow(IReadOnlyList<string> fields) =>
+        fields.All(string.IsNullOrWhiteSpace);
 }

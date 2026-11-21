@@ -63,6 +63,7 @@ public sealed class CsvRecordingImporter
             recording,
             parsed.Channels,
             telemetryReader,
-            parsed.TimestampOrigin);
+            parsed.TimestampOrigin,
+            parsed.Timeline);
     }
 }

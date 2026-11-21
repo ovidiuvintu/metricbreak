@@ -9,7 +9,7 @@ internal static class InvestigationDocumentNormalizer
         investigation = InvestigationBookmarkMutations.Normalize(investigation);
 
         if (investigation.SchemaVersion >= InvestigationSchema.CurrentVersion)
-            return EnsureMetadata(investigation);
+            return EnsureTimeline(EnsureMetadata(investigation));
 
         var name = investigation.Metadata?.Name
             ?? investigation.Recording.RecordingName;
@@ -22,12 +22,12 @@ internal static class InvestigationDocumentNormalizer
                 ? investigation.ExportedAtUtc
                 : investigation.Metadata!.LastOpenedAtUtc);
 
-        return investigation with
+        return EnsureTimeline(investigation with
         {
             SchemaVersion = InvestigationSchema.CurrentVersion,
             Metadata = metadata,
             UiState = investigation.UiState ?? EmptyUiState(),
-        };
+        });
     }
 
     private static ExportedInvestigation EnsureMetadata(ExportedInvestigation investigation)
@@ -35,7 +35,7 @@ internal static class InvestigationDocumentNormalizer
         if (investigation.Metadata is not null)
             return investigation;
 
-        return investigation with
+        return EnsureTimeline(investigation with
         {
             Metadata = new InvestigationMetadataSnapshot(
                 investigation.Recording.RecordingName,
@@ -43,8 +43,14 @@ internal static class InvestigationDocumentNormalizer
                 null,
                 investigation.ExportedAtUtc),
             UiState = investigation.UiState ?? EmptyUiState(),
-        };
+        });
     }
+
+    private static ExportedInvestigation EnsureTimeline(ExportedInvestigation investigation) =>
+        investigation with
+        {
+            Timeline = investigation.Timeline ?? RecordingTimelineSnapshot.Empty,
+        };
 
     private static InvestigationUiStateSnapshot EmptyUiState() =>
         new(Array.Empty<string>(), Array.Empty<string>(), null);
