@@ -5,62 +5,75 @@ namespace MetricBreak.Ingestion.Csv;
 
 public sealed class IndexedCsvTelemetryParser
 {
-    public IndexedCsvTelemetryResult Parse(TextReader reader)
+    public IndexedCsvTelemetryResult Parse(TextReader reader) =>
+        Parse(reader, mapping: null);
+
+    public IndexedCsvTelemetryResult Parse(
+        TextReader reader,
+        TimestampMapping? mapping)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
-        var header = CsvRecordReader.ReadRecord(reader);
-        if (header is null)
-            throw new FormatException("CSV is empty.");
-
-        if (header.Count < 2 || header[0] != "Timestamp")
-            throw new FormatException("First column must be Timestamp, followed by telemetry channels.");
-
-        var names = header.Skip(1).ToArray();
-        if (names.Any(string.IsNullOrWhiteSpace) ||
-            names.Distinct(StringComparer.Ordinal).Count() != names.Length)
-            throw new FormatException("Channel names must be nonempty and unique.");
-
-        // Store raw values until every column's type can be inferred. No guessing
-        // from the first sample, and no industry-specific interpretation.
-        var rows = new List<(TelemetryTimestamp Timestamp, string[] Values)>();
-        List<string>? fields;
-        while ((fields = CsvRecordReader.ReadRecord(reader)) is not null)
+        var table = CsvTable.Read(reader);
+        var inspection = CsvTimestampInspector.Inspect(table, mapping);
+        if (mapping is null && inspection.Detection.Ambiguous)
         {
-            var recordNumber = rows.Count + 2;
-            if (fields.Count != header.Count)
-                throw new FormatException($"CSV record {recordNumber} has an unexpected number of columns.");
-
-            if (!DateTimeOffset.TryParseExact(
-                    fields[0], "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK",
-                    CultureInfo.InvariantCulture, DateTimeStyles.None,
-                    out var timestamp) || timestamp.Offset != TimeSpan.Zero)
-                throw new FormatException($"Invalid UTC timestamp at record {recordNumber}.");
-
-            var values = fields.Skip(1).ToArray();
-            for (var i = 0; i < values.Length; i++)
-            {
-                // Reject non-finite tokens even if the column would otherwise
-                // be classified as categorical. Preserve the prior import policy.
-                if (IsNonFiniteToken(values[i]))
-                    throw new FormatException($"Invalid numeric value at record {recordNumber}, column {i + 2}.");
-            }
-
-            rows.Add((TelemetryTimestamp.FromDateTimeOffset(timestamp), values));
+            throw new FormatException(
+                "Timestamp mapping is ambiguous. Choose a timestamp column and format.");
         }
 
-        if (rows.Count == 0)
-            throw new FormatException("CSV contains no telemetry samples.");
+        var applied = inspection.Applied;
+        var channelIndexes = Enumerable.Range(0, table.Headers.Count)
+            .Where(index => index != applied.ColumnIndex)
+            .ToArray();
+
+        if (channelIndexes.Length == 0)
+        {
+            throw new FormatException(
+                "CSV must contain a timestamp column and at least one telemetry channel.");
+        }
+
+        var names = channelIndexes
+            .Select(index => table.Headers[index])
+            .ToArray();
+
+        var stamped = new List<(TelemetryTimestamp Timestamp, string[] Values)>(table.Rows.Count);
+        for (var rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+        {
+            var recordNumber = rowIndex + 2;
+            var row = table.Rows[rowIndex];
+            var timestamp = TimestampParser.Parse(
+                row[applied.ColumnIndex],
+                applied.Format,
+                recordNumber);
+
+            var values = new string[channelIndexes.Length];
+            for (var i = 0; i < channelIndexes.Length; i++)
+            {
+                values[i] = row[channelIndexes[i]];
+                if (IsNonFiniteToken(values[i]))
+                {
+                    throw new FormatException(
+                        $"Invalid numeric value at record {recordNumber}, column {channelIndexes[i] + 1}.");
+                }
+            }
+
+            stamped.Add((timestamp, values));
+        }
 
         var types = new ChannelValueType[names.Length];
         for (var column = 0; column < names.Length; column++)
         {
-            var nonEmpty = rows.Select(row => row.Values[column])
-                .Where(value => value.Length != 0).ToArray();
+            var nonEmpty = stamped
+                .Select(row => row.Values[column])
+                .Where(value => value.Length != 0)
+                .ToArray();
 
-            // An entirely empty channel has no evidence of its type.
             if (nonEmpty.Length == 0)
-                throw new FormatException($"Cannot infer type for empty channel '{names[column]}'.");
+            {
+                throw new FormatException(
+                    $"Cannot infer type for empty channel '{names[column]}'.");
+            }
 
             if (nonEmpty.All(IsFiniteNumeric))
                 types[column] = ChannelValueType.Numeric;
@@ -73,9 +86,9 @@ public sealed class IndexedCsvTelemetryParser
         var channels = names.Select((name, i) =>
             new ChannelDefinition(Guid.NewGuid(), name, null, types[i])).ToArray();
         var channelIndex = new ChannelIndex(channels.Select(channel => channel.Id));
-        var samples = new List<TelemetrySample>(rows.Count);
+        var samples = new List<TelemetrySample>(stamped.Count);
 
-        foreach (var row in rows)
+        foreach (var row in stamped)
         {
             var values = new ChannelValue?[channels.Length];
             for (var column = 0; column < channels.Length; column++)
@@ -99,7 +112,10 @@ public sealed class IndexedCsvTelemetryParser
                 samples.Count, row.Timestamp, channelIndex, values));
         }
 
-        return new IndexedCsvTelemetryResult(channels, samples);
+        return new IndexedCsvTelemetryResult(
+            channels,
+            samples,
+            applied.Origin);
     }
 
     private static bool IsFiniteNumeric(string value) =>

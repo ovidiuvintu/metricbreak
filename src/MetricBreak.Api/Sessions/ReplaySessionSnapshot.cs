@@ -1,5 +1,6 @@
 using MetricBreak.Domain.Recordings;
 using MetricBreak.Domain.Replay;
+using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Api.Sessions;
 
@@ -10,4 +11,5 @@ public sealed record ReplaySessionSnapshot(
     long SampleCount,
     ReplayExecutionState ExecutionState,
     SamplePosition Position,
-    TelemetrySample CurrentSample);
+    TelemetrySample CurrentSample,
+    TimestampOrigin TimestampOrigin = TimestampOrigin.Unix);

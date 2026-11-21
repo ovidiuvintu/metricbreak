@@ -40,6 +40,7 @@ interface RecordingChartProps {
   selectedChannelIds: string[];
   currentSequence: number | null;
   currentTimestampNanoseconds?: number | string | null;
+  timestampOrigin?: "Unix" | "Elapsed";
   onSeek: (sequence: number) => void;
   onScrubStart: () => void;
   onScrubEnd: (sequence: number) => void;
@@ -53,12 +54,38 @@ type HoverDetails = {
   values: { name: string; value: string }[];
 };
 
-function formatTimestamp(nanoseconds: string): string {
+function formatTimestamp(
+  nanoseconds: string,
+  origin: "Unix" | "Elapsed" = "Unix",
+): string {
+  if (origin === "Elapsed") {
+    return formatElapsed(nanoseconds);
+  }
+
   try {
     // Divide before converting to Number to avoid losing nanosecond precision.
     const milliseconds = BigInt(nanoseconds) / 1_000_000n;
     const date = new Date(Number(milliseconds));
     return Number.isNaN(date.getTime()) ? nanoseconds : date.toISOString();
+  } catch {
+    return nanoseconds;
+  }
+}
+
+function formatElapsed(nanoseconds: string): string {
+  try {
+    const value = BigInt(nanoseconds);
+    const negative = value < 0n;
+    const magnitude = negative ? -value : value;
+    const seconds = magnitude / 1_000_000_000n;
+    const fraction = (magnitude % 1_000_000_000n)
+      .toString()
+      .padStart(9, "0")
+      .replace(/0+$/, "");
+    const body = fraction.length === 0
+      ? seconds.toString()
+      : `${seconds}.${fraction}`;
+    return `${negative ? "-" : ""}${body} s`;
   } catch {
     return nanoseconds;
   }
@@ -143,6 +170,7 @@ export function RecordingChart({
   selectedChannelIds,
   currentSequence,
   currentTimestampNanoseconds,
+  timestampOrigin = "Unix",
   onSeek,
   onScrubStart,
   onScrubEnd,
@@ -277,7 +305,7 @@ export function RecordingChart({
       clientX: event.clientX,
       clientY: event.clientY,
       sequence: nearest.sequence,
-      timestamp: formatTimestamp(nearest.timestampNanoseconds),
+      timestamp: formatTimestamp(nearest.timestampNanoseconds, timestampOrigin),
       x,
       y,
     });
@@ -290,7 +318,7 @@ export function RecordingChart({
     const selected = new Set(selectedChannelIds);
     setInspectedSample({
       sequence: sample.sequence,
-      timestamp: formatTimestamp(sample.timestampNanoseconds),
+      timestamp: formatTimestamp(sample.timestampNanoseconds, timestampOrigin),
       x: chartMenu.x,
       y: chartMenu.y,
       values: channels.filter((channel) => selected.has(channel.channelId)).map((channel) => ({
@@ -1115,7 +1143,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           }));
         setHover({
           sequence: closest.sequence,
-          timestamp: formatTimestamp(closest.timestampNanoseconds),
+          timestamp: formatTimestamp(closest.timestampNanoseconds, timestampOrigin),
           x: event.offsetX,
           y: event.offsetY,
           values,
@@ -1209,6 +1237,9 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           >
             Current sample: {currentSequence?.toLocaleString() ?? "—"}
             {currentTimestampNanoseconds != null && (() => {
+              if (timestampOrigin === "Elapsed") {
+                return ` · ${formatElapsed(String(currentTimestampNanoseconds))}`;
+              }
               try {
                 const ms = Number(BigInt(currentTimestampNanoseconds) / 1_000_000n);
                 const date = new Date(ms);

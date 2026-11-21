@@ -1,4 +1,4 @@
-
+using System.Text;
 using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Api.Sessions;
@@ -15,12 +15,19 @@ public sealed class CsvSessionImportService
         _manager = manager;
     }
 
+    public Task<CreateSessionResponse> ImportAsync(
+        IFormFile file,
+        CancellationToken cancellationToken = default) =>
+        ImportAsync(file, mapping: null, cancellationToken);
+
     public async Task<CreateSessionResponse> ImportAsync(
         IFormFile file,
+        TimestampMapping? mapping,
         CancellationToken cancellationToken = default)
     {
         var imported = await ImportRecordingAsync(
             file,
+            mapping,
             cancellationToken);
 
         var sessionId = _manager.Create(imported);
@@ -33,11 +40,64 @@ public sealed class CsvSessionImportService
             "Ready");
     }
 
-    public async Task<ImportedCsvRecording> ImportRecordingAsync(
+    public Task<TimestampPreviewResponse> PreviewAsync(
         IFormFile file,
+        TimestampMapping? mapping,
         CancellationToken cancellationToken = default)
     {
+        return UseTemporaryFileAsync(file, path =>
+        {
+            using var reader = OpenReader(path);
+            var inspection = CsvTimestampInspector.Inspect(reader, mapping);
+            var detection = inspection.Detection;
+            var applied = inspection.Applied;
+
+            return Task.FromResult(new TimestampPreviewResponse(
+                detection.Columns
+                    .Select(column => new TimestampColumnResponse(
+                        column.Index,
+                        column.Name))
+                    .ToArray(),
+                detection.ColumnIndex,
+                detection.ColumnName,
+                detection.Format.ToString(),
+                detection.Ambiguous,
+                applied.ColumnIndex,
+                applied.Format.ToString(),
+                applied.Origin.ToString(),
+                inspection.Preview
+                    .Select(row => new TimestampPreviewRowResponse(
+                        row.SampleIndex,
+                        row.Raw,
+                        row.Normalized))
+                    .ToArray(),
+                detection.Note));
+        }, cancellationToken);
+    }
+
+    public Task<ImportedCsvRecording> ImportRecordingAsync(
+        IFormFile file,
+        CancellationToken cancellationToken = default) =>
+        ImportRecordingAsync(file, mapping: null, cancellationToken);
+
+    public Task<ImportedCsvRecording> ImportRecordingAsync(
+        IFormFile file,
+        TimestampMapping? mapping,
+        CancellationToken cancellationToken = default)
+    {
+        return UseTemporaryFileAsync(
+            file,
+            path => Task.FromResult(_importer.Import(path, mapping)),
+            cancellationToken);
+    }
+
+    private static async Task<T> UseTemporaryFileAsync<T>(
+        IFormFile file,
+        Func<string, Task<T>> useFile,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(useFile);
 
         if (file.Length == 0)
         {
@@ -53,10 +113,7 @@ public sealed class CsvSessionImportService
 
         Directory.CreateDirectory(temporaryDirectory);
 
-        // Keep the uploaded filename separate from the
-        // server-generated temporary path.
         var originalName = Path.GetFileName(file.FileName);
-
         var temporaryPath = Path.Combine(
             temporaryDirectory,
             string.IsNullOrWhiteSpace(originalName)
@@ -71,24 +128,26 @@ public sealed class CsvSessionImportService
                 FileAccess.Write,
                 FileShare.None))
             {
-                await file.CopyToAsync(
-                    stream,
-                    cancellationToken);
+                await file.CopyToAsync(stream, cancellationToken);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-
-            return _importer.Import(temporaryPath);
+            return await useFile(temporaryPath);
         }
         finally
         {
             if (Directory.Exists(temporaryDirectory))
             {
-                Directory.Delete(
-                    temporaryDirectory,
-                    recursive: true);
+                Directory.Delete(temporaryDirectory, recursive: true);
             }
         }
     }
-}
 
+    private static StreamReader OpenReader(string path) =>
+        new(
+            path,
+            new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false,
+                throwOnInvalidBytes: true),
+            detectEncodingFromByteOrderMarks: true);
+}

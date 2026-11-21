@@ -5,54 +5,106 @@ import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeResponse } from "./sampleTypes";
 
+export interface TimestampPreview {
+  columns: { index: number; name: string }[];
+  suggestedColumnIndex: number;
+  suggestedColumnName: string;
+  suggestedFormat: string;
+  ambiguous: boolean;
+  appliedColumnIndex: number;
+  appliedFormat: string;
+  timestampOrigin: "Unix" | "Elapsed";
+  preview: { sampleIndex: number; raw: string; normalized: string }[];
+  note: string | null;
+}
+
+export const TIMESTAMP_FORMATS = [
+  { value: "Iso8601", label: "ISO-8601" },
+  { value: "UnixEpochSeconds", label: "Unix epoch seconds" },
+  { value: "UnixEpochMilliseconds", label: "Unix epoch milliseconds" },
+  { value: "UnixEpochMicroseconds", label: "Unix epoch microseconds" },
+  { value: "RelativeElapsedSeconds", label: "Relative elapsed seconds" },
+] as const;
+
+async function postCsv(
+  path: string,
+  file: File,
+  mapping?: { columnIndex: number; format: string },
+): Promise<Response> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (mapping) {
+    formData.append("timestampColumn", String(mapping.columnIndex));
+    formData.append("timestampFormat", mapping.format);
+  }
+
+  try {
+    return await fetch(path, { method: "POST", body: formData });
+  } catch {
+    throw new ApiError(
+      0,
+      "NetworkError",
+      "Cannot connect to the MetricBreak API.",
+    );
+  }
+}
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  const error =
+    body !== null && typeof body === "object"
+      ? (body as Record<string, unknown>)
+      : {};
+
+  return typeof error.error === "string"
+    ? error.error
+    : typeof error.message === "string"
+      ? error.message
+      : fallback;
+}
+
 export const recordingApi = {
   /**
    * Imports a CSV recording and creates a replay session.
    *
    * POST /api/sessions
    */
-  async importCsv(file: File): Promise<CreateSessionResponse> {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    let response: Response;
-
-    try {
-      response = await fetch("/api/sessions", {
-        method: "POST",
-        body: formData,
-      });
-    } catch {
-      throw new ApiError(
-        0,
-        "NetworkError",
-        "Cannot connect to the MetricBreak API.",
-      );
-    }
+  async importCsv(
+    file: File,
+    mapping?: { columnIndex: number; format: string },
+  ): Promise<CreateSessionResponse> {
+    const response = await postCsv("/api/sessions", file, mapping);
 
     if (!response.ok) {
-      const body: unknown = await response.json().catch(() => null);
-
-      const error =
-        body !== null && typeof body === "object"
-          ? (body as Record<string, unknown>)
-          : {};
-
-      const message =
-        typeof error.error === "string"
-          ? error.error
-          : typeof error.message === "string"
-            ? error.message
-            : `CSV import failed (${response.status}).`;
-
       throw new ApiError(
         response.status,
         "ImportFailed",
-        message,
+        await readError(response, `CSV import failed (${response.status}).`),
       );
     }
 
     return (await response.json()) as CreateSessionResponse;
+  },
+
+  async previewTimestamp(
+    file: File,
+    mapping?: { columnIndex: number; format: string },
+  ): Promise<TimestampPreview> {
+    const response = await postCsv(
+      "/api/sessions/timestamp-preview",
+      file,
+      mapping,
+    );
+
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        "PreviewFailed",
+        await readError(response, `Timestamp preview failed (${response.status}).`),
+      );
+    }
+
+    return (await response.json()) as TimestampPreview;
   },
 
   getSamples(

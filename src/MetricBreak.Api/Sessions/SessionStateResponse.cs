@@ -7,7 +7,8 @@ public sealed record SessionStateResponse(
     long SampleCount,
     string ExecutionState,
     string PauseReason,
-    CurrentSampleResponse CurrentSample);
+    CurrentSampleResponse CurrentSample,
+    string TimestampOrigin = "Unix");
 
 public sealed record CurrentSampleResponse(
     long Sequence,
