@@ -27,8 +27,18 @@ import {
 } from "@mui/material";
 
 import { useTheme } from "@mui/material/styles";
+import ZoomInOutlinedIcon from "@mui/icons-material/ZoomInOutlined";
+import ZoomOutOutlinedIcon from "@mui/icons-material/ZoomOutOutlined";
+import CenterFocusStrongOutlinedIcon from "@mui/icons-material/CenterFocusStrongOutlined";
 
 import { recordingApi } from "./recordingApi";
+import {
+  applyViewportPercents,
+  resetViewport,
+  sequencesToViewportPercents,
+  zoomViewportByFactor,
+  zoomViewportToSequence,
+} from "./chartDataZoom";
 import type { CreateBreakpointRequest } from "./breakpointApi";
 import type { BreakpointDialogDraft } from "./BreakpointDialog";
 import type { ChannelMetadata } from "./channelMetadata";
@@ -156,6 +166,9 @@ interface RecordingChartProps {
     annotation?: string;
   }) => void;
   investigationBookmarks?: InvestigationBookmark[];
+  /** Bumped when the parent wants the chart viewport zoomed (not the replay cursor). */
+  viewportFocusRequestId?: number;
+  viewportFocusSequence?: number | null;
 }
 
 type HoverDetails = {
@@ -514,6 +527,8 @@ export function RecordingChart({
   onCreateBreakpointAtSample,
   onQuickBookmarkSample,
   investigationBookmarks = [],
+  viewportFocusRequestId = 0,
+  viewportFocusSequence = null,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -524,6 +539,16 @@ export function RecordingChart({
 
   const chartRef = useRef<ReactECharts>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const plotAreaRef = useRef<HTMLDivElement>(null);
+  const zoomSelectRef = useRef<HTMLDivElement>(null);
+  const boxZoomRef = useRef<{
+    pointerId: number;
+    originX: number;
+    active: boolean;
+    applied: boolean;
+  } | null>(null);
+
+  const BOX_ZOOM_DRAG_THRESHOLD_PX = 8;
 
   const [axisMenuAnchor, setAxisMenuAnchor] = useState<HTMLElement | null>(null);
   const rightAxisSet = useMemo(() => new Set(rightAxisChannelIds), [rightAxisChannelIds]);
@@ -677,16 +702,158 @@ export function RecordingChart({
     setTooltipsEnabled(next);
     if (!next) setHover(null);
   };
+  const withChart = (action: (chart: EChartsType) => void) => {
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!chart || chart.isDisposed()) return;
+    action(chart);
+  };
+
   const handleResetZoom = () => {
+    withChart((chart) => resetViewport(chart));
+  };
+
+  const handleZoomIn = () => {
+    withChart((chart) => {
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      zoomViewportByFactor(chart, ps, pe, 0.8);
+    });
+  };
+
+  const handleZoomOut = () => {
+    withChart((chart) => {
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      zoomViewportByFactor(chart, ps, pe, 1.25);
+    });
+  };
+
+  const handleZoomToReplay = () => {
+    const sequence = previewSequence ?? currentSequence;
+    if (sequence == null) return;
+    withChart((chart) => {
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      zoomViewportToSequence(chart, ps, pe, sequence, 0.15);
+    });
+  };
+
+  const hideZoomSelection = () => {
+    const band = zoomSelectRef.current;
+    if (band) band.style.display = "none";
+  };
+
+  const updateZoomSelection = (clientX: number) => {
+    const band = zoomSelectRef.current;
+    const plot = plotAreaRef.current;
+    const box = boxZoomRef.current;
+    if (!band || !plot || !box) return;
+
+    const rect = plot.getBoundingClientRect();
+    const start = Math.max(0, Math.min(rect.width, box.originX - rect.left));
+    const end = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const left = Math.min(start, end);
+    const width = Math.abs(end - start);
+
+    band.style.display = width < 2 ? "none" : "block";
+    band.style.left = `${left}px`;
+    band.style.width = `${width}px`;
+  };
+
+  const applyBoxZoom = (clientX: number) => {
+    const plot = plotAreaRef.current;
+    const box = boxZoomRef.current;
+    const chart = chartRef.current?.getEchartsInstance();
+    if (!plot || !box || !chart || chart.isDisposed()) return false;
+
+    const rect = plot.getBoundingClientRect();
+    const delta = Math.abs(clientX - box.originX);
+    if (delta < BOX_ZOOM_DRAG_THRESHOLD_PX) return false;
+
+    const x0 = Math.max(0, Math.min(rect.width, box.originX - rect.left));
+    const x1 = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const left = Math.min(x0, x1);
+    const right = Math.max(x0, x1);
+
+    const startCoord = chart.convertFromPixel(
+      { gridIndex: 0 },
+      [left, rect.height / 2],
+    ) as number[];
+    const endCoord = chart.convertFromPixel(
+      { gridIndex: 0 },
+      [right, rect.height / 2],
+    ) as number[];
+
+    const loaded = samplesRef.current;
+    if (!loaded.length || !Number.isFinite(startCoord[0]) || !Number.isFinite(endCoord[0])) {
+      return false;
+    }
+
+    const minBound = loaded[0].sequence;
+    const maxBound = loaded[loaded.length - 1].sequence;
+    const minSequence = Math.max(
+      minBound,
+      Math.min(maxBound, Math.round(Math.min(startCoord[0], endCoord[0]))),
+    );
+    const maxSequence = Math.max(
+      minBound,
+      Math.min(maxBound, Math.round(Math.max(startCoord[0], endCoord[0]))),
+    );
+
+    const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+    const percents = sequencesToViewportPercents(ps, pe, minSequence, maxSequence);
+    applyViewportPercents(chart, percents.startPercent, percents.endPercent);
+    suppressClickRef.current = true;
+    return true;
+  };
+
+  const handlePlotPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.shiftKey || dragRef.current) return;
     const chart = chartRef.current?.getEchartsInstance();
     if (!chart || chart.isDisposed()) return;
 
-    chart.dispatchAction({
-      type: "dataZoom",
-      dataZoomIndex: 0,
-      start: 0,
-      end: 100,
-    });
+    const plot = plotAreaRef.current;
+    if (!plot) return;
+
+    const rect = plot.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const localY = event.clientY - rect.top;
+    if (!chart.containPixel({ gridIndex: 0 }, [localX, localY])) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    boxZoomRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      active: true,
+      applied: false,
+    };
+  };
+
+  const handlePlotPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const box = boxZoomRef.current;
+    if (!box?.active) return;
+    updateZoomSelection(event.clientX);
+  };
+
+  const finishPlotPointer = (event: PointerEvent<HTMLDivElement>, cancelled: boolean) => {
+    const box = boxZoomRef.current;
+    if (!box?.active) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    if (!cancelled) {
+      box.applied = applyBoxZoom(event.clientX);
+    }
+
+    boxZoomRef.current = null;
+    hideZoomSelection();
+  };
+
+  const handlePlotPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    finishPlotPointer(event, false);
+  };
+
+  const handlePlotPointerCancel = (event: PointerEvent<HTMLDivElement>) => {
+    finishPlotPointer(event, true);
   };
 
   const listenerCleanupRef = useRef<(() => void) | null>(null);
@@ -1262,9 +1429,10 @@ export function RecordingChart({
         {
           type: "inside" as const,
           xAxisIndex: 0,
+          filterMode: "none" as const,
           zoomOnMouseWheel: true,
-          // Reserve left-button dragging for replay scrubbing, not ECharts panning.
-          moveOnMouseMove: false,
+          // Box-drag zoom on plot; Shift+drag pans. Wheel zooms the viewport only.
+          moveOnMouseMove: "shift",
           moveOnMouseWheel: false,
         },
       ],
@@ -1403,6 +1571,57 @@ export function RecordingChart({
       observer.disconnect();
     };
   }, [sessionId, currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
+
+  useEffect(() => {
+    if (viewportFocusRequestId <= 0 || viewportFocusSequence == null) return;
+    withChart((chart) => {
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      zoomViewportToSequence(chart, ps, pe, viewportFocusSequence, 0.12);
+    });
+  }, [viewportFocusRequestId, viewportFocusSequence]);
+
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (
+        active !== root &&
+        active !== document.body &&
+        !root.contains(active)
+      ) {
+        return;
+      }
+      if (active === document.body) return;
+
+      const key = event.key;
+      const withMeta = event.ctrlKey || event.metaKey;
+
+      if (!withMeta && (key === "=" || key === "+")) {
+        event.preventDefault();
+        handleZoomIn();
+        return;
+      }
+      if (!withMeta && key === "-") {
+        event.preventDefault();
+        handleZoomOut();
+        return;
+      }
+      if (!withMeta && key === "0") {
+        event.preventDefault();
+        handleResetZoom();
+        return;
+      }
+      if (!withMeta && (key === "f" || key === "F")) {
+        event.preventDefault();
+        handleZoomToReplay();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  });
 
   const handleLabelPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || dragRef.current) return;
@@ -1564,6 +1783,8 @@ export function RecordingChart({
            suppressClickRef.current = false;
            return;
          }
+         const domEvent = (event as { event?: MouseEvent }).event;
+         if (domEvent?.shiftKey) return;
          const sequence = sequenceAt(event.offsetX, event.offsetY);
          if (sequence !== null && sequence !== currentSequenceRef.current) {
            onSeekRef.current(sequence);
@@ -1639,6 +1860,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
   return (
     <Box
       ref={containerRef}
+      tabIndex={0}
       sx={{
         display: "flex",
         flexDirection: "column",
@@ -1648,6 +1870,10 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         minHeight: 0,
         overflow: "hidden",
         position: "relative",
+        outline: "none",
+        "&:focus-visible": {
+          boxShadow: `inset 0 0 0 2px ${theme.palette.primary.main}`,
+        },
       }}
     >
       {error && (
@@ -1736,11 +1962,45 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         <Button
           size="small"
           variant="outlined"
+          onClick={handleZoomOut}
+          disabled={loading || samples.length === 0}
+          title="Zoom out (−)"
+          aria-label="Zoom out"
+          sx={{ bgcolor: "background.paper", minWidth: 0, px: 1, flexShrink: 0 }}
+        >
+          <ZoomOutOutlinedIcon fontSize="small" />
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={handleZoomIn}
+          disabled={loading || samples.length === 0}
+          title="Zoom in (+)"
+          aria-label="Zoom in"
+          sx={{ bgcolor: "background.paper", minWidth: 0, px: 1, flexShrink: 0 }}
+        >
+          <ZoomInOutlinedIcon fontSize="small" />
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          onClick={handleZoomToReplay}
+          disabled={loading || samples.length === 0 || currentSequence == null}
+          title="Zoom viewport to replay cursor (F)"
+          aria-label="Zoom to replay cursor"
+          sx={{ bgcolor: "background.paper", minWidth: 0, px: 1, flexShrink: 0 }}
+        >
+          <CenterFocusStrongOutlinedIcon fontSize="small" />
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
           onClick={handleResetZoom}
           disabled={loading || samples.length === 0}
+          title="Reset zoom (0)"
           sx={{ bgcolor: "background.paper", flexShrink: 0, whiteSpace: "nowrap" }}
         >
-          Reset Zoom (100%)
+          Reset zoom
         </Button>
         <Button
           size="small"
@@ -1792,15 +2052,40 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
         ) : samples.length > 0 ? (
           <>
           <Box
+            ref={plotAreaRef}
             sx={{
               height: "100%",
               width: "100%",
+              position: "relative",
               "& canvas": {
-                cursor: "default !important",
+                cursor: "crosshair",
               },
             }}
             onContextMenu={handlePlotContextMenu}
+            onPointerDown={handlePlotPointerDown}
+            onPointerMove={handlePlotPointerMove}
+            onPointerUp={handlePlotPointerUp}
+            onPointerCancel={handlePlotPointerCancel}
+            onPointerDownCapture={() => containerRef.current?.focus({ preventScroll: true })}
           >
+          <Box
+            ref={zoomSelectRef}
+            aria-hidden
+            sx={{
+              display: "none",
+              position: "absolute",
+              top: 36,
+              bottom: 44,
+              border: 1,
+              borderColor: "primary.main",
+              bgcolor: (muiTheme) =>
+                muiTheme.palette.mode === "dark"
+                  ? "rgba(78,168,255,0.16)"
+                  : "rgba(29,78,216,0.14)",
+              pointerEvents: "none",
+              zIndex: 9,
+            }}
+          />
           <ReactECharts
             key={`${sessionId}:${pageStart}`}
             ref={chartRef}
@@ -2056,6 +2341,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             {visibleInvestigationBookmarkCount > 0
               ? ` · ${visibleInvestigationBookmarkCount} bookmark${visibleInvestigationBookmarkCount === 1 ? "" : "s"} (dashed violet — click to seek)`
               : ""}
+            {" · Drag zoom · Shift+drag pan · Wheel zoom"}
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>

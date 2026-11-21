@@ -157,6 +157,8 @@ export function RecordingDashboard({
   const [bookmarkSnackOpen, setBookmarkSnackOpen] = useState(false);
   const [bookmarkSnackMessage, setBookmarkSnackMessage] = useState("");
   const [bookmarkSnackPrompt, setBookmarkSnackPrompt] = useState(false);
+  const [viewportFocusRequestId, setViewportFocusRequestId] = useState(0);
+  const [viewportFocusSequence, setViewportFocusSequence] = useState<number | null>(null);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
@@ -831,6 +833,8 @@ export function RecordingDashboard({
           setBookmarkSnackMessage(`Stopped at sample ${hitSequence.toLocaleString()}`);
           setBookmarkSnackPrompt(true);
           setBookmarkSnackOpen(true);
+          setViewportFocusSequence(hitSequence);
+          setViewportFocusRequestId((value) => value + 1);
         }
       }
       return response.session;
@@ -1105,6 +1109,8 @@ export function RecordingDashboard({
             onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
             onQuickBookmarkSample={(payload) => void handleQuickBookmark(payload)}
             investigationBookmarks={chartInvestigationBookmarks}
+            viewportFocusRequestId={viewportFocusRequestId}
+            viewportFocusSequence={viewportFocusSequence}
           />
         </Box>
       ) : (
