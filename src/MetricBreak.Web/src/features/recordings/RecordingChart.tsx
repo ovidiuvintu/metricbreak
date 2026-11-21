@@ -1047,6 +1047,9 @@ export function RecordingChart({
   // A page change must never be interpreted as a replay cursor movement.
   // Manual page browsing is independent of the replay cursor.
   const manualPageRef = useRef(false);
+  const activePageRef = useRef(activePage);
+  activePageRef.current = activePage;
+  const pageLoadGenerationRef = useRef(0);
   const lastReplayPositionRef = useRef<{
     sessionId: string;
     sequence: number | null;
@@ -1083,7 +1086,12 @@ export function RecordingChart({
       previousReplayPage !== null && currentReplayPage !== null &&
       previousReplayPage !== currentReplayPage;
 
-    if (crossedPageBoundary) manualPageRef.current = false;
+    // Resume auto-follow only after the cursor reaches the page the user
+    // navigated to (not on the first boundary cross while still behind it).
+    if (crossedPageBoundary && currentReplayPage !== null &&
+        currentReplayPage >= activePageRef.current) {
+      manualPageRef.current = false;
+    }
 
     if (dragRef.current || manualPageRef.current) return;
 
@@ -1106,7 +1114,7 @@ export function RecordingChart({
   // Layout effect applies prefetched data before the browser paints a new page.
   // Uncached pages still show the existing loading indicator.
   useLayoutEffect(() => {
-    let cancelled = false;
+    const loadId = ++pageLoadGenerationRef.current;
     setHover(null);
     setInspectedSample(null);
     setCursorLabelX(null);
@@ -1118,26 +1126,31 @@ export function RecordingChart({
       return;
     }
 
-    const cached = pageCacheRef.current.get(pageKey(pageStart));
-    if (cached) {
-      setSamples(cached);
+    const applySamples = (loaded: SampleRangeItem[]) => {
+      if (pageLoadGenerationRef.current !== loadId) return;
+      setSamples(loaded);
       setLoading(false);
       setError("");
+    };
+
+    const cached = pageCacheRef.current.get(pageKey(pageStart));
+    if (cached) {
+      applySamples(cached);
     } else {
       setSamples([]);
       setLoading(true);
       setError("");
-      void requestPage(pageStart).then((loaded) => {
-        if (!cancelled) {
-          setSamples(loaded);
+      void requestPage(pageStart)
+        .then(applySamples)
+        .catch((caught) => {
+          if (pageLoadGenerationRef.current !== loadId) return;
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Unable to load recording samples.",
+          );
           setLoading(false);
-        }
-      }).catch((caught) => {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Unable to load recording samples.");
-          setLoading(false);
-        }
-      });
+        });
     }
 
     // Prefetch both directions. This is a data-only optimization: replay
@@ -1147,7 +1160,6 @@ export function RecordingChart({
         void requestPage(neighbor).catch(() => { /* Retry on actual navigation. */ });
       }
     }
-    return () => { cancelled = true; };
   }, [sessionId, pageStart, sampleCount]);
 
   useEffect(() => {
@@ -1187,7 +1199,7 @@ export function RecordingChart({
   // Browsing another chart page must not seek or invalidate playback.
   // Keep the selected page visible until the user explicitly scrubs/seeks.
   const navigateToPage = (targetPage: number) => {
-    if (loading || targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
+    if (targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
     manualPageRef.current = true;
     // Clear the old page's handle before the new chart finishes loading.
     setCursorLabelX(null);
@@ -2598,11 +2610,11 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
-              <Button disabled={loading || activePage === 0} onClick={() => navigateToPage(activePage - 1)}>
+              <Button disabled={activePage === 0} onClick={() => navigateToPage(activePage - 1)}>
                 Previous
               </Button>
               <Button
-                disabled={loading || activePage >= pageCount - 1}
+                disabled={activePage >= pageCount - 1}
                 onClick={() => navigateToPage(activePage + 1)}
               >
                 Next
