@@ -21,6 +21,7 @@ import { loadInvestigationSelection } from "../investigations/investigationSelec
 import type { InvestigationBookmark } from "../investigations/investigationTypes";
 import { formatBookmarkTime } from "../investigations/formatBookmarkTime";
 import { formatDurationBetweenNanoseconds } from "./formatDuration";
+import { InvestigationsResumeList } from "../investigations/InvestigationsResumeList";
 
 interface RecordingDebuggerDashboardProps {
     session: SessionState | null;
@@ -33,6 +34,11 @@ interface RecordingDebuggerDashboardProps {
     onOpenInvestigations: () => void;
     onGoToSample: (sequence: number) => void;
     bookmarkRefreshKey?: number;
+    onOpenInvestigation?: (
+        investigationId: string,
+        projectId: string,
+    ) => Promise<void>;
+    openInvestigationBusy?: boolean;
 }
 
 function executionLabel(state: string): string {
@@ -57,6 +63,8 @@ export function RecordingDebuggerDashboard({
     onOpenInvestigations,
     onGoToSample,
     bookmarkRefreshKey = 0,
+    onOpenInvestigation,
+    openInvestigationBusy = false,
 }: RecordingDebuggerDashboardProps) {
     const [durationLabel, setDurationLabel] = useState<string | null>(null);
     const [bookmarks, setBookmarks] = useState<InvestigationBookmark[]>([]);
@@ -199,6 +207,15 @@ export function RecordingDebuggerDashboard({
                 >
                     Import CSV
                 </Button>
+                {onOpenInvestigation && (
+                    <Box sx={{ mt: 2, width: "100%", maxWidth: 420, textAlign: "left" }}>
+                        <InvestigationsResumeList
+                            busy={openInvestigationBusy}
+                            onOpen={onOpenInvestigation}
+                            limit={4}
+                        />
+                    </Box>
+                )}
             </Box>
         );
     }

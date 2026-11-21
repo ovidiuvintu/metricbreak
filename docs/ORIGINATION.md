@@ -16,8 +16,8 @@ MetricBreak is developed as an **original codebase**. This policy applies to all
 4. **Reuse inside this repo is encouraged**  
    Following existing patterns (`ProjectWorkspaceStore`, `InvestigationEndpoints`, API test helpers, MUI layout conventions) is required; that is not “external copying.”
 
-5. **AI assistance**  
-   Using assistants is allowed. You are responsible for reviewing output for correctness, license compatibility, and fit with this policy before commit.
+5. **Contributor tooling**  
+   Editors and assistants used while developing are fine; you are responsible for reviewing output before commit. **Shipped product code** must not add LLM features; see [PRODUCT.md](./PRODUCT.md).
 
 ## Vendoring (rare)
 

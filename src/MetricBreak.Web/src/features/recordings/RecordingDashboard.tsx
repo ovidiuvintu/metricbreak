@@ -1,5 +1,5 @@
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -21,13 +21,17 @@ import ShowChartIcon from "@mui/icons-material/ShowChart";
 import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
 import { ChannelList } from "./ChannelList";
 import { RecordingWorkspace } from "./RecordingWorkspace";
-import { RecordingChart } from "./RecordingChart";
+import {
+  RecordingChart,
+  type ChartViewportReader,
+} from "./RecordingChart";
 import { ImportRecordingDialog } from "./ImportRecordingDialog";
 import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
 import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog";
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
+import { InvestigationsResumeList } from "../investigations/InvestigationsResumeList";
 import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
@@ -35,6 +39,7 @@ import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
+import type { InvestigationUiState } from "../investigations/investigationTypes";
 import type { AppSection } from "../../app/AppSidebar";
 
 import { recordingApi } from "./recordingApi";
@@ -163,6 +168,22 @@ export function RecordingDashboard({
   const [bookmarkSnackPrompt, setBookmarkSnackPrompt] = useState(false);
   const [viewportFocusRequestId, setViewportFocusRequestId] = useState(0);
   const [viewportFocusSequence, setViewportFocusSequence] = useState<number | null>(null);
+  const [restoreChartViewportRequestId, setRestoreChartViewportRequestId] =
+    useState(0);
+  const [restoreChartViewport, setRestoreChartViewport] =
+    useState<InvestigationUiState["chartViewport"]>(null);
+  const chartViewportReaderRef = useRef<ChartViewportReader | null>(null);
+  const investigationUiBaselineRef = useRef<{
+    investigationId: string;
+    snapshot: string;
+  } | null>(null);
+
+  const snapshotInvestigationUiState = (uiState: InvestigationUiState) =>
+    JSON.stringify({
+      selectedChannelIds: uiState.selectedChannelIds ?? [],
+      rightAxisChannelIds: uiState.rightAxisChannelIds ?? [],
+      chartViewport: uiState.chartViewport ?? null,
+    });
   const [breakpointHitsRefreshKey, setBreakpointHitsRefreshKey] = useState(0);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
@@ -1064,6 +1085,50 @@ export function RecordingDashboard({
     </Box>
   );
 
+  const rememberInvestigationUiBaseline = useCallback(
+    (investigationId: string, uiState: InvestigationUiState) => {
+      investigationUiBaselineRef.current = {
+        investigationId,
+        snapshot: snapshotInvestigationUiState(uiState),
+      };
+    },
+    [],
+  );
+
+  const applyInvestigationUiState = useCallback((uiState: InvestigationUiState) => {
+    setSelectedChannelIds(uiState.selectedChannelIds ?? []);
+    setRightAxisChannelIds(uiState.rightAxisChannelIds ?? []);
+    const viewport = uiState.chartViewport;
+    if (viewport) {
+      setRestoreChartViewport(viewport);
+      setRestoreChartViewportRequestId((value) => value + 1);
+    }
+  }, []);
+
+  const resolveExportUiState = useCallback((): InvestigationUiState => ({
+    selectedChannelIds,
+    rightAxisChannelIds,
+    chartViewport: chartViewportReaderRef.current?.read() ?? null,
+  }), [selectedChannelIds, rightAxisChannelIds]);
+
+  const isInvestigationUiDirty = useCallback(() => {
+    const investigationId = context.investigationId;
+    if (!investigationId || !session) return false;
+    const baseline = investigationUiBaselineRef.current;
+    if (!baseline || baseline.investigationId !== investigationId) return false;
+    return (
+      baseline.snapshot !==
+      snapshotInvestigationUiState(resolveExportUiState())
+    );
+  }, [context.investigationId, session, resolveExportUiState]);
+
+  const registerChartViewportReader = useCallback(
+    (reader: ChartViewportReader | null) => {
+      chartViewportReaderRef.current = reader;
+    },
+    [],
+  );
+
   // --------------------------------------------------
   // Chart
   // --------------------------------------------------
@@ -1127,6 +1192,9 @@ export function RecordingDashboard({
             investigationBookmarks={chartInvestigationBookmarks}
             viewportFocusRequestId={viewportFocusRequestId}
             viewportFocusSequence={viewportFocusSequence}
+            restoreChartViewport={restoreChartViewport}
+            restoreChartViewportRequestId={restoreChartViewportRequestId}
+            registerChartViewportReader={registerChartViewportReader}
             breakpoints={breakpoints}
             compositeBreakpoints={compositeBreakpoints}
             breakpointHitsRefreshKey={breakpointHitsRefreshKey}
@@ -1372,8 +1440,13 @@ export function RecordingDashboard({
       if (!loaded) return;
 
       if (document.uiState) {
-        setSelectedChannelIds(document.uiState.selectedChannelIds ?? []);
-        setRightAxisChannelIds(document.uiState.rightAxisChannelIds ?? []);
+        const uiState = {
+          selectedChannelIds: document.uiState.selectedChannelIds ?? [],
+          rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+          chartViewport: document.uiState.chartViewport ?? null,
+        };
+        applyInvestigationUiState(uiState);
+        rememberInvestigationUiBaseline(investigationId, uiState);
       }
 
       const name =
@@ -1419,10 +1492,10 @@ export function RecordingDashboard({
         rightAxisChannelIds={rightAxisChannelIds}
         onSeek={(sequence) => void handleSeek(sequence)}
         onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
-        onRestoreUiState={(uiState) => {
-          setSelectedChannelIds(uiState.selectedChannelIds);
-          setRightAxisChannelIds(uiState.rightAxisChannelIds);
-        }}
+        onRestoreUiState={applyInvestigationUiState}
+        resolveExportUiState={resolveExportUiState}
+        isUiStateDirty={isInvestigationUiDirty}
+        onUiStateBaselineSaved={rememberInvestigationUiBaseline}
         onOpenInvestigation={handleOpenInvestigation}
       />
     </Box>
@@ -1445,6 +1518,8 @@ export function RecordingDashboard({
         void handleSeek(sequence).then(() => onSelectSection("recordings"));
       }}
       bookmarkRefreshKey={bookmarkRevision}
+      onOpenInvestigation={handleOpenInvestigation}
+      openInvestigationBusy={loading || navigationBusy}
     />
   );
 
@@ -1516,11 +1591,27 @@ export function RecordingDashboard({
               details={details}
             />
             ) : (
-              <RecordingsCatalogPanel
-                busy={loading}
-                onImport={() => setDialogOpen(true)}
-                onOpened={(result) => void handleImportSuccess(result)}
-              />
+              <Box
+                sx={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 3,
+                  p: 1,
+                }}
+              >
+                <RecordingsCatalogPanel
+                  busy={loading}
+                  onImport={() => setDialogOpen(true)}
+                  onOpened={(result) => void handleImportSuccess(result)}
+                />
+                <InvestigationsResumeList
+                  busy={loading}
+                  onOpen={handleOpenInvestigation}
+                />
+              </Box>
             )
           ) : sectionPlaceholder}
       </Box>

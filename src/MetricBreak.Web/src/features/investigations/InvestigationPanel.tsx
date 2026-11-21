@@ -4,6 +4,11 @@ import {
     Box,
     Button,
     CircularProgress,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
     Divider,
     FormControl,
     IconButton,
@@ -48,6 +53,12 @@ interface InvestigationPanelProps {
     onSeek: (sequence: number) => void;
     onBookmarksChanged?: () => void;
     onRestoreUiState?: (uiState: InvestigationUiState) => void;
+    resolveExportUiState?: () => InvestigationUiState;
+    isUiStateDirty?: () => boolean;
+    onUiStateBaselineSaved?: (
+        investigationId: string,
+        uiState: InvestigationUiState,
+    ) => void;
     onOpenInvestigation?: (
         investigationId: string,
         projectId: string,
@@ -67,6 +78,9 @@ export function InvestigationPanel({
     onSeek,
     onBookmarksChanged,
     onRestoreUiState,
+    resolveExportUiState,
+    isUiStateDirty,
+    onUiStateBaselineSaved,
     onOpenInvestigation,
 }: InvestigationPanelProps) {
     const { setActiveInvestigation } = useWorkspace();
@@ -81,6 +95,69 @@ export function InvestigationPanel({
     const [error, setError] = useState<string | null>(null);
     const [editorOpen, setEditorOpen] = useState(false);
     const [editingBookmark, setEditingBookmark] = useState<InvestigationBookmark | null>(null);
+    const [discardDialogOpen, setDiscardDialogOpen] = useState(false);
+    const [pendingInvestigationAction, setPendingInvestigationAction] = useState<
+        | { type: "select"; investigationId: string }
+        | { type: "open" }
+        | null
+    >(null);
+
+    const applyInvestigationSelection = async (nextId: string) => {
+        setInvestigationId(nextId);
+        if (!nextId) return;
+
+        const summary = investigations.find((item) => item.investigationId === nextId);
+        const displayName = summary?.investigationName ?? summary?.recordingName ?? "";
+        setInvestigationName(displayName);
+
+        setActiveInvestigation({
+            investigationId: nextId,
+            investigationName: displayName,
+            projectId: projectId || null,
+        });
+
+        try {
+            const document = await investigationApi.getInvestigation(
+                nextId,
+                projectId || null,
+            );
+            if (document.uiState && onRestoreUiState) {
+                onRestoreUiState({
+                    selectedChannelIds: document.uiState.selectedChannelIds ?? [],
+                    rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+                    chartViewport: document.uiState.chartViewport ?? null,
+                });
+            }
+            if (document.uiState && onUiStateBaselineSaved) {
+                onUiStateBaselineSaved(nextId, {
+                    selectedChannelIds: document.uiState.selectedChannelIds ?? [],
+                    rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+                    chartViewport: document.uiState.chartViewport ?? null,
+                });
+            }
+        } catch {
+            // Selection still works when detail load fails.
+        }
+    };
+
+    const requestInvestigationSwitch = (
+        action:
+            | { type: "select"; investigationId: string }
+            | { type: "open" },
+    ) => {
+        if (isUiStateDirty?.()) {
+            setPendingInvestigationAction(action);
+            setDiscardDialogOpen(true);
+            return;
+        }
+        if (action.type === "select") {
+            void applyInvestigationSelection(action.investigationId);
+            return;
+        }
+        if (onOpenInvestigation && investigationId) {
+            void onOpenInvestigation(investigationId, projectId);
+        }
+    };
 
     const loadProjects = useCallback(async () => {
         try {
@@ -199,14 +276,16 @@ export function InvestigationPanel({
                 recordingName ||
                 "Investigation";
 
+            const uiState = resolveExportUiState?.() ?? {
+                selectedChannelIds,
+                rightAxisChannelIds,
+            };
+
             const response = await investigationApi.exportSession(sessionId, {
                 investigationId: investigationId || null,
                 name,
                 projectId: projectId || null,
-                uiState: {
-                    selectedChannelIds,
-                    rightAxisChannelIds,
-                },
+                uiState,
             });
             setInvestigationId(response.investigationId);
             setInvestigationName(name);
@@ -218,6 +297,7 @@ export function InvestigationPanel({
             await loadInvestigations();
             await loadBookmarks();
             onBookmarksChanged?.();
+            onUiStateBaselineSaved?.(response.investigationId, uiState);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Unable to export investigation.");
         } finally {
@@ -225,35 +305,12 @@ export function InvestigationPanel({
         }
     };
 
-    const handleSelectInvestigation = async (nextId: string) => {
-        setInvestigationId(nextId);
-        if (!nextId) return;
-
-        const summary = investigations.find((item) => item.investigationId === nextId);
-        const displayName = summary?.investigationName ?? summary?.recordingName ?? "";
-        setInvestigationName(displayName);
-
-        setActiveInvestigation({
-            investigationId: nextId,
-            investigationName: displayName,
-            projectId: projectId || null,
-        });
-
-        try {
-            const document = await investigationApi.getInvestigation(
-                nextId,
-                projectId || null,
-            );
-            if (document.uiState && onRestoreUiState) {
-                onRestoreUiState({
-                    selectedChannelIds: document.uiState.selectedChannelIds ?? [],
-                    rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
-                    chartViewport: document.uiState.chartViewport ?? null,
-                });
-            }
-        } catch {
-            // Selection still works when detail load fails.
+    const handleSelectInvestigation = (nextId: string) => {
+        if (!nextId) {
+            setInvestigationId("");
+            return;
         }
+        requestInvestigationSwitch({ type: "select", investigationId: nextId });
     };
 
     const handleQuickBookmarkHere = async () => {
@@ -436,7 +493,7 @@ export function InvestigationPanel({
                     disabled={!investigationId || busy || navigationBusy || !onOpenInvestigation}
                     onClick={() => {
                         if (!investigationId || !onOpenInvestigation) return;
-                        void onOpenInvestigation(investigationId, projectId);
+                        requestInvestigationSwitch({ type: "open" });
                     }}
                 >
                     Open investigation
@@ -590,6 +647,48 @@ export function InvestigationPanel({
                     })}
                 </Stack>
             )}
+
+            <Dialog
+                open={discardDialogOpen}
+                onClose={() => {
+                    setDiscardDialogOpen(false);
+                    setPendingInvestigationAction(null);
+                }}
+            >
+                <DialogTitle>Discard unsaved chart layout?</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        Channel selection or chart zoom changed since the last save.
+                        Continue without saving?
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button
+                        onClick={() => {
+                            setDiscardDialogOpen(false);
+                            setPendingInvestigationAction(null);
+                        }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        color="warning"
+                        onClick={() => {
+                            const pending = pendingInvestigationAction;
+                            setDiscardDialogOpen(false);
+                            setPendingInvestigationAction(null);
+                            if (!pending) return;
+                            if (pending.type === "select") {
+                                void applyInvestigationSelection(pending.investigationId);
+                            } else if (onOpenInvestigation && investigationId) {
+                                void onOpenInvestigation(investigationId, projectId);
+                            }
+                        }}
+                    >
+                        Discard and continue
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             <BookmarkEditorDialog
                 open={editorOpen}
