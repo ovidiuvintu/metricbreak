@@ -9,5 +9,6 @@ public enum TimestampFormat
     UnixEpochSeconds,
     UnixEpochMilliseconds,
     UnixEpochMicroseconds,
+    UnixEpochNanoseconds,
     RelativeElapsedSeconds
 }

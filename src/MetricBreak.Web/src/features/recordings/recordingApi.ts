@@ -23,6 +23,7 @@ export const TIMESTAMP_FORMATS = [
   { value: "UnixEpochSeconds", label: "Unix epoch seconds" },
   { value: "UnixEpochMilliseconds", label: "Unix epoch milliseconds" },
   { value: "UnixEpochMicroseconds", label: "Unix epoch microseconds" },
+  { value: "UnixEpochNanoseconds", label: "Unix epoch nanoseconds" },
   { value: "RelativeElapsedSeconds", label: "Relative elapsed seconds" },
 ] as const;
 
