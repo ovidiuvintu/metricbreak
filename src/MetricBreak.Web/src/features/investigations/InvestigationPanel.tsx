@@ -71,7 +71,22 @@ export function InvestigationPanel({
             const openProjects = await projectApi.getOpenProjects();
             setProjects(openProjects);
 
-            if (openProjects.length === 1 && projectId === "") {
+            if (openProjects.length === 0) {
+                if (projectId !== "") {
+                    setProjectId("");
+                    setInvestigationId("");
+                }
+                return;
+            }
+
+            const projectIsOpen = openProjects.some(
+                (project) => project.projectId === projectId,
+            );
+
+            if (projectId !== "" && !projectIsOpen) {
+                setProjectId("");
+                setInvestigationId("");
+            } else if (projectId === "" && openProjects.length === 1) {
                 setProjectId(openProjects[0].projectId);
             }
         } catch (err) {
@@ -312,7 +327,8 @@ export function InvestigationPanel({
 
             {projects.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
-                    Open a project on the API host before saving bookmarks.
+                    No project is open in the API. Create or open one (POST /api/projects or
+                    /api/projects/open via Scalar at localhost:5069), then refresh this page.
                 </Typography>
             ) : (
                 <FormControl size="small" fullWidth>
@@ -345,21 +361,47 @@ export function InvestigationPanel({
             </Stack>
 
             {projectId && (
-                <FormControl size="small" fullWidth>
-                    <InputLabel id="investigation-select-label">Investigation</InputLabel>
-                    <Select
-                        labelId="investigation-select-label"
-                        label="Investigation"
-                        value={investigationId}
-                        onChange={(event) => setInvestigationId(event.target.value)}
-                    >
-                        {investigations.map((item) => (
-                            <MenuItem key={item.investigationId} value={item.investigationId}>
-                                {item.recordingName}
-                            </MenuItem>
-                        ))}
-                    </Select>
-                </FormControl>
+                <>
+                    <FormControl size="small" fullWidth>
+                        <InputLabel id="investigation-select-label">Investigation</InputLabel>
+                        <Select
+                            labelId="investigation-select-label"
+                            label="Investigation"
+                            value={
+                                investigations.some((item) => item.investigationId === investigationId)
+                                    ? investigationId
+                                    : ""
+                            }
+                            onChange={(event) => setInvestigationId(event.target.value)}
+                            displayEmpty
+                            renderValue={(value) => {
+                                if (!value) {
+                                    return investigations.length === 0
+                                        ? "None yet for this recording"
+                                        : "Select investigation";
+                                }
+                                const selected = investigations.find(
+                                    (item) => item.investigationId === value,
+                                );
+                                return selected?.recordingName ?? value;
+                            }}
+                        >
+                            {investigations.map((item) => (
+                                <MenuItem key={item.investigationId} value={item.investigationId}>
+                                    {item.recordingName}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                    {recordingName && investigations.length === 0 && !loading && (
+                        <Typography variant="caption" color="text.secondary">
+                            No saved investigation for{" "}
+                            <strong>{recordingName}</strong>. With a CSV loaded on Recordings,
+                            choose the project above and click <strong>Save investigation</strong>{" "}
+                            — it will appear here.
+                        </Typography>
+                    )}
+                </>
             )}
 
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>

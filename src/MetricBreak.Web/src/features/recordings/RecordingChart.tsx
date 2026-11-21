@@ -39,6 +39,97 @@ import {
   getAxisTemperatureAccent,
   getSeriesColor,
 } from "../../theme/chartTheme";
+import type { InvestigationBookmark } from "../investigations/investigationTypes";
+
+type ChartMarkLine = {
+  silent?: boolean;
+  symbol?: string;
+  animation?: boolean;
+  label?: { show: boolean };
+  data: Array<Record<string, unknown>>;
+};
+
+function buildFirstSeriesMarkLine(params: {
+  cursorSequence: number | null;
+  pageStart: number;
+  pageEnd: number;
+  seriesLength: number;
+  cursorHovered: boolean;
+  previewSequence: number | null;
+  paletteMode: "light" | "dark";
+  bookmarks: InvestigationBookmark[];
+}): ChartMarkLine | undefined {
+  const bookmarkColor = params.paletteMode === "dark" ? "#C792EA" : "#6D28D9";
+  const data: Array<Record<string, unknown>> = [];
+
+  const cursorInView =
+    params.cursorSequence !== null &&
+    params.cursorSequence >= params.pageStart &&
+    params.cursorSequence < params.pageEnd;
+
+  if (cursorInView && params.seriesLength > 0) {
+    data.push({
+      xAxis: params.cursorSequence,
+      lineStyle: {
+        color: "#F59E0B",
+        width: params.cursorHovered || params.previewSequence !== null ? 4 : 2.5,
+        type: "solid",
+        opacity: 1,
+      },
+    });
+  }
+
+  for (const bookmark of params.bookmarks) {
+    if (
+      bookmark.sampleSequence < params.pageStart ||
+      bookmark.sampleSequence >= params.pageEnd
+    ) {
+      continue;
+    }
+
+    const label =
+      bookmark.title?.trim() ||
+      `Sample ${bookmark.sampleSequence.toLocaleString()}`;
+
+    data.push({
+      xAxis: bookmark.sampleSequence,
+      name: bookmark.bookmarkId,
+      bookmarkSequence: bookmark.sampleSequence,
+      silent: false,
+      lineStyle: {
+        color: bookmarkColor,
+        width: 1.5,
+        type: "dashed",
+        opacity: 0.85,
+      },
+      label: { show: false },
+      emphasis: {
+        label: {
+          show: true,
+          formatter: label,
+          color: bookmarkColor,
+          fontSize: 10,
+        },
+        lineStyle: {
+          width: 2.5,
+          opacity: 1,
+        },
+      },
+    });
+  }
+
+  if (data.length === 0) {
+    return undefined;
+  }
+
+  return {
+    silent: true,
+    symbol: "none",
+    animation: false,
+    label: { show: false },
+    data,
+  };
+}
 
 interface RecordingChartProps {
   sessionId: string;
@@ -64,6 +155,7 @@ interface RecordingChartProps {
     title?: string;
     annotation?: string;
   }) => void;
+  investigationBookmarks?: InvestigationBookmark[];
 }
 
 type HoverDetails = {
@@ -421,6 +513,7 @@ export function RecordingChart({
   onOpenBreakpointDialog,
   onCreateBreakpointAtSample,
   onQuickBookmarkSample,
+  investigationBookmarks = [],
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -601,6 +694,8 @@ export function RecordingChart({
   // Keep the latest callback and sample range accessible
   // without re-registering chart listeners on each render.
   const onSeekRef = useRef(onSeek);
+  const investigationBookmarksRef = useRef(investigationBookmarks);
+  investigationBookmarksRef.current = investigationBookmarks;
   const onScrubStartRef = useRef(onScrubStart);
   const onScrubEndRef = useRef(onScrubEnd);
   const samplesRef = useRef(samples);
@@ -609,6 +704,11 @@ export function RecordingChart({
   const selectedIdsRef = useRef(selectedChannelIds);
   const rightAxisSetRef = useRef(rightAxisSet);
   const hasRightAxisRef = useRef(hasRightAxis);
+  const pageWindowRef = useRef({ pageStart, pageEnd });
+  const cursorUiRef = useRef({ cursorHovered, previewSequence, paletteMode: theme.palette.mode });
+
+  pageWindowRef.current = { pageStart, pageEnd };
+  cursorUiRef.current = { cursorHovered, previewSequence, paletteMode: theme.palette.mode };
 
   onSeekRef.current = onSeek;
   onScrubStartRef.current = onScrubStart;
@@ -772,6 +872,15 @@ export function RecordingChart({
   };
 
   const lineWidth = getLineWidth(samples.length);
+
+  const visibleInvestigationBookmarkCount = useMemo(
+    () =>
+      investigationBookmarks.filter(
+        (item) =>
+          item.sampleSequence >= pageStart && item.sampleSequence < pageEnd,
+      ).length,
+    [investigationBookmarks, pageStart, pageEnd],
+  );
 
   const showAxisRangeWarning = useMemo(() => {
     if (samples.length === 0) return false;
@@ -976,28 +1085,20 @@ export function RecordingChart({
       },
     });
 
-    // The cursor position comes from backend replay state.
-    // Attach it to the first visible telemetry series.
     const cursorSequence = previewSequence ?? currentSequence;
-    const replayCursor =
-      cursorSequence === null ||
-      cursorSequence < pageStart ||
-      cursorSequence >= pageEnd ||
+    const seriesMarkLine =
       series.length === 0
         ? undefined
-        : {
-            silent: true,
-            symbol: "none",
-            animation: false,
-            label: { show: false },
-            lineStyle: {
-              color: "#F59E0B",
-              width: cursorHovered || previewSequence !== null ? 4 : 2.5,
-              type: "solid" as const,
-              opacity: 1,
-            },
-            data: [{ xAxis: cursorSequence }],
-          };
+        : buildFirstSeriesMarkLine({
+            cursorSequence,
+            pageStart,
+            pageEnd,
+            seriesLength: series.length,
+            cursorHovered,
+            previewSequence,
+            paletteMode: theme.palette.mode,
+            bookmarks: investigationBookmarks,
+          });
 
     const noDataWindows = findNoDataWindows(samples, series.map((item) => item.id));
     const noDataArea = noDataWindows.length === 0 ? undefined : {
@@ -1021,7 +1122,7 @@ export function RecordingChart({
 
     const chartSeries = series.map((item, index) =>
       index === 0
-        ? { ...item, ...(replayCursor ? { markLine: replayCursor } : {}),
+        ? { ...item, ...(seriesMarkLine ? { markLine: seriesMarkLine } : {}),
             ...(noDataArea ? { markArea: noDataArea } : {}) }
         : item,
     );
@@ -1184,6 +1285,7 @@ export function RecordingChart({
       pageStart,
       pageEnd,
       theme.palette.mode,
+      investigationBookmarks,
   ]);
 
   // Follow replay within a zoomed viewport without changing the zoom width.
@@ -1386,25 +1488,40 @@ export function RecordingChart({
     // Restore the visible markLine immediately, including a no-op drag.
     const restoredChart = chartRef.current?.getEchartsInstance();
     const restoredSeriesId = (option.series[0] as { id?: string } | undefined)?.id;
+    const restoreMarkLine = (
+      chart: EChartsType | undefined,
+      seriesId: string | undefined,
+      cursorSequence: number | null,
+    ) => {
+      if (!chart || chart.isDisposed() || !seriesId) return;
+      const { pageStart: ps, pageEnd: pe } = pageWindowRef.current;
+      const ui = cursorUiRef.current;
+      const markLine = buildFirstSeriesMarkLine({
+        cursorSequence,
+        pageStart: ps,
+        pageEnd: pe,
+        seriesLength: 1,
+        cursorHovered: ui.cursorHovered,
+        previewSequence: ui.previewSequence,
+        paletteMode: ui.paletteMode,
+        bookmarks: investigationBookmarksRef.current,
+      });
+      chart.setOption({
+        series: [{
+          id: seriesId,
+          markLine: markLine ?? { data: [] },
+        }],
+      });
+    };
+
     if (restoredChart && !restoredChart.isDisposed() && restoredSeriesId && sequence !== null) {
-      restoredChart.setOption({ series: [{ id: restoredSeriesId, markLine: {
-        data: [{ xAxis: sequence }], silent: true, symbol: "none",
-        animation: false, label: { show: false },
-        lineStyle: { color: "#F59E0B", width: 2.5, type: "solid" },
-      } }] });
+      restoreMarkLine(restoredChart, restoredSeriesId, sequence);
     }
     if (cancelled) {
       // Restore the original cursor after cancellation without seeking.
       const chart = chartRef.current?.getEchartsInstance();
       const firstSeriesId = (option.series[0] as { id?: string } | undefined)?.id;
-      if (chart && !chart.isDisposed() && firstSeriesId && currentSequence !== null) {
-        chart.setOption({ series: [{ id: firstSeriesId, markLine: {
-          data: [{ xAxis: currentSequence }],
-          silent: true, symbol: "none", animation: false,
-          label: { show: false },
-          lineStyle: { color: "#F59E0B", width: 2.5, type: "solid" },
-        } }] });
-      }
+      restoreMarkLine(chart, firstSeriesId, currentSequence);
       if (cursorHandleRef.current && cursorLabelX !== null) {
         renderDragPosition(cursorLabelX, currentSequence ?? 0);
       }
@@ -1691,6 +1808,18 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             notMerge={false}
             replaceMerge={["series", "yAxis", "xAxis", "grid"]}
             onChartReady={handleChartReady}
+            onEvents={{
+              click: (params: {
+                componentType?: string;
+                data?: { bookmarkSequence?: number };
+              }) => {
+                if (params.componentType !== "markLine") return;
+                const sequence = params.data?.bookmarkSequence;
+                if (sequence == null || !Number.isFinite(sequence)) return;
+                manualPageRef.current = false;
+                onSeekRef.current(sequence);
+              },
+            }}
             style={{
               height: "100%",
               width: "100%",
@@ -1924,6 +2053,9 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           <Typography variant="caption" color="text.secondary" noWrap>
             Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
             {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
+            {visibleInvestigationBookmarkCount > 0
+              ? ` · ${visibleInvestigationBookmarkCount} bookmark${visibleInvestigationBookmarkCount === 1 ? "" : "s"} (dashed violet — click to seek)`
+              : ""}
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>

@@ -29,6 +29,7 @@ import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
 import { tryQuickBookmark } from "../investigations/quickBookmark";
+import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
@@ -911,6 +912,11 @@ export function RecordingDashboard({
     ? loadInvestigationSelection(session.recordingName)
     : null;
 
+  const chartInvestigationBookmarks = useActiveInvestigationBookmarks(
+    session?.recordingName ?? null,
+    bookmarkRevision,
+  );
+
   const handleCreateCompositeBreakpoint = async (
     request: CreateCompositeBreakpointRequest,
   ) => {
@@ -1098,6 +1104,7 @@ export function RecordingDashboard({
             onOpenBreakpointDialog={handleOpenBreakpointDialog}
             onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
             onQuickBookmarkSample={(payload) => void handleQuickBookmark(payload)}
+            investigationBookmarks={chartInvestigationBookmarks}
           />
         </Box>
       ) : (
