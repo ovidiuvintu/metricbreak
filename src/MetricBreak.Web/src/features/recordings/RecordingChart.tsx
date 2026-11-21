@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   type PointerEvent,
@@ -166,6 +167,40 @@ export function RecordingChart({
       : [...previous, id]);
   };
   const [samples, setSamples] = useState<SampleRangeItem[]>([]);
+  // Keep the current page and its immediate neighbors ready for instant navigation.
+  // The cache is session-scoped and bounded to avoid retaining entire recordings.
+  const pageCacheRef = useRef(new Map<string, SampleRangeItem[]>());
+  const pendingPagesRef = useRef(new Map<string, Promise<SampleRangeItem[]>>());
+  const cacheSessionRef = useRef(sessionId);
+  if (cacheSessionRef.current !== sessionId) {
+    cacheSessionRef.current = sessionId;
+    pageCacheRef.current.clear();
+    pendingPagesRef.current.clear();
+  }
+  const pageKey = (start: number) => `${sessionId}:${sampleCount}:${start}`;
+  const requestPage = (start: number): Promise<SampleRangeItem[]> => {
+    const key = pageKey(start);
+    const cached = pageCacheRef.current.get(key);
+    if (cached) return Promise.resolve(cached);
+    const existing = pendingPagesRef.current.get(key);
+    if (existing) return existing;
+    const promise = recordingApi.getSamples(sessionId, start, Math.min(PAGE_SIZE, sampleCount - start))
+      .then((result) => {
+        // A previous session's request must never repopulate the current cache.
+        if (cacheSessionRef.current === sessionId) {
+          pageCacheRef.current.set(key, result.samples);
+          // Only retain a small sliding window around the active page.
+          if (pageCacheRef.current.size > 5) {
+            const oldest = pageCacheRef.current.keys().next().value;
+            if (oldest !== undefined) pageCacheRef.current.delete(oldest);
+          }
+        }
+        return result.samples;
+      })
+      .finally(() => { pendingPagesRef.current.delete(key); });
+    pendingPagesRef.current.set(key, promise);
+    return promise;
+  };
   const [pageIndex, setPageIndex] = useState(0);
   const pageCount = Math.ceil(sampleCount / PAGE_SIZE);
   const activePage = Math.min(pageIndex, Math.max(0, pageCount - 1));
@@ -368,37 +403,50 @@ export function RecordingChart({
     );
   }, [sessionId, currentSequence, sampleCount, previewSequence]);
 
-  useEffect(() => {
+  // Layout effect applies prefetched data before the browser paints a new page.
+  // Uncached pages still show the existing loading indicator.
+  useLayoutEffect(() => {
     let cancelled = false;
-    setSamples([]);
     setHover(null);
+    setInspectedSample(null);
+    setCursorLabelX(null);
 
     if (sampleCount <= 0 || pageStart >= sampleCount) {
+      setSamples([]);
       setLoading(false);
       setError("");
       return;
     }
 
-    async function loadSamples() {
+    const cached = pageCacheRef.current.get(pageKey(pageStart));
+    if (cached) {
+      setSamples(cached);
+      setLoading(false);
+      setError("");
+    } else {
+      setSamples([]);
       setLoading(true);
       setError("");
-      try {
-        const result = await recordingApi.getSamples(
-          sessionId,
-          pageStart,
-          Math.min(PAGE_SIZE, sampleCount - pageStart),
-        );
-        if (!cancelled) setSamples(result.samples);
-      } catch (caught) {
+      void requestPage(pageStart).then((loaded) => {
+        if (!cancelled) {
+          setSamples(loaded);
+          setLoading(false);
+        }
+      }).catch((caught) => {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Unable to load recording samples.");
+          setLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      });
     }
 
-    void loadSamples();
+    // Prefetch both directions. This is a data-only optimization: replay
+    // position, breakpoint behavior, and manual page selection are unchanged.
+    for (const neighbor of [pageStart - PAGE_SIZE, pageStart + PAGE_SIZE]) {
+      if (neighbor >= 0 && neighbor < sampleCount) {
+        void requestPage(neighbor).catch(() => { /* Retry on actual navigation. */ });
+      }
+    }
     return () => { cancelled = true; };
   }, [sessionId, pageStart, sampleCount]);
 
@@ -784,7 +832,7 @@ export function RecordingChart({
         // Move the existing DOM handle immediately; don't depend on a React
         // render to synchronize with the chart's newly positioned markLine.
         if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${pixel}px`;
-        setCursorLabelX((previous) => previous === pixel ? previous : pixel);
+        setCursorLabelX(pixel);
       } catch {
         setCursorLabelX(null);
       }
