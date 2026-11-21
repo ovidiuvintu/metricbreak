@@ -1,5 +1,6 @@
 using MetricBreak.Api.Recordings;
 using MetricBreak.Api.Sessions;
+using MetricBreak.Api.Workspaces;
 using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Api.Investigations;
@@ -7,21 +8,25 @@ namespace MetricBreak.Api.Investigations;
 public sealed class InvestigationOpenService
 {
     private readonly RecordingCatalogStore _catalog;
+    private readonly ProjectWorkspaceStore _projectStore;
     private readonly CsvRecordingImporter _importer;
     private readonly ReplaySessionManager _sessions;
 
     public InvestigationOpenService(
         RecordingCatalogStore catalog,
+        ProjectWorkspaceStore projectStore,
         CsvRecordingImporter importer,
         ReplaySessionManager sessions)
     {
         _catalog = catalog;
+        _projectStore = projectStore;
         _importer = importer;
         _sessions = sessions;
     }
 
     public bool TryOpen(
         ExportedInvestigation investigation,
+        Guid? projectId,
         out OpenInvestigationResponse? response,
         out string? error)
     {
@@ -30,15 +35,32 @@ public sealed class InvestigationOpenService
 
         investigation = InvestigationDocumentNormalizer.Normalize(investigation);
 
-        if (!TryResolveCatalogEntry(investigation, out var catalogEntry)
-            || catalogEntry is null)
+        string archivePath;
+        Guid importRecordingId;
+
+        if (projectId is Guid selectedProjectId
+            && _projectStore.TryGetRecordingArchivePath(
+                selectedProjectId,
+                investigation,
+                out var projectArchivePath,
+                out _))
+        {
+            archivePath = projectArchivePath!;
+            importRecordingId = investigation.Recording.RecordingId;
+        }
+        else if (TryResolveCatalogEntry(investigation, out var catalogEntry)
+            && catalogEntry is not null)
+        {
+            archivePath = _catalog.GetArchiveFilePath(catalogEntry);
+            importRecordingId = catalogEntry.RecordingId;
+        }
+        else
         {
             error =
                 "Recording is not in the local catalog. Import the CSV once before opening this investigation.";
             return false;
         }
 
-        var archivePath = _catalog.GetArchiveFilePath(catalogEntry);
         if (!File.Exists(archivePath))
         {
             error = "Recording archive file is missing.";
@@ -51,7 +73,9 @@ public sealed class InvestigationOpenService
             imported = _importer.Import(
                 archivePath,
                 mapping: null,
-                recordingId: catalogEntry.RecordingId);
+                recordingId: importRecordingId != Guid.Empty
+                    ? importRecordingId
+                    : null);
         }
         catch (Exception exception) when (
             exception is ArgumentException or FormatException or InvalidDataException)

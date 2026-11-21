@@ -37,6 +37,14 @@ public sealed class MetricBreakApiFactory
     public ReplaySessionManager SessionManager =>
         Services.GetRequiredService<ReplaySessionManager>();
 
+    public void ClearRecordingCatalog()
+    {
+        if (File.Exists(_catalogPath))
+        {
+            File.Delete(_catalogPath);
+        }
+    }
+
     protected override void ConfigureWebHost(
         IWebHostBuilder builder)
     {

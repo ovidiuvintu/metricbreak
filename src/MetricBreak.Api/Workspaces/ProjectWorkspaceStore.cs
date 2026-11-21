@@ -2,12 +2,12 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using MetricBreak.Api.Investigations;
 using MetricBreak.Api.Persistence;
-
 namespace MetricBreak.Api.Workspaces;
 
 public sealed class ProjectWorkspaceStore
 {
-    private const int _manifestSchemaVersion = 1;
+    private const int _manifestSchemaVersion = 2;
+    private const int _minimumManifestSchemaVersion = 1;
 
     private static readonly JsonSerializerOptions _jsonOptions =
         new()
@@ -154,6 +154,7 @@ public sealed class ProjectWorkspaceStore
 
         Directory.CreateDirectory(GetProjectDirectory(fullRootPath));
         Directory.CreateDirectory(GetInvestigationsDirectory(fullRootPath));
+        Directory.CreateDirectory(GetRecordingsDirectory(fullRootPath));
 
         var now = DateTimeOffset.UtcNow;
 
@@ -163,7 +164,8 @@ public sealed class ProjectWorkspaceStore
             ProjectName: projectName,
             CreatedAtUtc: now,
             UpdatedAtUtc: now,
-            Investigations: Array.Empty<ProjectInvestigationIndexItem>());
+            Investigations: Array.Empty<ProjectInvestigationIndexItem>(),
+            Recordings: Array.Empty<ProjectRecordingIndexItem>());
 
         SaveManifest(fullRootPath, manifest);
 
@@ -303,8 +305,9 @@ public sealed class ProjectWorkspaceStore
 
         var updatedManifest = manifest with
         {
+            SchemaVersion = _manifestSchemaVersion,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
-            Investigations = updatedItems
+            Investigations = updatedItems,
         };
 
         // Step 3: Commit by publishing the manifest.
@@ -420,6 +423,200 @@ public sealed class ProjectWorkspaceStore
         }
     }
 
+    public bool TryEnsureRecordingArchive(
+        Guid projectId,
+        Guid recordingId,
+        string sourceContentHash,
+        long sourceSizeInBytes,
+        string sourceName,
+        string workspaceArchivePath,
+        out ProjectStoreError? error)
+    {
+        error = null;
+
+        if (recordingId == Guid.Empty)
+        {
+            error = new ProjectStoreError(
+                "InvalidRecordingId",
+                "Recording ID cannot be empty.");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(workspaceArchivePath) || !File.Exists(workspaceArchivePath))
+        {
+            error = new ProjectStoreError(
+                "RecordingArchiveMissing",
+                "Workspace recording archive was not found.");
+            return false;
+        }
+
+        if (!_projectRoots.TryGetValue(projectId, out var rootPath))
+        {
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
+            return false;
+        }
+
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
+            || manifest is null)
+        {
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
+            return false;
+        }
+
+        var relativePath = CreateRecordingRelativePath(recordingId);
+        var destinationPath = Path.Combine(
+            GetProjectDirectory(rootPath),
+            relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        var existing = manifest.Recordings
+            .FirstOrDefault(item => item.RecordingId == recordingId);
+
+        if (existing is not null
+            && File.Exists(destinationPath)
+            && string.Equals(
+                existing.SourceContentHash,
+                sourceContentHash,
+                StringComparison.OrdinalIgnoreCase)
+            && existing.SourceSizeInBytes == sourceSizeInBytes)
+        {
+            return true;
+        }
+
+        Directory.CreateDirectory(GetRecordingsDirectory(rootPath));
+
+        try
+        {
+            File.Copy(workspaceArchivePath, destinationPath, overwrite: true);
+        }
+        catch (IOException)
+        {
+            error = new ProjectStoreError(
+                "RecordingArchiveFailed",
+                "Recording could not be copied into the project.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = new ProjectStoreError(
+                "RecordingArchiveFailed",
+                "Access to project recording storage was denied.");
+            return false;
+        }
+
+        var updatedRecordings = manifest.Recordings
+            .Where(item => item.RecordingId != recordingId)
+            .ToList();
+
+        updatedRecordings.Add(new ProjectRecordingIndexItem(
+            RecordingId: recordingId,
+            RelativePath: relativePath,
+            SourceName: string.IsNullOrWhiteSpace(sourceName)
+                ? Path.GetFileName(workspaceArchivePath)
+                : sourceName,
+            SourceContentHash: sourceContentHash,
+            SourceSizeInBytes: sourceSizeInBytes,
+            ArchivedAtUtc: DateTimeOffset.UtcNow));
+
+        var updatedManifest = manifest with
+        {
+            SchemaVersion = _manifestSchemaVersion,
+            UpdatedAtUtc = DateTimeOffset.UtcNow,
+            Recordings = updatedRecordings,
+        };
+
+        try
+        {
+            SaveManifest(rootPath, updatedManifest);
+        }
+        catch (IOException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Recording was archived, but the project manifest could not be updated.");
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = new ProjectStoreError(
+                "ManifestWriteFailed",
+                "Access to project manifest storage was denied.");
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool TryGetRecordingArchivePath(
+        Guid projectId,
+        ExportedInvestigation investigation,
+        out string? archivePath,
+        out ProjectStoreError? error)
+    {
+        archivePath = null;
+        error = null;
+
+        if (!_projectRoots.TryGetValue(projectId, out var rootPath))
+        {
+            error = new ProjectStoreError(
+                "ProjectNotOpen",
+                "Project is not open in the current workspace.");
+            return false;
+        }
+
+        if (!TryLoadManifest(
+                rootPath,
+                out var manifest,
+                out error)
+            || manifest is null)
+        {
+            error ??= new ProjectStoreError(
+                "ManifestLoadFailed",
+                "Project manifest could not be loaded.");
+            return false;
+        }
+
+        var recording = investigation.Recording;
+        var indexItem = manifest.Recordings.FirstOrDefault(item =>
+                item.RecordingId == recording.RecordingId
+                && recording.RecordingId != Guid.Empty)
+            ?? manifest.Recordings.FirstOrDefault(item =>
+                string.Equals(
+                    item.SourceContentHash,
+                    recording.SourceContentHash,
+                    StringComparison.OrdinalIgnoreCase)
+                && item.SourceSizeInBytes == recording.SourceSizeInBytes);
+
+        if (indexItem is null)
+        {
+            error = new ProjectStoreError(
+                "ProjectRecordingNotFound",
+                "Recording is not archived in this project.");
+            return false;
+        }
+
+        var fullPath = Path.Combine(
+            GetProjectDirectory(rootPath),
+            indexItem.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        if (!File.Exists(fullPath))
+        {
+            error = new ProjectStoreError(
+                "ProjectRecordingMissing",
+                "Project recording file is missing.");
+            return false;
+        }
+
+        archivePath = fullPath;
+        return true;
+    }
+
     public bool TryListInvestigations(
         Guid projectId,
         out IReadOnlyList<ProjectInvestigationItemResponse>? investigations,
@@ -483,9 +680,26 @@ public sealed class ProjectWorkspaceStore
 
         try
         {
-            manifest = JsonSerializer.Deserialize<ProjectManifest>(
+            var storage = JsonSerializer.Deserialize<ProjectManifestStorage>(
                 json,
                 _jsonOptions);
+
+            if (storage is null)
+            {
+                error = new ProjectStoreError(
+                    "ManifestCorrupt",
+                    "Project manifest could not be parsed.");
+                return false;
+            }
+
+            manifest = new ProjectManifest(
+                storage.SchemaVersion,
+                storage.ProjectId,
+                storage.ProjectName,
+                storage.CreatedAtUtc,
+                storage.UpdatedAtUtc,
+                storage.Investigations ?? [],
+                storage.Recordings ?? []);
         }
         catch (JsonException)
         {
@@ -503,7 +717,8 @@ public sealed class ProjectWorkspaceStore
             return false;
         }
 
-        if (manifest.SchemaVersion != _manifestSchemaVersion)
+        if (manifest.SchemaVersion < _minimumManifestSchemaVersion
+            || manifest.SchemaVersion > _manifestSchemaVersion)
         {
             error = new ProjectStoreError(
                 "UnsupportedManifestSchema",
@@ -531,6 +746,17 @@ public sealed class ProjectWorkspaceStore
     private static string GetInvestigationsDirectory(string rootPath)
     {
         return Path.Combine(GetProjectDirectory(rootPath), "investigations");
+    }
+
+    private static string GetRecordingsDirectory(string rootPath)
+    {
+        return Path.Combine(GetProjectDirectory(rootPath), "recordings");
+    }
+
+    private static string CreateRecordingRelativePath(Guid recordingId)
+    {
+        return Path.Combine("recordings", $"{recordingId:N}.csv")
+            .Replace('\\', '/');
     }
 
     private static string GetManifestPath(string rootPath)
@@ -567,6 +793,15 @@ public sealed class ProjectWorkspaceStore
             $"{investigationId:N}-{revisionId:N}.json");
     }
 
+
+    private sealed record ProjectManifestStorage(
+        int SchemaVersion,
+        Guid ProjectId,
+        string ProjectName,
+        DateTimeOffset CreatedAtUtc,
+        DateTimeOffset UpdatedAtUtc,
+        IReadOnlyList<ProjectInvestigationIndexItem>? Investigations,
+        IReadOnlyList<ProjectRecordingIndexItem>? Recordings);
 
     private sealed record WorkspaceState(string LastProjectRootPath);
 }

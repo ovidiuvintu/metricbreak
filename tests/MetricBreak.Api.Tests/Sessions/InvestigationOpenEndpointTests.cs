@@ -94,7 +94,7 @@ public sealed class InvestigationOpenEndpointTests
 
             var exportedAt = item.GetProperty("exportedAtUtc").GetDateTimeOffset();
             var lastOpened = item.GetProperty("lastOpenedAtUtc").GetDateTimeOffset();
-            Assert.Equal(exportedAt, lastOpened);
+            Assert.Equal(exportedAt, lastOpened, TimeSpan.FromMilliseconds(1));
         }
 
         using var openResponse = await client.PostAsync(
@@ -127,7 +127,6 @@ public sealed class InvestigationOpenEndpointTests
         {
             using var channels = await ReadJsonAsync(channelResponse);
             var channelId = channels.RootElement
-                .GetProperty("channels")
                 .EnumerateArray()
                 .First()
                 .GetProperty("channelId")

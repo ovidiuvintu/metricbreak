@@ -1,6 +1,7 @@
 
 using Microsoft.AspNetCore.Mvc;
 using MetricBreak.Api.Investigations;
+using MetricBreak.Api.Recordings;
 using MetricBreak.Api.Sessions;
 using MetricBreak.Api.Workspaces;
 
@@ -100,6 +101,7 @@ internal static class InvestigationEndpoints
 
                 if (!investigationOpen.TryOpen(
                         investigation!,
+                        projectId,
                         out var response,
                         out var openError)
                     || response is null)
@@ -147,7 +149,8 @@ internal static class InvestigationEndpoints
                 [FromBody] ExportInvestigationRequest? request,
                 ReplaySessionManager manager,
                 SessionInvestigationStore store,
-                ProjectWorkspaceStore projectStore) =>
+                ProjectWorkspaceStore projectStore,
+                RecordingCatalogStore catalog) =>
             {
                 var exportRequest = request ?? new ExportInvestigationRequest();
                 if (projectId is Guid queryProjectId)
@@ -193,6 +196,33 @@ internal static class InvestigationEndpoints
                             error ?? new ProjectStoreError(
                                 "InvestigationSaveFailed",
                                 "Unable to save investigation to project.")));
+                    }
+
+                    if (!TryResolveCatalogArchivePath(
+                            catalog,
+                            investigation,
+                            out var workspaceArchivePath)
+                        || workspaceArchivePath is null)
+                    {
+                        return Results.BadRequest(ToErrorBody(
+                            new ProjectStoreError(
+                                "RecordingArchiveMissing",
+                                "Recording must be in the workspace catalog before saving to a project.")));
+                    }
+
+                    if (!projectStore.TryEnsureRecordingArchive(
+                            resolvedProjectId,
+                            investigation.Recording.RecordingId,
+                            investigation.Recording.SourceContentHash,
+                            investigation.Recording.SourceSizeInBytes,
+                            investigation.Recording.SourceName,
+                            workspaceArchivePath,
+                            out var archiveError))
+                    {
+                        return Results.BadRequest(ToErrorBody(
+                            archiveError ?? new ProjectStoreError(
+                                "RecordingArchiveFailed",
+                                "Unable to archive recording in the project.")));
                     }
 
                     filePath = projectPath;
@@ -479,6 +509,35 @@ internal static class InvestigationEndpoints
             ErrorCode = error.Code,
             Error = error.Message
         };
+    }
+
+    private static bool TryResolveCatalogArchivePath(
+        RecordingCatalogStore catalog,
+        ExportedInvestigation investigation,
+        out string? archivePath)
+    {
+        archivePath = null;
+        var recording = investigation.Recording;
+
+        if (recording.RecordingId != Guid.Empty
+            && catalog.TryGet(recording.RecordingId, out var byId)
+            && byId is not null)
+        {
+            archivePath = catalog.GetArchiveFilePath(byId);
+            return true;
+        }
+
+        if (catalog.TryFindBySource(
+                recording.SourceContentHash,
+                recording.SourceSizeInBytes,
+                out var bySource)
+            && bySource is not null)
+        {
+            archivePath = catalog.GetArchiveFilePath(bySource);
+            return true;
+        }
+
+        return false;
     }
 
     private static ExportedInvestigation? LoadPriorInvestigation(

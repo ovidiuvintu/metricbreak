@@ -114,6 +114,79 @@ public sealed class ProjectWorkspaceEndpointTests
     }
 
     [Fact]
+    public async Task OpenProjectInvestigation_WorksAfterWorkspaceCatalogCleared()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        var rootPath = Path.Combine(
+            Path.GetTempPath(),
+            "metricbreak-project-recording-archive",
+            Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(rootPath);
+
+        try
+        {
+            Guid projectId;
+
+            using (var createProjectResponse = await client.PostAsJsonAsync(
+                       "/api/projects",
+                       new
+                       {
+                           projectName = "Archive Test",
+                           rootPath,
+                       }))
+            {
+                Assert.Equal(HttpStatusCode.Created, createProjectResponse.StatusCode);
+                using var json = await ReadJsonAsync(createProjectResponse);
+                projectId = json.RootElement.GetProperty("projectId").GetGuid();
+            }
+
+            using (var openResponse = await client.PostAsJsonAsync(
+                       "/api/projects/open",
+                       new { rootPath }))
+            {
+                Assert.Equal(HttpStatusCode.OK, openResponse.StatusCode);
+            }
+
+            var sessionId = await CreateSessionAsync(client);
+
+            Guid investigationId;
+
+            using (var exportResponse = await client.PostAsync(
+                       $"/api/sessions/{sessionId}/export?projectId={projectId}",
+                       content: null))
+            {
+                Assert.Equal(HttpStatusCode.Created, exportResponse.StatusCode);
+                using var json = await ReadJsonAsync(exportResponse);
+                investigationId = json.RootElement.GetProperty("investigationId").GetGuid();
+            }
+
+            var recordingsDir = Path.Combine(rootPath, ".metricbreak", "recordings");
+            Assert.True(Directory.Exists(recordingsDir));
+            Assert.NotEmpty(Directory.GetFiles(recordingsDir, "*.csv"));
+
+            factory.ClearRecordingCatalog();
+
+            using var openInvestigation = await client.PostAsync(
+                $"/api/investigations/{investigationId}/open?projectId={projectId}&closeSessionId={sessionId}",
+                content: null);
+
+            var openBody = await openInvestigation.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.Created, openInvestigation.StatusCode);
+            Assert.Contains("sessionId", openBody, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(rootPath))
+            {
+                Directory.Delete(rootPath, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task OpenProjects_CloseProject_UpdatesOpenProjectList()
     {
         using var factory = new MetricBreakApiFactory();
@@ -531,6 +604,18 @@ public sealed class ProjectWorkspaceEndpointTests
                 Directory.Delete(rootPath, recursive: true);
             }
         }
+    }
+
+    private static async Task<Guid> CreateSessionAsync(HttpClient client)
+    {
+        using var createSessionResponse = await client.PostAsync(
+            "/api/sessions",
+            CreateCsvUploadContent(_csvContent, "recording.csv"));
+
+        Assert.Equal(HttpStatusCode.Created, createSessionResponse.StatusCode);
+
+        using var json = await ReadJsonAsync(createSessionResponse);
+        return json.RootElement.GetProperty("sessionId").GetGuid();
     }
 
     private static MultipartFormDataContent CreateImportContent(
