@@ -1021,9 +1021,9 @@ export function RecordingDashboard({
         variant="fullWidth"
         sx={{
           flexShrink: 0,
-          minHeight: 40,
+          minHeight: 34,
           "& .MuiTab-root": {
-            minHeight: 40,
+            minHeight: 34,
             minWidth: 0,
             px: 0.5,
             fontSize: "0.72rem",
@@ -1132,14 +1132,15 @@ export function RecordingDashboard({
         alignItems: "center",
         justifyContent: "space-between",
         gap: 2,
-        minHeight: 28,
-        px: 0.5,
+        minHeight: 22,
+        px: 0.25,
       }}
     >
       <Typography
         variant="caption"
         color="text.secondary"
         noWrap
+        sx={{ fontSize: "0.68rem" }}
       >
         {session
           ? `Session: ${session.sessionId}`
@@ -1242,7 +1243,7 @@ export function RecordingDashboard({
         }}
       >
         {(loadError || importSuccess) && (
-          <Box sx={{ flexShrink: 0, mb: 1 }}>
+          <Box sx={{ flexShrink: 0, mb: 0.5 }}>
             {loadError && (
               <Alert
                 severity="error"

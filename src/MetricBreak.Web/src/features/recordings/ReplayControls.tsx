@@ -52,7 +52,7 @@ export function ReplayControls({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: 2,
+        gap: 1,
         minHeight: 40,
       }}
     >

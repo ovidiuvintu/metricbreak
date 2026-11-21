@@ -252,7 +252,7 @@ export function InvestigationPanel({
         currentTimestampNanoseconds != null;
 
     return (
-        <Stack spacing={1.5} sx={{ width: "100%", minWidth: 0, p: 1.5 }}>
+        <Stack spacing={1} sx={{ width: "100%", minWidth: 0, p: 1 }}>
             <Typography variant="subtitle2">Investigation</Typography>
 
             {error && <Alert severity="error">{error}</Alert>}

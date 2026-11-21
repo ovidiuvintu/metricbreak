@@ -221,11 +221,11 @@ export function RecordingDebuggerDashboard({
                 overflow: "hidden",
                 display: "flex",
                 flexDirection: "column",
-                gap: 1.5,
+                gap: 1,
                 maxWidth: 900,
                 mx: "auto",
                 width: "100%",
-                py: 0.5,
+                py: 0.25,
             }}
         >
             <Box sx={{ flexShrink: 0 }}>
