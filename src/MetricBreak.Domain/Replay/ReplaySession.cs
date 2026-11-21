@@ -195,7 +195,8 @@ public sealed class ReplaySession
                 var hit = BreakpointEvaluator.EvaluateHit(
                     breakpoint,
                     _cursor.Position,
-                    sample);
+                    sample,
+                    _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null);
 
                 if (hit is not null)
                 {
@@ -344,7 +345,8 @@ public sealed class ReplaySession
                     var hit = BreakpointEvaluator.EvaluateHit(
                         breakpoint,
                         _cursor.Position,
-                        sample);
+                        sample,
+                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null);
 
                     if (hit is not null)
                         hits.Add(hit);
@@ -407,7 +409,8 @@ public sealed class ReplaySession
                 var hits = new List<BreakpointHit>();
                 foreach (var breakpoint in active)
                 {
-                    var hit = BreakpointEvaluator.EvaluateHit(breakpoint, _cursor.Position, sample);
+                    var hit = BreakpointEvaluator.EvaluateHit(breakpoint, _cursor.Position, sample,
+                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null);
                     if (hit is not null)
                         hits.Add(hit);
                 }

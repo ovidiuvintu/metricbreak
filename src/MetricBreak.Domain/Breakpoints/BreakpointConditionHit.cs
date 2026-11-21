@@ -1,3 +1,5 @@
+using MetricBreak.Domain.Recordings;
+
 namespace MetricBreak.Domain.Breakpoints;
 
 /// <summary>
@@ -9,4 +11,7 @@ public sealed record BreakpointConditionHit(
     double? ObservedValue,
     ComparisonOperator Operator,
     double Threshold,
-    bool Matched);
+    bool Matched)
+{
+    public ChannelValue? TypedObservedValue { get; init; }
+}

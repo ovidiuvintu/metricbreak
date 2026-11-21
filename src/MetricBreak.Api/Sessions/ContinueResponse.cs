@@ -18,4 +18,8 @@ public sealed record BreakpointHitResponse(
     Guid ChannelId,
     double ObservedValue,
     string Operator,
-    double Threshold);
+    double Threshold)
+{
+    public string? ObservedValueType { get; init; }
+    public string? ObservedText { get; init; }
+}

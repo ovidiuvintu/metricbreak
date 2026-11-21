@@ -1,4 +1,5 @@
 using MetricBreak.Domain.Breakpoints;
+using MetricBreak.Domain.Recordings;
 
 namespace MetricBreak.Api.Sessions;
 
@@ -27,7 +28,23 @@ public static class ContinueResponseMapper
                 ChannelId: hit.ChannelId,
                 ObservedValue: hit.ObservedValue,
                 Operator: hit.Operator.ToString(),
-                Threshold: hit.Threshold);
+                Threshold: hit.Threshold)
+            {
+                ObservedValueType = hit.TypedObservedValue switch
+                {
+                    ChannelValue.Numeric => "Numeric",
+                    ChannelValue.Boolean => "Boolean",
+                    ChannelValue.Categorical => "Categorical",
+                    _ => null
+                },
+                ObservedText = hit.TypedObservedValue switch
+                {
+                    ChannelValue.Numeric n => n.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ChannelValue.Boolean b => b.Value ? "true" : "false",
+                    ChannelValue.Categorical c => c.Value,
+                    _ => null
+                }
+            };
         }
 
         var representativeCondition = hit.Conditions
@@ -39,6 +56,22 @@ public static class ContinueResponseMapper
             ChannelId: representativeCondition.ChannelId,
             ObservedValue: representativeCondition.ObservedValue ?? 0d,
             Operator: representativeCondition.Operator.ToString(),
-            Threshold: representativeCondition.Threshold);
+            Threshold: representativeCondition.Threshold)
+        {
+            ObservedValueType = representativeCondition.TypedObservedValue switch
+            {
+                ChannelValue.Numeric => "Numeric",
+                ChannelValue.Boolean => "Boolean",
+                ChannelValue.Categorical => "Categorical",
+                _ => null
+            },
+            ObservedText = representativeCondition.TypedObservedValue switch
+            {
+                ChannelValue.Numeric n => n.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ChannelValue.Boolean b => b.Value ? "true" : "false",
+                ChannelValue.Categorical c => c.Value,
+                _ => null
+            }
+        };
     }
 }

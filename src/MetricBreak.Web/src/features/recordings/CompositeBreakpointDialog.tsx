@@ -30,6 +30,9 @@ const operators: { value: ComparisonOperator; label: string }[] = [
   { value: "LessThanOrEqual", label: "<=" },
   { value: "Equal", label: "==" },
   { value: "NotEqual", label: "!=" },
+  { value: "Changed", label: "Changed" },
+  { value: "RisingEdge", label: "Rising Edge" },
+  { value: "FallingEdge", label: "Falling Edge" },
 ];
 
 export function CompositeBreakpointDialog({
@@ -55,14 +58,14 @@ export function CompositeBreakpointDialog({
 
   const valid = conditions.length >= 2 && conditions.every(c =>
     channels.some(channel => channel.channelId === c.channelId) &&
-    c.threshold.trim() !== "" && Number.isFinite(Number(c.threshold)));
+    ((channels.find(ch => ch.channelId === c.channelId)?.valueType ?? "Numeric") !== "Numeric" || c.operator === "Changed" || c.threshold.trim() !== "") && Number.isFinite(Number(c.threshold || "0")));
 
   const submit = async () => {
     if (!valid || busy) return;
     const parsed: BreakpointCondition[] = conditions.map(c => ({
       channelId: c.channelId,
       operator: c.operator,
-      threshold: Number(c.threshold),
+      threshold: Number(c.threshold || "0"),
     }));
     await onCreate({ logicalOperator, conditions: parsed });
   };
@@ -94,7 +97,7 @@ export function CompositeBreakpointDialog({
                 <FormControl fullWidth size="small">
                   <InputLabel id={`channel-${c.key}`}>Channel</InputLabel>
                   <Select labelId={`channel-${c.key}`} label="Channel" value={c.channelId}
-                    onChange={event => update(c.key, { channelId: event.target.value })} disabled={busy}>
+                    onChange={event => update(c.key, { channelId: event.target.value, operator: (channels.find(ch => ch.channelId === event.target.value)?.valueType ?? "Numeric") === "Numeric" ? c.operator : "Changed" })} disabled={busy}>
                     {channels.map(channel => (
                       <MenuItem key={channel.channelId} value={channel.channelId}>{channel.name}</MenuItem>
                     ))}
@@ -105,13 +108,16 @@ export function CompositeBreakpointDialog({
                     <InputLabel id={`operator-${c.key}`}>Operator</InputLabel>
                     <Select labelId={`operator-${c.key}`} label="Operator" value={c.operator}
                       onChange={event => update(c.key, { operator: event.target.value as ComparisonOperator })} disabled={busy}>
-                      {operators.map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
+                      {operators.filter(op => {
+                        const type = channels.find(ch => ch.channelId === c.channelId)?.valueType ?? "Numeric";
+                        return type === "Numeric" || (type === "Boolean" && ["Changed", "RisingEdge", "FallingEdge"].includes(op.value)) || (type === "Categorical" && op.value === "Changed");
+                      }).map(op => <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
                     </Select>
                   </FormControl>
-                  <TextField fullWidth size="small" label="Threshold" type="number"
+                  {(channels.find(ch => ch.channelId === c.channelId)?.valueType ?? "Numeric") === "Numeric" && c.operator !== "Changed" && <TextField fullWidth size="small" label="Threshold" type="number"
                     value={c.threshold} disabled={busy}
                     onChange={event => update(c.key, { threshold: event.target.value })}
-                    error={c.threshold.trim() !== "" && !Number.isFinite(Number(c.threshold))} />
+                    error={c.threshold.trim() !== "" && !Number.isFinite(Number(c.threshold))} />}
                 </Stack>
               </Stack>
             </Box>

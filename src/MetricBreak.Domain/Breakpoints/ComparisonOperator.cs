@@ -7,5 +7,8 @@ public enum ComparisonOperator
     LessThan,
     LessThanOrEqual,
     Equal,
-    NotEqual
+    NotEqual,
+    Changed,
+    RisingEdge,
+    FallingEdge
 }

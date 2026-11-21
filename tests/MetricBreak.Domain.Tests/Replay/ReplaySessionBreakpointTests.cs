@@ -238,4 +238,40 @@ public sealed class ReplaySessionBreakpointTests
             ReplayPauseReason.StartOfRecording,
             session.ExecutionState.PauseReason);
     }
+
+    [Fact]
+    public void RisingEdge_StopsOnlyAtActualCrossings_InBothDirections()
+    {
+        var session = CreateSession(90, 100, 105, 110, 98, 107, 108);
+        var breakpoint = new ConditionalBreakpoint(Guid.NewGuid(), _pressureChannelId,
+            ComparisonOperator.RisingEdge, 100);
+        var collection = new BreakpointCollection();
+        collection.Add(breakpoint);
+        Assert.Equal(2, session.RunToBreakpoints(collection)!.Position.SequenceNumber);
+        Assert.Equal(5, session.RunToBreakpoints(collection)!.Position.SequenceNumber);
+        session.Seek(6);
+        Assert.Equal(5, session.RunBackwardToBreakpoints(collection)!.Position.SequenceNumber);
+        Assert.Equal(2, session.RunBackwardToBreakpoints(collection)!.Position.SequenceNumber);
+    }
+
+    [Fact]
+    public void RisingEdge_DoesNotBridgeMissingValues()
+    {
+        var session = CreateSession(90, null, 110, 90, 101);
+        var breakpoint = new ConditionalBreakpoint(Guid.NewGuid(), _pressureChannelId,
+            ComparisonOperator.RisingEdge, 100);
+        Assert.True(session.RunToBreakpoint(breakpoint));
+        Assert.Equal(4, session.Position.SequenceNumber);
+    }
+
+    [Fact]
+    public void RisingEdge_WorksAcrossChartPageBoundary()
+    {
+        var samples = Enumerable.Repeat<double?>(90, 5000).Concat(new double?[] { 110 }).ToArray();
+        var session = CreateSession(samples);
+        var breakpoint = new ConditionalBreakpoint(Guid.NewGuid(), _pressureChannelId,
+            ComparisonOperator.RisingEdge, 100);
+        Assert.True(session.RunToBreakpoint(breakpoint));
+        Assert.Equal(5000, session.Position.SequenceNumber);
+    }
 }
