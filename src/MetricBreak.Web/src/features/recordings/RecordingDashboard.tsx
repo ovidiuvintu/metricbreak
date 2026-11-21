@@ -33,6 +33,9 @@ import {
 import { ImportRecordingDialog } from "./ImportRecordingDialog";
 import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
+import { RecordingTimelinePanel } from "./RecordingTimelinePanel";
+import { recordingTimelineApi } from "./recordingTimelineApi";
+import type { RecordingTimeline } from "./recordingTimelineTypes";
 import { BreakpointDialog, type BreakpointDialogDraft } from "./BreakpointDialog";
 import { CompositeBreakpointDialog } from "./CompositeBreakpointDialog";
 import { InvestigationPanel } from "../investigations/InvestigationPanel";
@@ -43,7 +46,9 @@ import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
 import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
+import { AppSettingsPanel } from "../../app/AppSettingsPanel";
 import { ProjectDashboard } from "../projects/ProjectDashboard";
+import type { PaletteMode } from "@mui/material";
 import { formatOpenInvestigationError } from "../investigations/formatOpenInvestigationError";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
@@ -71,7 +76,7 @@ import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 
-type InspectorTab = 0 | 1 | 2;
+type InspectorTab = 0 | 1 | 2 | 3;
 type PlaybackState = "stopped" | "playing" | "paused";
 
 type SessionNavigationAction =
@@ -94,6 +99,8 @@ interface RecordingDashboardProps {
     investigationId: string,
     projectId: string,
   ) => void;
+  themeMode?: PaletteMode;
+  onToggleTheme?: () => void;
 }
 
 export function RecordingDashboard({
@@ -102,6 +109,8 @@ export function RecordingDashboard({
   deepLinkInvestigation = null,
   onDeepLinkHandled,
   onInvestigationOpened,
+  themeMode = "light",
+  onToggleTheme,
 }: RecordingDashboardProps) {
   const { context, setRecordingSession, setActiveInvestigation } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
@@ -166,6 +175,10 @@ export function RecordingDashboard({
 
   const [inspectorTab, setInspectorTab] =
     useState<InspectorTab>(0);
+
+  const [recordingTimeline, setRecordingTimeline] =
+    useState<RecordingTimeline | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   const [previousSampleResult, setPreviousSampleResult] = useState<{
     sessionId: string;
@@ -309,6 +322,39 @@ export function RecordingDashboard({
     previousSampleResult.currentSequence === watchSequence
       ? previousSampleResult.sample
       : null;
+
+  useEffect(() => {
+    const sessionId = session?.sessionId;
+    if (!sessionId) {
+      setRecordingTimeline(null);
+      return;
+    }
+
+    let cancelled = false;
+    setTimelineLoading(true);
+
+    void recordingTimelineApi
+      .getForSession(sessionId)
+      .then((timeline) => {
+        if (!cancelled) {
+          setRecordingTimeline(timeline);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecordingTimeline({ events: [], stages: [] });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setTimelineLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.sessionId]);
 
   // --------------------------------------------------
   // Recording loading
@@ -1274,6 +1320,8 @@ export function RecordingDashboard({
             onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
             onQuickBookmarkSample={(payload) => void handleQuickBookmark(payload)}
             investigationBookmarks={chartInvestigationBookmarks}
+            timelineEvents={recordingTimeline?.events ?? []}
+            timelineStages={recordingTimeline?.stages ?? []}
             viewportFocusRequestId={viewportFocusRequestId}
             viewportFocusSequence={viewportFocusSequence}
             restoreChartViewport={restoreChartViewport}
@@ -1366,6 +1414,7 @@ export function RecordingDashboard({
         <Tab label="Channels" />
         <Tab label="Breakpoints" />
         <Tab label="Values" />
+        <Tab label="Timeline" />
       </Tabs>
 
       <Box
@@ -1460,6 +1509,27 @@ export function RecordingDashboard({
             No current sample available.
           </Typography>
         )}
+      </Box>
+
+      <Box
+        role="tabpanel"
+        hidden={inspectorTab !== 3}
+        sx={{
+          flex: "1 1 0%",
+          minHeight: 0,
+          overflowY: "auto",
+          overflowX: "hidden",
+          scrollbarGutter: "stable",
+          overscrollBehavior: "contain",
+          display: inspectorTab === 3 ? "block" : "none",
+          p: 1,
+        }}
+      >
+        <RecordingTimelinePanel
+          timeline={recordingTimeline}
+          loading={timelineLoading}
+          onSeek={(sequence) => void handleSeek(sequence)}
+        />
       </Box>
     </Box>
   );
@@ -1597,7 +1667,7 @@ export function RecordingDashboard({
     void handleOpenInvestigation(investigationId, projectId);
   }, [deepLinkInvestigation, onDeepLinkHandled]);
 
-  const settingsView = (
+  const projectsView = (
     <Box
       sx={{
         flex: 1,
@@ -1608,6 +1678,21 @@ export function RecordingDashboard({
       <ProjectDashboard
         onOpenInvestigation={handleOpenInvestigation}
         openInvestigationBusy={navigationBusy}
+      />
+    </Box>
+  );
+
+  const settingsView = (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <AppSettingsPanel
+        themeMode={themeMode}
+        onToggleTheme={onToggleTheme ?? (() => undefined)}
       />
     </Box>
   );
@@ -1783,7 +1868,8 @@ export function RecordingDashboard({
                 />
               </Box>
             )
-          ) : section === "settings" ? settingsView
+          ) : section === "projects" ? projectsView
+          : section === "settings" ? settingsView
           : sectionPlaceholder}
       </Box>
 

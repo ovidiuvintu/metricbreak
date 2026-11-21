@@ -11,6 +11,7 @@ const validSections: AppSection[] = [
     "recordings",
     "investigations",
     "analysis",
+    "projects",
     "settings",
 ];
 

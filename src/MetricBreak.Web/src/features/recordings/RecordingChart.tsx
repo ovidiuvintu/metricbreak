@@ -53,10 +53,10 @@ import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 import {
   AXIS_RANGE_MIN_SCALE,
-  AXIS_RANGE_RATIO_THRESHOLD,
   collectPlottedSeriesRange,
   isNumericChartChannel,
   numericPlotValue,
+  axisHasDivergentRanges,
   resolveEffectiveRightAxisIds,
   suggestRightAxisChannelIds,
   type AxisPins,
@@ -72,6 +72,15 @@ import type {
   InvestigationBookmark,
   InvestigationUiState,
 } from "../investigations/investigationTypes";
+import {
+  buildTimelineEventScatterSeries,
+  formatTimelineEventTooltip,
+  resolveActiveStage,
+  TIMELINE_EVENTS_SERIES_ID,
+  timelineEventMarkerY,
+  timelineEventsOnPage,
+  type ChartTimelineEntry,
+} from "./chartTimelineMarks";
 
 export type ChartViewportSnapshot = NonNullable<
   InvestigationUiState["chartViewport"]
@@ -258,6 +267,8 @@ interface RecordingChartProps {
     annotation?: string;
   }) => void;
   investigationBookmarks?: InvestigationBookmark[];
+  timelineEvents?: ChartTimelineEntry[];
+  timelineStages?: ChartTimelineEntry[];
   /** Bumped when the parent wants the chart viewport zoomed (not the replay cursor). */
   viewportFocusRequestId?: number;
   viewportFocusSequence?: number | null;
@@ -276,6 +287,7 @@ type HoverDetails = {
   x: number;
   y: number;
   values: { name: string; value: string }[];
+  activeStage?: ChartTimelineEntry | null;
 };
 
 function formatTimestamp(
@@ -327,32 +339,6 @@ function formatSampleValue(sample: SampleRangeItem, channelId: string): string {
   return numeric == null ? "N/A" : numeric.toLocaleString();
 }
 
-function axisHasDivergentRanges(ranges: PlottedSeriesRange[]): boolean {
-  if (ranges.length < 2) return false;
-
-  const scales = ranges.map((range) => range.scale);
-  const minScale = Math.min(...scales);
-  const maxScale = Math.max(...scales);
-  if (minScale > 0 && maxScale / minScale >= AXIS_RANGE_RATIO_THRESHOLD) {
-    return true;
-  }
-
-  const ordered = [...ranges].sort((a, b) => a.min - b.min);
-  for (let index = 1; index < ordered.length; index += 1) {
-    const lower = ordered[index - 1];
-    const upper = ordered[index];
-    if (upper.min <= lower.max) continue;
-
-    const gap = upper.min - lower.max;
-    const reference = Math.min(lower.scale, upper.scale);
-    if (gap / reference >= 8 && maxScale / minScale >= 12) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
 function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
   const windows: { start: number; end: number }[] = [];
   if (!channelIds.length) return windows;
@@ -382,21 +368,22 @@ type PlottedSeriesMeta = {
 };
 
 // Axis side: left = solid, right = dashed (always). Additional series on the
-// same axis vary width and opacity so overlaps stay visible without breaking
-// the solid/dashed axis rule.
+// same axis use slightly different widths so overlaps stay visible without
+// fading the traces (low opacity reads as "disabled" on dark charts).
 function seriesLineStyleForAxis(
   yAxisIndex: number,
   indexOnAxis: number,
   baseWidth: number,
 ) {
   const tier = Math.min(indexOnAxis, 2);
-  const widthScale = [1, 0.82, 0.68][tier];
-  const opacity = [1, 0.82, 0.68][tier];
+  const widthScale = [1, 0.94, 0.88][tier];
 
+  const width = Math.max(1.35, baseWidth * widthScale);
   return {
     type: (yAxisIndex === 1 ? "dashed" : "solid") as "solid" | "dashed",
-    width: Math.max(0.75, baseWidth * widthScale),
-    opacity,
+    // Dashed strokes look thinner at the same pixel width — nudge right-axis series up slightly.
+    width: yAxisIndex === 1 ? width * 1.1 : width,
+    opacity: 1,
   };
 }
 
@@ -539,8 +526,8 @@ function formatChannelSeriesLabel(
 function getLineWidth(sampleCount: number): number {
   if (sampleCount <= 100) return 2.5;
   if (sampleCount <= 500) return 2;
-  if (sampleCount <= 2000) return 1.5;
-  return 1;
+  if (sampleCount <= 2000) return 1.75;
+  return 1.5;
 }
 
 export function RecordingChart({
@@ -562,6 +549,8 @@ export function RecordingChart({
   onCreateBreakpointAtSample,
   onQuickBookmarkSample,
   investigationBookmarks = [],
+  timelineEvents = [],
+  timelineStages = [],
   viewportFocusRequestId = 0,
   viewportFocusSequence = null,
   restoreChartViewport = null,
@@ -694,6 +683,7 @@ export function RecordingChart({
     if (line) line.style.left = `${x}px`;
   };
   const suppressClickRef = useRef(false);
+  const tooltipPanelRef = useRef<HTMLDivElement>(null);
   const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const tooltipsEnabledRef = useRef(true);
   const [chartMenu, setChartMenu] = useState<{
@@ -757,6 +747,7 @@ export function RecordingChart({
         ),
         value: formatSampleValue(sample, channel.channelId),
       })),
+      activeStage: resolveActiveStage(timelineStages, sample.sequence),
     });
     setChartMenu(null);
   };
@@ -1005,6 +996,8 @@ export function RecordingChart({
   const onSeekRef = useRef(onSeek);
   const investigationBookmarksRef = useRef(investigationBookmarks);
   investigationBookmarksRef.current = investigationBookmarks;
+  const timelineStagesRef = useRef(timelineStages);
+  timelineStagesRef.current = timelineStages;
   const onScrubStartRef = useRef(onScrubStart);
   const onScrubEndRef = useRef(onScrubEnd);
   const samplesRef = useRef(samples);
@@ -1112,6 +1105,13 @@ export function RecordingChart({
       return;
     }
 
+    if (selectedChannelIds.length === 0) {
+      setSamples([]);
+      setLoading(false);
+      setError("");
+      return;
+    }
+
     const applySamples = (loaded: SampleRangeItem[]) => {
       if (pageLoadGenerationRef.current !== loadId) return;
       setSamples(loaded);
@@ -1146,7 +1146,15 @@ export function RecordingChart({
         void requestPage(neighbor).catch(() => { /* Retry on actual navigation. */ });
       }
     }
-  }, [sessionId, pageStart, sampleCount]);
+  }, [sessionId, pageStart, sampleCount, selectedChannelIds.length]);
+
+  useEffect(() => {
+    if (selectedChannelIds.length === 0) {
+      setHover(null);
+      setInspectedSample(null);
+      setCursorLabelX(null);
+    }
+  }, [selectedChannelIds.length]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1194,6 +1202,15 @@ export function RecordingChart({
 
   const lineWidth = getLineWidth(samples.length);
 
+  const hasPlottedSeries = useMemo(() => {
+    if (selectedChannelIds.length === 0 || samples.length === 0) return false;
+    return channels.some(
+      (channel) =>
+        selectedChannelIds.includes(channel.channelId) &&
+        isNumericChartChannel(samples, channel.channelId),
+    );
+  }, [channels, selectedChannelIds, samples]);
+
   const visibleInvestigationBookmarkCount = useMemo(
     () =>
       investigationBookmarks.filter(
@@ -1205,6 +1222,7 @@ export function RecordingChart({
 
   const showAxisRangeWarning = useMemo(() => {
     if (samples.length === 0) return false;
+    if (Object.keys(axisPins).length === 0) return false;
 
     const plottedChannelIds = channels
       .filter(
@@ -1226,7 +1244,7 @@ export function RecordingChart({
       axisHasDivergentRanges(rangesForAxis(false)) ||
       axisHasDivergentRanges(rangesForAxis(true))
     );
-  }, [samples, channels, selectedChannelIds, rightAxisSet]);
+  }, [samples, channels, selectedChannelIds, rightAxisSet, axisPins]);
 
   const option = useMemo(() => {
     const selectedIds = new Set(selectedChannelIds);
@@ -1308,6 +1326,10 @@ export function RecordingChart({
             itemStyle: {
               color: seriesColor,
             },
+          },
+
+          tooltip: {
+            show: false,
           },
 
           data: samples.map(
@@ -1436,6 +1458,37 @@ export function RecordingChart({
         : item,
     );
 
+    const primaryYAxisIndex: 0 | 1 =
+      builtSeries.some((item) => item.meta.yAxisIndex === 0) ? 0 : 1;
+    const primaryExtent = computeSeriesAxisExtent(
+      builtSeries,
+      primaryYAxisIndex,
+    );
+    const pageEvents = timelineEventsOnPage(
+      timelineEvents,
+      pageStart,
+      pageEnd,
+    );
+    const eventScatter = primaryExtent
+      ? buildTimelineEventScatterSeries({
+          events: pageEvents,
+          markerY: timelineEventMarkerY(
+            primaryExtent.dataMin,
+            primaryExtent.dataMax,
+          ),
+          yAxisIndex: primaryYAxisIndex,
+          darkMode: theme.palette.mode === "dark",
+        })
+      : null;
+    const allSeries = eventScatter
+      ? [...chartSeries, eventScatter]
+      : chartSeries;
+
+    const tooltipBackground =
+      theme.palette.mode === "dark" ? "#1E293B" : "#FFFFFF";
+    const tooltipBorder =
+      theme.palette.mode === "dark" ? "#334155" : "#E2E8F0";
+
     return {
       animation: false,
 
@@ -1444,8 +1497,29 @@ export function RecordingChart({
       textStyle: chartTheme.textStyle,
 
       tooltip: {
-        show: false,
-        trigger: "none",
+        show: true,
+        trigger: "item",
+        confine: true,
+        backgroundColor: tooltipBackground,
+        borderColor: tooltipBorder,
+        borderWidth: 1,
+        textStyle: {
+          color: chartTheme.axisTextColor,
+          fontSize: 11,
+        },
+        formatter: (param: unknown) => {
+          if (!param || Array.isArray(param)) return "";
+          const seriesParam = param as {
+            seriesId?: string;
+            data?: { eventName?: string; eventDescription?: string | null; value?: [number, number] };
+          };
+          if (seriesParam.seriesId !== TIMELINE_EVENTS_SERIES_ID) return "";
+          return formatTimelineEventTooltip({ data: seriesParam.data as {
+            eventName: string;
+            eventDescription: string | null;
+            value: [number, number];
+          } });
+        },
       },
 
       legend: {
@@ -1579,7 +1653,7 @@ export function RecordingChart({
         },
       ],
 
-      series: chartSeries,
+      series: allSeries,
     };
   }, [
       channels,
@@ -1596,6 +1670,7 @@ export function RecordingChart({
       pageEnd,
       theme.palette.mode,
       investigationBookmarks,
+      timelineEvents,
   ]);
 
   // Follow replay within a zoomed viewport without changing the zoom width.
@@ -1991,6 +2066,9 @@ export function RecordingChart({
 
       const handleWheel = (event: WheelEvent) => {
         if (chart.isDisposed()) return;
+        if (tooltipPanelRef.current?.contains(event.target as Node)) {
+          return;
+        }
 
         const rect = chartDom.getBoundingClientRect();
         const localX = event.clientX - rect.left;
@@ -2118,6 +2196,10 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           x: event.offsetX,
           y: event.offsetY,
           values,
+          activeStage: resolveActiveStage(
+            timelineStagesRef.current,
+            closest.sequence,
+          ),
         });
       };
 
@@ -2337,7 +2419,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           position: "relative",
         }}
       >
-        {loading ? (
+        {loading && selectedChannelIds.length > 0 ? (
           <Box
             sx={{
               height: "100%",
@@ -2348,7 +2430,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           >
             <CircularProgress />
           </Box>
-        ) : samples.length > 0 ? (
+        ) : hasPlottedSeries && samples.length > 0 ? (
           <>
           <Box
             ref={plotAreaRef}
@@ -2397,8 +2479,19 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             onEvents={{
               click: (params: {
                 componentType?: string;
-                data?: { bookmarkSequence?: number };
+                seriesId?: string;
+                data?: {
+                  bookmarkSequence?: number;
+                  value?: [number, number];
+                };
               }) => {
+                if (params.seriesId === TIMELINE_EVENTS_SERIES_ID) {
+                  const sequence = params.data?.value?.[0];
+                  if (sequence == null || !Number.isFinite(sequence)) return;
+                  manualPageRef.current = false;
+                  onSeekRef.current(sequence);
+                  return;
+                }
                 if (params.componentType !== "markLine") return;
                 const sequence = params.data?.bookmarkSequence;
                 if (sequence == null || !Number.isFinite(sequence)) return;
@@ -2463,20 +2556,10 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Box>
           {displayedSample && (
             <Box
-              tabIndex={inspectedSample ? 0 : undefined}
-              role={inspectedSample ? "region" : undefined}
-              aria-label={inspectedSample ? "Inspect sample values" : undefined}
-              onWheel={inspectedSample ? (event) => event.stopPropagation() : undefined}
-              onClick={inspectedSample ? (event) => event.stopPropagation() : undefined}
-              onMouseDown={inspectedSample ? (event) => event.stopPropagation() : undefined}
               sx={{
                 position: "absolute",
                 zIndex: 10,
-                // Hover previews pass through to the chart; explicitly inspected
-                // samples must receive clicks, focus and wheel scrolling.
-                pointerEvents: inspectedSample ? "auto" : "none",
-                overscrollBehavior: "contain",
-                scrollbarGutter: "stable",
+                pointerEvents: "none",
                 left: Math.max(
                   8,
                   Math.min(
@@ -2489,70 +2572,112 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 width: CHART_TOOLTIP_WIDTH,
                 maxWidth: "min(92%, 420px)",
                 maxHeight: "70%",
-                overflowY: "auto",
-                p: 1.5,
-                border: 1,
-                borderColor: "divider",
-                borderRadius: 1,
-                bgcolor: "background.paper",
-                boxShadow: 4,
               }}
             >
-              <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                  Sequence {displayedSample.sequence.toLocaleString()}
-                </Typography>
-                {inspectedSample && (
-                  <Button size="small" sx={{ minWidth: 0, p: 0.25, pointerEvents: "auto" }} onClick={() => setInspectedSample(null)} aria-label="Close sample inspection">
-                    Close
-                  </Button>
-                )}
-              </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                {displayedSample.timestamp}
-              </Typography>
-              {showAxisRangeWarning && (
-                <Typography
-                  variant="caption"
-                  sx={{
-                    display: "block",
-                    mb: 1,
-                    color: "warning.main",
-                    opacity: 0.85,
-                    fontSize: "0.68rem",
-                    lineHeight: 1.35,
-                  }}
-                >
-                  Some series have significantly different value ranges. Consider moving a channel to the other Y-axis.
-                </Typography>
-              )}
-              {displayedSample.values.map((entry) => (
-                <Box
-                  key={entry.name}
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: 2,
-                    alignItems: "flex-start",
-                  }}
-                >
-                  <Typography
-                    variant="caption"
-                    sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
-                  >
-                    {entry.name}
-                  </Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>
-                    {entry.value}
+              <Box
+                ref={tooltipPanelRef}
+                tabIndex={inspectedSample ? 0 : undefined}
+                role={inspectedSample ? "region" : undefined}
+                aria-label={inspectedSample ? "Inspect sample values" : undefined}
+                onWheel={(event) => event.stopPropagation()}
+                onClick={inspectedSample ? (event) => event.stopPropagation() : undefined}
+                onMouseDown={inspectedSample ? (event) => event.stopPropagation() : undefined}
+                sx={{
+                  pointerEvents: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: "100%",
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  bgcolor: "background.paper",
+                  boxShadow: 4,
+                  overflow: "hidden",
+                }}
+              >
+                <Box sx={{ flexShrink: 0, p: 1.5, pb: 0.5 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+                    <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                      Sequence {displayedSample.sequence.toLocaleString()}
+                    </Typography>
+                    {inspectedSample && (
+                      <Button size="small" sx={{ minWidth: 0, p: 0.25 }} onClick={() => setInspectedSample(null)} aria-label="Close sample inspection">
+                        Close
+                      </Button>
+                    )}
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    {displayedSample.timestamp}
                   </Typography>
                 </Box>
-              ))}
-              {inspectedSample && onOpenBreakpointDialog && (
+                <Box
+                  sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowY: "auto",
+                    overscrollBehavior: "contain",
+                    scrollbarGutter: "stable",
+                    px: 1.5,
+                    pb: inspectedSample ? 0 : 1.5,
+                  }}
+                >
+                  {displayedSample.activeStage && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1, fontWeight: 600 }}
+                    >
+                      Stage: {displayedSample.activeStage.name}
+                      {displayedSample.activeStage.description?.trim()
+                        ? ` — ${displayedSample.activeStage.description.trim()}`
+                        : ""}
+                    </Typography>
+                  )}
+                  {showAxisRangeWarning && (
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        display: "block",
+                        mb: 1,
+                        color: "warning.main",
+                        opacity: 0.85,
+                        fontSize: "0.68rem",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      Some series have significantly different value ranges. Consider moving a channel to the other Y-axis.
+                    </Typography>
+                  )}
+                  {displayedSample.values.map((entry) => (
+                    <Box
+                      key={entry.name}
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 2,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                      >
+                        {entry.name}
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>
+                        {entry.value}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+                {inspectedSample && (
+                <Box sx={{ flexShrink: 0, p: 1.5, pt: 0.5 }}>
+              {onOpenBreakpointDialog && (
                 <Button
                   size="small"
                   variant="text"
                   fullWidth
-                  sx={{ mt: 1, pointerEvents: "auto" }}
+                  sx={{ mt: 0.5 }}
                   onClick={() => {
                     const sample = samples.find((item) => item.sequence === inspectedSample.sequence);
                     const plotted = channels.filter((channel) =>
@@ -2573,12 +2698,12 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                   Add breakpoint at this sample…
                 </Button>
               )}
-              {inspectedSample && onQuickBookmarkSample && (
+              {onQuickBookmarkSample && (
                 <Button
                   size="small"
                   variant="outlined"
                   fullWidth
-                  sx={{ mt: 1, pointerEvents: "auto" }}
+                  sx={{ mt: 1 }}
                   onClick={() => {
                     onQuickBookmarkSample({ sequence: inspectedSample.sequence });
                     setInspectedSample(null);
@@ -2587,7 +2712,6 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                   Bookmark this sample
                 </Button>
               )}
-              {inspectedSample && (
                 <Button
                   size="small"
                   variant="outlined"
@@ -2602,10 +2726,36 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 >
                   Move Replay Cursor Here
                 </Button>
-              )}
+                </Box>
+                )}
+              </Box>
             </Box>
           )}
           </>
+        ) : sampleCount > 0 ? (
+          <Box
+            sx={{
+              height: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              px: 3,
+              textAlign: "center",
+            }}
+          >
+            <Box>
+              <Typography color="text.secondary" sx={{ fontWeight: 600, mb: 0.75 }}>
+                {selectedChannelIds.length === 0
+                  ? "No channels on chart"
+                  : "No plottable series on this page"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {selectedChannelIds.length === 0
+                  ? "Turn on channels in the Inspector to plot series. Replay position and the timeline below still follow playback."
+                  : "Selected channels have no numeric values on this page. Try another page or channel."}
+              </Typography>
+            </Box>
+          </Box>
         ) : (
           <Box
             sx={{

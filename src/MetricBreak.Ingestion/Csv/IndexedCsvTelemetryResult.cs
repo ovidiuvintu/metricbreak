@@ -14,10 +14,13 @@ public sealed class IndexedCsvTelemetryResult
 
     public TimestampOrigin TimestampOrigin { get; }
 
+    public RecordingTimeline Timeline { get; }
+
     public IndexedCsvTelemetryResult(
         IEnumerable<ChannelDefinition> channels,
         IEnumerable<TelemetrySample> samples,
-        TimestampOrigin timestampOrigin = TimestampOrigin.Unix)
+        TimestampOrigin timestampOrigin = TimestampOrigin.Unix,
+        RecordingTimeline? timeline = null)
     {
         ArgumentNullException.ThrowIfNull(channels);
         ArgumentNullException.ThrowIfNull(samples);
@@ -30,6 +33,7 @@ public sealed class IndexedCsvTelemetryResult
         Channels = Array.AsReadOnly(_channels);
         Samples = Array.AsReadOnly(_samples);
         TimestampOrigin = timestampOrigin;
+        Timeline = timeline ?? RecordingTimeline.Empty;
     }
 }
 

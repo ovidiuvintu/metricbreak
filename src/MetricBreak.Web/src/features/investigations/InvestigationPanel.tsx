@@ -468,7 +468,7 @@ export function InvestigationPanel({
 
             {projects.length === 0 && (
                 <Typography variant="caption" color="text.secondary">
-                    Investigations can be saved without a project. Use Settings → New Project
+                    Investigations can be saved without a project. Use Projects → New Project
                     to create or open a project folder when you want investigations filed on disk.
                 </Typography>
             )}

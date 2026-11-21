@@ -112,10 +112,16 @@ public sealed class IndexedCsvTelemetryParser
                 samples.Count, row.Timestamp, channelIndex, values));
         }
 
+        var timeline = CsvAnnotationSectionReader.TryRead(
+            reader,
+            applied.Format,
+            samples);
+
         return new IndexedCsvTelemetryResult(
             channels,
             samples,
-            applied.Origin);
+            applied.Origin,
+            timeline);
     }
 
     private static bool IsFiniteNumeric(string value) =>
