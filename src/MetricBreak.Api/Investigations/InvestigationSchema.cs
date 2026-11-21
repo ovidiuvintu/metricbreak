@@ -2,7 +2,7 @@ namespace MetricBreak.Api.Investigations;
 
 public static class InvestigationSchema
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const int LegacyVersion = 1;
 }
 

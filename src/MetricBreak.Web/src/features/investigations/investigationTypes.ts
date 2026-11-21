@@ -31,6 +31,18 @@ export interface ExportInvestigationRequest {
     uiState?: InvestigationUiState | null;
 }
 
+export interface TimelineEntrySnapshot {
+    timestampNanoseconds: number;
+    sampleSequence: number;
+    name: string;
+    description: string | null;
+}
+
+export interface RecordingTimelineSnapshot {
+    events: TimelineEntrySnapshot[];
+    stages: TimelineEntrySnapshot[];
+}
+
 export interface OpenInvestigationResponse {
     sessionId: string;
     investigationId: string;

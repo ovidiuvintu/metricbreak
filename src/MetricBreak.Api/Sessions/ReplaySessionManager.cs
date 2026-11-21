@@ -58,6 +58,28 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryGetTimeline(
+        Guid sessionId,
+        out RecordingTimelineResponse? timeline)
+    {
+        timeline = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            var snapshot = RecordingTimelineMapping.ToSnapshot(entry.Imported.Timeline);
+            timeline = new RecordingTimelineResponse(
+                snapshot.Events,
+                snapshot.Stages);
+            return true;
+        }
+    }
+
     public bool TryExportInvestigation(
         Guid sessionId,
         ExportInvestigationRequest? request,
@@ -136,7 +158,8 @@ public sealed class ReplaySessionManager
                 Breakpoints: breakpoints,
                 Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>(),
                 Metadata: metadata,
-                UiState: request?.UiState);
+                UiState: request?.UiState,
+                Timeline: RecordingTimelineMapping.ToSnapshot(entry.Imported.Timeline));
 
             return true;
         }

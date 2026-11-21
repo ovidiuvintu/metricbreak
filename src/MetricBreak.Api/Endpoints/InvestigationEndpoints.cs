@@ -174,6 +174,7 @@ internal static class InvestigationEndpoints
                     store);
 
                 investigation = MergeExistingBookmarks(investigation, prior);
+                investigation = MergeExistingTimeline(investigation, prior);
                 investigation = InvestigationPersistence.MergePriorMetadata(
                     investigation,
                     prior);
@@ -578,5 +579,18 @@ internal static class InvestigationEndpoints
             return investigation;
 
         return investigation with { Bookmarks = bookmarks };
+    }
+
+    private static ExportedInvestigation MergeExistingTimeline(
+        ExportedInvestigation investigation,
+        ExportedInvestigation? previous)
+    {
+        if (investigation.Timeline is not null && !investigation.Timeline.IsEmpty)
+            return investigation;
+
+        if (previous?.Timeline is not { IsEmpty: false } priorTimeline)
+            return investigation;
+
+        return investigation with { Timeline = priorTimeline };
     }
 }

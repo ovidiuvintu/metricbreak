@@ -149,6 +149,22 @@ internal static class SessionEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .Produces(StatusCodes.Status404NotFound);
 
+        group.MapGet(
+            "/{sessionId:guid}/timeline",
+            (Guid sessionId, ReplaySessionManager manager) =>
+            {
+                if (!manager.TryGetTimeline(sessionId, out var timeline) ||
+                    timeline is null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(timeline);
+            })
+            .WithName("GetSessionRecordingTimeline")
+            .Produces<RecordingTimelineResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
         // GET SESSION STATE
         group.MapGet(
             "/{sessionId:guid}",
