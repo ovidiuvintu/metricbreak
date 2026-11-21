@@ -33,11 +33,12 @@ internal static class BreakpointEndpoints
 
                 try
                 {
-                    var found = manager.TryAddBreakpoint(
+                    var found = manager.TryAddTypedBreakpoint(
                         sessionId,
                         request.ChannelId,
                         comparisonOperator,
                         request.Threshold,
+                        request.Value,
                         out var breakpoint,
                         out var unknownChannel);
 
@@ -122,7 +123,7 @@ internal static class BreakpointEndpoints
                     if (!Enum.TryParse<ComparisonOperator>(
                             condition.Operator,
                             ignoreCase: true,
-                            out var comparisonOperator))
+                            out var comparisonOperator) || !Enum.IsDefined(comparisonOperator))
                     {
                         return Results.BadRequest(new
                         {
@@ -131,10 +132,16 @@ internal static class BreakpointEndpoints
                         });
                     }
 
-                    parsedConditions.Add(new BreakpointCondition(
-                        condition.ChannelId,
-                        comparisonOperator,
-                        condition.Threshold));
+                    try
+                    {
+                        parsedConditions.Add(new BreakpointCondition(
+                            condition.ChannelId, comparisonOperator, condition.Threshold,
+                            manager.ParseConditionValue(sessionId, condition.ChannelId, comparisonOperator, condition.Value)));
+                    }
+                    catch (ArgumentException exception)
+                    {
+                        return Results.BadRequest(new { Error = exception.Message });
+                    }
                 }
 
                 try
@@ -168,7 +175,8 @@ internal static class BreakpointEndpoints
                             .Select(condition => new BreakpointConditionRequest(
                                 condition.ChannelId,
                                 condition.Operator.ToString(),
-                                condition.Threshold))
+                                condition.Threshold,
+                                BreakpointValueParser.ToWire(condition.ExpectedValue)))
                             .ToArray(),
                         IsEnabled: true);
 
@@ -230,7 +238,8 @@ internal static class BreakpointEndpoints
                                 .Select(condition => new BreakpointConditionRequest(
                                     condition.ChannelId,
                                     condition.Operator.ToString(),
-                                    condition.Threshold))
+                                    condition.Threshold,
+                                    BreakpointValueParser.ToWire(condition.ExpectedValue)))
                                 .ToArray(),
                             IsEnabled: registered.IsEnabled))
                         .ToArray());

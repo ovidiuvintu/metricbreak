@@ -16,7 +16,8 @@ public static class BreakpointResponseMapper
             ChannelId: breakpoint.ChannelId,
             Operator: breakpoint.Operator.ToString(),
             Threshold: breakpoint.Threshold,
-            IsEnabled: isEnabled);
+            IsEnabled: isEnabled,
+            Value: BreakpointValueParser.ToWire(breakpoint.ExpectedValue));
     }
 }
 

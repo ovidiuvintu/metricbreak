@@ -364,6 +364,51 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryAddTypedBreakpoint(Guid sessionId, Guid channelId,
+        ComparisonOperator op, double threshold, string? value,
+        out ConditionalBreakpoint? breakpoint, out bool unknownChannel)
+    {
+        breakpoint = null;
+        unknownChannel = false;
+        if (!_sessions.TryGetValue(sessionId, out var entry)) return false;
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed) return false;
+            var channel = entry.Imported.Channels.FirstOrDefault(c => c.Id == channelId);
+            if (channel is null) { unknownChannel = true; return true; }
+            BreakpointOperatorValidation.Validate(channel.ValueType, op);
+            var expected = ParseExpected(channel.ValueType, op, value);
+            breakpoint = new ConditionalBreakpoint(Guid.NewGuid(), channelId, op, threshold, expected);
+            entry.Breakpoints.Add(breakpoint);
+            return true;
+        }
+    }
+
+    private static MetricBreak.Domain.Recordings.ChannelValue? ParseExpected(
+        MetricBreak.Domain.Recordings.ChannelValueType type, ComparisonOperator op, string? value)
+    {
+        if (op is not (ComparisonOperator.Equal or ComparisonOperator.NotEqual)) return null;
+        if (type == MetricBreak.Domain.Recordings.ChannelValueType.Numeric) return null;
+        if (value is null) throw new ArgumentException("A typed comparison value is required.");
+        if (type == MetricBreak.Domain.Recordings.ChannelValueType.Boolean)
+        {
+            if (!bool.TryParse(value, out var parsed)) throw new ArgumentException("Boolean value must be true or false.");
+            return new MetricBreak.Domain.Recordings.ChannelValue.Boolean(parsed);
+        }
+        return new MetricBreak.Domain.Recordings.ChannelValue.Categorical(value);
+    }
+
+    public MetricBreak.Domain.Recordings.ChannelValue? ParseConditionValue(Guid sessionId,
+        Guid channelId, ComparisonOperator op, string? value)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var entry)) return null;
+        lock (entry.SyncRoot)
+        {
+            var channel = entry.Imported.Channels.FirstOrDefault(c => c.Id == channelId);
+            return channel is null ? null : ParseExpected(channel.ValueType, op, value);
+        }
+    }
+
     public bool TryGetBreakpoints(
     Guid sessionId,
     out IReadOnlyList<RegisteredBreakpointSnapshot>? breakpoints)
@@ -467,6 +512,12 @@ public sealed class ReplaySessionManager
             {
                 var channel = entry.Imported.Channels.Single(c => c.Id == condition.ChannelId);
                 BreakpointOperatorValidation.Validate(channel.ValueType, condition.Operator);
+                if (condition.Operator is ComparisonOperator.Equal or ComparisonOperator.NotEqual &&
+                    channel.ValueType != MetricBreak.Domain.Recordings.ChannelValueType.Numeric &&
+                    (condition.ExpectedValue is null ||
+                     channel.ValueType == MetricBreak.Domain.Recordings.ChannelValueType.Boolean && condition.ExpectedValue is not MetricBreak.Domain.Recordings.ChannelValue.Boolean ||
+                     channel.ValueType == MetricBreak.Domain.Recordings.ChannelValueType.Categorical && condition.ExpectedValue is not MetricBreak.Domain.Recordings.ChannelValue.Categorical))
+                    throw new ArgumentException("Condition value must match the channel type.");
             }
 
             // Validate all conditions before modifying the collection.

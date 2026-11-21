@@ -10,9 +10,9 @@ public static class BreakpointOperatorValidation
         bool supported = type switch
         {
             ChannelValueType.Numeric => true,
-            ChannelValueType.Boolean => op is ComparisonOperator.Changed or
+            ChannelValueType.Boolean => op is ComparisonOperator.Equal or ComparisonOperator.NotEqual or ComparisonOperator.Changed or
                 ComparisonOperator.RisingEdge or ComparisonOperator.FallingEdge,
-            ChannelValueType.Categorical => op == ComparisonOperator.Changed,
+            ChannelValueType.Categorical => op is ComparisonOperator.Equal or ComparisonOperator.NotEqual or ComparisonOperator.Changed,
             _ => false
         };
         if (!supported)

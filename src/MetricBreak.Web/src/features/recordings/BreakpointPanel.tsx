@@ -30,8 +30,8 @@ export function BreakpointPanel({
   onAdd, onAddComposite, onSetEnabled, onDelete,
 }: BreakpointPanelProps) {
   const names = new Map(channels.map(c => [c.channelId, c.name]));
-  const format = (c: { channelId: string; operator: ComparisonOperator; threshold: number }) =>
-    `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.threshold.toLocaleString()}`;
+  const format = (c: { channelId: string; operator: ComparisonOperator; threshold: number; value?: string }) =>
+    `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`;
   const total = breakpoints.length + compositeBreakpoints.length;
 
   const actions = (id: string, enabled: boolean, label: string) => (
@@ -84,7 +84,7 @@ export function BreakpointPanel({
                 <Tooltip title={format(b)}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>{names.get(b.channelId) ?? b.channelId}</Typography>
                 </Tooltip>
-                <Typography variant="caption" color="text.secondary">{symbols[b.operator]} {b.operator === "Changed" ? "" : b.threshold.toLocaleString()}</Typography>
+                <Typography variant="caption" color="text.secondary">{symbols[b.operator]} {b.operator === "Changed" ? "" : b.value ?? b.threshold.toLocaleString()}</Typography>
               </Box>
               {actions(b.breakpointId, b.isEnabled, format(b))}
             </Box>

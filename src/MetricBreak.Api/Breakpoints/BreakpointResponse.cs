@@ -6,5 +6,6 @@ public sealed record BreakpointResponse(
     Guid ChannelId,
     string Operator,
     double Threshold,
-    bool IsEnabled);
+    bool IsEnabled,
+    string? Value = null);
 

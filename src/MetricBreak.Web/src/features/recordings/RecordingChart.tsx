@@ -790,15 +790,25 @@ export function RecordingChart({
       pageEnd,
   ]);
 
-  // Keep the HTML handle aligned with ECharts' markLine after zoom/resize.
-  // A datazoom event can fire before ECharts has completed its new layout,
-  // so the finished event is also observed. Neither event rebuilds the series.
+  // Follow replay within a zoomed viewport without changing the zoom width.
+  // Only a replay-position change can move the viewport: manual zoom/pan stays
+  // untouched while paused. Chart pages retain their existing navigation rules.
+  const lastChartReplayRef = useRef<{ sessionId: string; pageStart: number; sequence: number | null } | null>(null);
+
+  // Keep the HTML handle aligned with the actual visible plot, not the canvas.
+  // ECharts can convert off-screen data coordinates into pixels outside the grid.
   useEffect(() => {
     const chart = chartRef.current?.getEchartsInstance();
     if (!chart || chart.isDisposed()) return;
 
     let disposed = false;
     let frame: number | null = null;
+    const previous = lastChartReplayRef.current;
+    const replayMoved = previous?.sessionId === sessionId &&
+      previous.pageStart === pageStart && previous.sequence !== currentSequence;
+    lastChartReplayRef.current = { sessionId, pageStart, sequence: currentSequence };
+    let followPending = replayMoved && previewSequence === null;
+
     const update = () => {
       if (disposed || chart.isDisposed() || dragRef.current) return;
       const sequence = previewSequence ?? currentSequence;
@@ -809,30 +819,68 @@ export function RecordingChart({
         return;
       }
       try {
-        // During a page transition ReactECharts may still expose the old
-        // chart instance. Never interpret a new-page sequence with old axes.
+        // During page transitions, ECharts may still expose the previous axes.
         const axis = (chart.getOption().xAxis as Array<{ min?: number; max?: number }> | undefined)?.[0];
         if (Number(axis?.min) !== pageStart ||
             Number(axis?.max) !== Math.max(pageStart + 1, pageEnd - 1)) {
           setCursorLabelX(null);
           return;
         }
-        const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
-        // A zoom may move the replay position outside the visible plot.
-        // Hide the handle in that case instead of leaving it at a stale X.
-        // containPixel with an xAxis finder and a scalar pixel can report
-        // false even when the X coordinate is valid. Check the rendered
-        // chart's horizontal bounds instead; zoomed-outside positions are
-        // hidden, while visible labels remain draggable.
-        const visible = Number.isFinite(pixel) && pixel >= 0 && pixel <= chart.getWidth();
-        if (!visible) {
+
+        const zoom = (chart.getOption().dataZoom as Array<{
+          start?: number; end?: number;
+        }> | undefined)?.[0];
+        const startPercent = Math.max(0, Math.min(100, Number(zoom?.start ?? 0)));
+        const endPercent = Math.max(startPercent, Math.min(100, Number(zoom?.end ?? 100)));
+        const fullMin = pageStart;
+        const fullMax = Math.max(pageStart + 1, pageEnd - 1);
+        const fullWidth = fullMax - fullMin;
+        const visibleMin = fullMin + fullWidth * startPercent / 100;
+        const visibleMax = fullMin + fullWidth * endPercent / 100;
+        const visibleWidth = visibleMax - visibleMin;
+
+        if (followPending) {
+          followPending = false;
+          // A forward cursor leaving the right edge returns near 80% of the
+          // viewport; reverse playback follows from the left at 20%.
+          // Preserve the exact zoom width, including near page boundaries.
+          if (visibleWidth > 0 && visibleWidth < fullWidth - 0.001 &&
+              (sequence < visibleMin || sequence > visibleMax)) {
+            const forward = previous?.sequence == null || sequence >= previous.sequence;
+            const anchor = forward ? 0.8 : 0.2;
+            const shiftedMin = Math.max(fullMin, Math.min(fullMax - visibleWidth,
+              sequence - visibleWidth * anchor));
+            const newStart = (shiftedMin - fullMin) / fullWidth * 100;
+            const newEnd = (shiftedMin + visibleWidth - fullMin) / fullWidth * 100;
+            chart.dispatchAction({
+              type: "dataZoom", dataZoomIndex: 0,
+              start: newStart, end: newEnd,
+            });
+            // datazoom/finished will update the handle after layout.
+            return;
+          }
+        }
+
+        // Never render the cursor outside the zoomed plot. In particular,
+        // checking pixel <= chart.getWidth() is insufficient here.
+        if (sequence < visibleMin - 0.001 || sequence > visibleMax + 0.001) {
           setCursorLabelX(null);
           return;
         }
-        // Move the existing DOM handle immediately; don't depend on a React
-        // render to synchronize with the chart's newly positioned markLine.
-        if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${pixel}px`;
-        setCursorLabelX(pixel);
+        const pixel = chart.convertToPixel({ xAxisIndex: 0 }, sequence) as number;
+        const leftPixel = chart.convertToPixel({ xAxisIndex: 0 }, visibleMin) as number;
+        const rightPixel = chart.convertToPixel({ xAxisIndex: 0 }, visibleMax) as number;
+        if (!Number.isFinite(pixel) || !Number.isFinite(leftPixel) ||
+            !Number.isFinite(rightPixel) ||
+            pixel < Math.min(leftPixel, rightPixel) - 1 ||
+            pixel > Math.max(leftPixel, rightPixel) + 1) {
+          setCursorLabelX(null);
+          return;
+        }
+        // Keep the draggable label fully inside the chart at either edge.
+        const labelX = Math.max(30, Math.min(chart.getWidth() - 30, pixel));
+        if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${labelX}px`;
+        setCursorLabelX(labelX);
       } catch {
         setCursorLabelX(null);
       }
@@ -856,7 +904,7 @@ export function RecordingChart({
       chart.off("datazoom", scheduleUpdate);
       observer.disconnect();
     };
-  }, [currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
+  }, [sessionId, currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
 
   const handleLabelPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || dragRef.current) return;
@@ -986,6 +1034,25 @@ export function RecordingChart({
   const handleChartReady = useCallback(
     (chart: EChartsType) => {
       console.debug("Replay chart ready");
+
+      chart.on("finished", () => {
+        const series = chart.getOption().series as Array<{
+          id?: string;
+          markLine?: {
+            data?: Array<{ xAxis?: number }>;
+          };
+        }>;
+
+        console.debug(
+          "[MetricBreak Chart] Active cursor markers",
+          series.flatMap(s =>
+            (s.markLine?.data ?? []).map(marker => ({
+              series: s.id,
+              sequence: marker.xAxis
+            }))
+          )
+        );
+      });
 
       const renderer = chart.getZr();
              const sequenceAt = (x: number, y: number): number | null => {
