@@ -7,6 +7,8 @@ import {
   IconButton,
   InputAdornment,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -20,13 +22,17 @@ import type { ChannelMetadata } from "./channelMetadata";
 interface ChannelSelectionPanelProps {
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
+  rightAxisChannelIds?: string[];
   onSelectionChange: (ids: string[]) => void;
+  onChartAxisChange?: (channelId: string, side: "left" | "right") => void;
 }
 
 export function ChannelSelectionPanel({
   channels,
   selectedChannelIds,
+  rightAxisChannelIds = [],
   onSelectionChange,
+  onChartAxisChange,
 }: ChannelSelectionPanelProps) {
   const [search, setSearch] = useState("");
 
@@ -49,6 +55,13 @@ export function ChannelSelectionPanel({
   const allSelected =
     channels.length > 0 &&
     selectedChannelIds.length === channels.length;
+
+  const rightAxisSet = useMemo(
+    () => new Set(rightAxisChannelIds),
+    [rightAxisChannelIds],
+  );
+
+  const dualAxisActive = selectedChannelIds.some((id) => rightAxisSet.has(id));
 
   return (
     <Box
@@ -77,36 +90,67 @@ export function ChannelSelectionPanel({
         }}
       />
 
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          px: 0.5,
-        }}
-      >
-        <Typography variant="caption" color="text.secondary">
-          {selectedChannelIds.length} of {channels.length} visible
-        </Typography>
-
-        <Tooltip title={allSelected ? "Hide all" : "Show all"}>
-          <IconButton
-            size="small"
-            onClick={() =>
-              onSelectionChange(
-                allSelected
-                  ? []
-                  : channels.map((channel) => channel.channelId),
-              )
-            }
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75, px: 0.5 }}>
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 1,
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{ color: "text.primary", fontWeight: 600, fontSize: "0.75rem" }}
           >
-            {allSelected ? (
-              <VisibilityOffIcon fontSize="small" />
-            ) : (
-              <VisibilityIcon fontSize="small" />
-            )}
-          </IconButton>
-        </Tooltip>
+            {selectedChannelIds.length} of {channels.length} on chart
+          </Typography>
+
+          <Tooltip title={allSelected ? "Hide all" : "Show all"}>
+            <IconButton
+              size="small"
+              onClick={() =>
+                onSelectionChange(
+                  allSelected
+                    ? []
+                    : channels.map((channel) => channel.channelId),
+                )
+              }
+            >
+              {allSelected ? (
+                <VisibilityOffIcon fontSize="small" />
+              ) : (
+                <VisibilityIcon fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
+        </Box>
+
+        {dualAxisActive && (
+          <Typography
+            variant="caption"
+            component="div"
+            sx={{
+              fontSize: "0.72rem",
+              lineHeight: 1.45,
+              color: "text.secondary",
+              bgcolor: "action.hover",
+              borderRadius: 0.75,
+              px: 1,
+              py: 0.5,
+            }}
+          >
+            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+              L
+            </Box>
+            {" = left axis, solid"}
+            <br />
+            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+              R
+            </Box>
+            {" = right axis, dashed"}
+          </Typography>
+        )}
       </Box>
 
       <Box
@@ -159,6 +203,41 @@ export function ChannelSelectionPanel({
                   </Typography>
                 )}
               </Box>
+
+              {checked && onChartAxisChange && (
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={rightAxisSet.has(channel.channelId) ? "right" : "left"}
+                  onChange={(_, value: "left" | "right" | null) => {
+                    if (value) onChartAxisChange(channel.channelId, value);
+                  }}
+                  aria-label={`Y-axis for ${channel.name}`}
+                  sx={{
+                    flexShrink: 0,
+                    ml: 0.5,
+                    "& .MuiToggleButton-root": {
+                      px: 0.75,
+                      py: 0.15,
+                      fontSize: "0.65rem",
+                      fontWeight: 700,
+                      lineHeight: 1.2,
+                      minWidth: 26,
+                    },
+                  }}
+                >
+                  <Tooltip title="Left Y-axis (solid)">
+                    <ToggleButton value="left" aria-label="Left Y-axis">
+                      L
+                    </ToggleButton>
+                  </Tooltip>
+                  <Tooltip title="Right Y-axis (dashed)">
+                    <ToggleButton value="right" aria-label="Right Y-axis">
+                      R
+                    </ToggleButton>
+                  </Tooltip>
+                </ToggleButtonGroup>
+              )}
             </Box>
           );
         })}
