@@ -13,6 +13,19 @@ internal static class InvestigationEndpoints
     public static IEndpointRouteBuilder MapInvestigationEndpoints(
         this IEndpointRouteBuilder app)
     {
+        app.MapGet(
+            "/api/investigations",
+            (
+                [FromQuery] string? recordingName,
+                SessionInvestigationStore store) =>
+            {
+                var investigations = store.List(recordingName);
+                return Results.Ok(new InvestigationsListResponse(investigations));
+            })
+            .WithName("ListWorkspaceInvestigations")
+            .WithTags(_investigationTag)
+            .Produces<InvestigationsListResponse>(StatusCodes.Status200OK);
+
         // EXPORT INVESTIGATION
         app.MapPost(
             "/api/sessions/{sessionId:guid}/export",

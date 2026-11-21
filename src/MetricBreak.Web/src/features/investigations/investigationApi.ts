@@ -16,12 +16,28 @@ export const investigationApi = {
         );
     },
 
+    listWorkspaceInvestigations(
+        recordingName?: string | null,
+    ): Promise<{ investigations: InvestigationSummary[] }> {
+        const query = recordingName?.trim()
+            ? `?recordingName=${encodeURIComponent(recordingName.trim())}`
+            : "";
+
+        return apiRequest<{ investigations: InvestigationSummary[] }>(
+            `/api/investigations${query}`,
+        );
+    },
+
     exportSession(
         sessionId: string,
-        projectId: string,
+        projectId?: string | null,
     ): Promise<ExportInvestigationResponse> {
+        const query = projectId?.trim()
+            ? `?projectId=${encodeURIComponent(projectId.trim())}`
+            : "";
+
         return apiRequest<ExportInvestigationResponse>(
-            `/api/sessions/${encodeURIComponent(sessionId)}/export?projectId=${encodeURIComponent(projectId)}`,
+            `/api/sessions/${encodeURIComponent(sessionId)}/export${query}`,
             { method: "POST" },
         );
     },

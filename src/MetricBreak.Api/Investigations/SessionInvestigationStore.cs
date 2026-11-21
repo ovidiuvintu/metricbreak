@@ -51,17 +51,69 @@ public sealed class SessionInvestigationStore
         if (!File.Exists(filePath))
             return false;
 
-        var json = File.ReadAllText(filePath);
+        investigation = TryReadFile(filePath);
+        return investigation is not null;
+    }
 
-        investigation = JsonSerializer.Deserialize<ExportedInvestigation>(
-            json,
-            _jsonOptions);
+    public IReadOnlyList<WorkspaceInvestigationItemResponse> List(
+        string? recordingName = null)
+    {
+        if (!Directory.Exists(_storageDirectory))
+            return Array.Empty<WorkspaceInvestigationItemResponse>();
 
-        if (investigation is null)
-            return false;
+        var filter = recordingName?.Trim();
+        var results = new List<WorkspaceInvestigationItemResponse>();
 
-        investigation = InvestigationBookmarkMutations.Normalize(investigation);
-        return true;
+        foreach (var filePath in Directory.EnumerateFiles(
+                     _storageDirectory,
+                     "*.json",
+                     SearchOption.TopDirectoryOnly))
+        {
+            var investigation = TryReadFile(filePath);
+            if (investigation is null)
+                continue;
+
+            if (!string.IsNullOrEmpty(filter) &&
+                !string.Equals(
+                    investigation.Recording.RecordingName,
+                    filter,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            results.Add(new WorkspaceInvestigationItemResponse(
+                investigation.InvestigationId,
+                investigation.Recording.RecordingName,
+                Path.GetFileName(filePath),
+                investigation.ExportedAtUtc,
+                investigation.Recording.SourceContentHash,
+                investigation.Recording.SourceSizeInBytes));
+        }
+
+        return results
+            .OrderByDescending(item => item.ExportedAtUtc)
+            .ToArray();
+    }
+
+    private ExportedInvestigation? TryReadFile(string filePath)
+    {
+        try
+        {
+            var json = File.ReadAllText(filePath);
+            var investigation = JsonSerializer.Deserialize<ExportedInvestigation>(
+                json,
+                _jsonOptions);
+
+            if (investigation is null)
+                return null;
+
+            return InvestigationBookmarkMutations.Normalize(investigation);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private string GetFilePath(Guid investigationId)
