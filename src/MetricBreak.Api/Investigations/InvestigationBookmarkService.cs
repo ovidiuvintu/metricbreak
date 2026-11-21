@@ -30,7 +30,7 @@ public sealed class InvestigationBookmarkService
             return false;
         }
 
-        investigation = InvestigationBookmarkMutations.Normalize(investigation);
+        investigation = InvestigationDocumentNormalizer.Normalize(investigation);
 
         response = new InvestigationBookmarksResponse(
             InvestigationBookmarkMutations.Sort(investigation.Bookmarks!)

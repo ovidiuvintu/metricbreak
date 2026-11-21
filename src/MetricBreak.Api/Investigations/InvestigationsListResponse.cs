@@ -5,8 +5,10 @@ public sealed record InvestigationsListResponse(
 
 public sealed record WorkspaceInvestigationItemResponse(
     Guid InvestigationId,
+    string InvestigationName,
     string RecordingName,
     string RelativePath,
     DateTimeOffset ExportedAtUtc,
     string SourceContentHash,
-    long SourceSizeInBytes);
+    long SourceSizeInBytes,
+    Guid RecordingId);

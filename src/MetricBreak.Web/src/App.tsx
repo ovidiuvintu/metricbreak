@@ -11,6 +11,7 @@ import { createMetricBreakTheme } from "./theme/theme";
 import { AppShell } from "./app/AppShell";
 import type { AppSection } from "./app/AppSidebar";
 import { RecordingDashboard } from "./features/recordings/RecordingDashboard";
+import { WorkspaceProvider } from "./workspace/WorkspaceProvider";
 
 const THEME_STORAGE_KEY = "metricbreak-theme";
 const CHART_PLOT_CONTEXT_ATTR = "data-chart-plot";
@@ -78,16 +79,18 @@ export default function App() {
           color: "text.primary",
         }}
       >
-        <AppShell
-          onToggleTheme={toggleTheme}
-          selected={section}
-          onSelectSection={setSection}
-        >
-          <RecordingDashboard
-            section={section}
+        <WorkspaceProvider>
+          <AppShell
+            onToggleTheme={toggleTheme}
+            selected={section}
             onSelectSection={setSection}
-          />
-        </AppShell>
+          >
+            <RecordingDashboard
+              section={section}
+              onSelectSection={setSection}
+            />
+          </AppShell>
+        </WorkspaceProvider>
       </Box>
     </ThemeProvider>
   );

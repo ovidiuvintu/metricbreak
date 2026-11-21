@@ -60,6 +60,7 @@ public sealed class ReplaySessionManager
 
     public bool TryExportInvestigation(
         Guid sessionId,
+        ExportInvestigationRequest? request,
         out ExportedInvestigation? investigation)
     {
         investigation = null;
@@ -98,16 +99,34 @@ public sealed class ReplaySessionManager
                 })
                 .ToArray();
 
+            var investigationId = request?.InvestigationId is Guid existingId &&
+                                    existingId != Guid.Empty
+                ? existingId
+                : Guid.NewGuid();
+
+            var name = string.IsNullOrWhiteSpace(request?.Name)
+                ? entry.Imported.Recording.Name
+                : request!.Name!.Trim();
+
+            var metadata = new InvestigationMetadataSnapshot(
+                name,
+                string.IsNullOrWhiteSpace(request?.Description)
+                    ? null
+                    : request!.Description!.Trim(),
+                request?.ProjectId,
+                DateTimeOffset.UtcNow);
+
             investigation = new ExportedInvestigation(
-                SchemaVersion: 1,
-                InvestigationId: Guid.NewGuid(),
+                SchemaVersion: InvestigationSchema.CurrentVersion,
+                InvestigationId: investigationId,
                 ExportedAtUtc: DateTimeOffset.UtcNow,
                 Recording: new RecordingExportSnapshot(
                     SourceName: entry.Imported.Recording.Source.Name,
                     SourceContentHash: entry.Imported.Recording.Source.ContentHash,
                     SourceSizeInBytes: entry.Imported.Recording.Source.SizeInBytes,
                     RecordingName: entry.Imported.Recording.Name,
-                    SampleCount: entry.Imported.Reader.SampleCount),
+                    SampleCount: entry.Imported.Reader.SampleCount,
+                    RecordingId: entry.Imported.Recording.Id),
                 Session: new SessionExportSnapshot(
                     SequenceNumber: snapshot.Position.SequenceNumber,
                     ExecutionState:
@@ -115,7 +134,9 @@ public sealed class ReplaySessionManager
                     PauseReason:
                         snapshot.ExecutionState.PauseReason.ToString()),
                 Breakpoints: breakpoints,
-                Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>());
+                Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>(),
+                Metadata: metadata,
+                UiState: request?.UiState);
 
             return true;
         }

@@ -31,6 +31,8 @@ import { InvestigationPanel } from "../investigations/InvestigationPanel";
 import { tryQuickBookmark } from "../investigations/quickBookmark";
 import { useActiveInvestigationBookmarks } from "../investigations/useActiveInvestigationBookmarks";
 import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashboard";
+import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
 import type { AppSection } from "../../app/AppSidebar";
@@ -66,6 +68,7 @@ export function RecordingDashboard({
   section,
   onSelectSection,
 }: RecordingDashboardProps) {
+  const { context, setRecordingSession } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
     null,
   );
@@ -271,6 +274,11 @@ export function RecordingDashboard({
       activeSessionIdRef.current = loadedSession.sessionId;
 
       setSession(loadedSession);
+      setRecordingSession(
+        loadedSession.sessionId,
+        loadedSession.recordingId,
+        loadedSession.recordingName,
+      );
       setChannels(loadedChannels);
       setBreakpoints(loadedBreakpoints.breakpoints);
       setCompositeBreakpoints(loadedBreakpoints.compositeBreakpoints ?? []);
@@ -1009,10 +1017,14 @@ export function RecordingDashboard({
           </Typography>
         )}
 
-        {session && activeInvestigationSelection && (
+        {session && (context.investigationName || activeInvestigationSelection) && (
           <Chip
             size="small"
-            label="Investigation active"
+            label={
+              context.investigationName
+                ? `Investigation: ${context.investigationName}`
+                : "Investigation active"
+            }
             variant="outlined"
             color="primary"
             onClick={() => onSelectSection("investigations")}
@@ -1356,8 +1368,14 @@ export function RecordingDashboard({
           timestampOrigin={session.timestampOrigin ?? "Unix"}
           navigationBusy={navigationBusy}
           setupHint={investigationSetupHint}
+          selectedChannelIds={selectedChannelIds}
+          rightAxisChannelIds={rightAxisChannelIds}
           onSeek={(sequence) => void handleSeek(sequence)}
           onBookmarksChanged={() => setBookmarkRevision((value) => value + 1)}
+          onRestoreUiState={(uiState) => {
+            setSelectedChannelIds(uiState.selectedChannelIds);
+            setRightAxisChannelIds(uiState.rightAxisChannelIds);
+          }}
         />
       ) : (
         <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
@@ -1446,6 +1464,7 @@ export function RecordingDashboard({
         {section === "dashboard" ? dashboardView
           : section === "investigations" ? investigationsView
           : section === "recordings" ? (
+            session ? (
             <RecordingWorkspace
               toolbar={toolbar}
               chart={chart}
@@ -1453,6 +1472,13 @@ export function RecordingDashboard({
               replayControls={replayControls}
               details={details}
             />
+            ) : (
+              <RecordingsCatalogPanel
+                busy={loading}
+                onImport={() => setDialogOpen(true)}
+                onOpened={(result) => void handleImportSuccess(result)}
+              />
+            )
           ) : sectionPlaceholder}
       </Box>
 

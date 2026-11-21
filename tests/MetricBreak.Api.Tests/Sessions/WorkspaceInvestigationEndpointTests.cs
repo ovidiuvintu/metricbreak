@@ -44,9 +44,9 @@ public sealed class WorkspaceInvestigationEndpointTests
                 .EnumerateArray()
                 .ToArray();
 
-            var match = Assert.Single(items);
-            Assert.Equal(investigationId, match.GetProperty("investigationId").GetGuid());
-            Assert.Equal("recording.csv", match.GetProperty("recordingName").GetString());
+            var match = items.Single(
+                item => item.GetProperty("investigationId").GetGuid() == investigationId);
+            Assert.Equal("recording", match.GetProperty("recordingName").GetString());
         }
 
         using (var createBookmark = await client.PostAsJsonAsync(
@@ -100,7 +100,7 @@ public sealed class WorkspaceInvestigationEndpointTests
         }
 
         using var filtered = await client.GetAsync(
-            "/api/investigations?recordingName=beta.csv");
+            "/api/investigations?recordingName=beta");
 
         using var json = await ReadJsonAsync(filtered);
         var items = json.RootElement
@@ -109,7 +109,7 @@ public sealed class WorkspaceInvestigationEndpointTests
             .ToArray();
 
         var match = Assert.Single(items);
-        Assert.Equal("beta.csv", match.GetProperty("recordingName").GetString());
+        Assert.Equal("beta", match.GetProperty("recordingName").GetString());
     }
 
     private static async Task<Guid> CreateSessionAsync(

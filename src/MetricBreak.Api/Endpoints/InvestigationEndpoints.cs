@@ -26,30 +26,85 @@ internal static class InvestigationEndpoints
             .WithTags(_investigationTag)
             .Produces<InvestigationsListResponse>(StatusCodes.Status200OK);
 
+        app.MapGet(
+            "/api/investigations/{investigationId:guid}",
+            (
+                Guid investigationId,
+                [FromQuery] Guid? projectId,
+                SessionInvestigationStore store,
+                ProjectWorkspaceStore projectStore) =>
+            {
+                ExportedInvestigation? investigation;
+
+                if (projectId is Guid selectedProjectId)
+                {
+                    if (!projectStore.TryLoadInvestigation(
+                            selectedProjectId,
+                            investigationId,
+                            out investigation,
+                            out var error))
+                    {
+                        return error?.Code == "InvestigationNotFound"
+                            ? Results.NotFound(ToErrorBody(error))
+                            : Results.BadRequest(ToErrorBody(
+                                error ?? new ProjectStoreError(
+                                    "InvestigationLoadFailed",
+                                    "Unable to load investigation.")));
+                    }
+                }
+                else if (!store.TryLoad(investigationId, out investigation))
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(InvestigationDocumentNormalizer.Normalize(investigation!));
+            })
+            .WithName("GetInvestigation")
+            .WithTags(_investigationTag)
+            .Produces<ExportedInvestigation>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
         // EXPORT INVESTIGATION
         app.MapPost(
             "/api/sessions/{sessionId:guid}/export",
             (
                 Guid sessionId,
                 [FromQuery] Guid? projectId,
+                [FromBody] ExportInvestigationRequest? request,
                 ReplaySessionManager manager,
                 SessionInvestigationStore store,
                 ProjectWorkspaceStore projectStore) =>
             {
+                var exportRequest = request ?? new ExportInvestigationRequest();
+                if (projectId is Guid queryProjectId)
+                {
+                    exportRequest = exportRequest with { ProjectId = queryProjectId };
+                }
+
                 if (!manager.TryExportInvestigation(
                         sessionId,
+                        exportRequest,
                         out var investigation)
                     || investigation is null)
                 {
                     return Results.NotFound();
                 }
 
+                investigation = MergeExistingBookmarks(
+                    investigation,
+                    exportRequest.ProjectId ?? projectId,
+                    projectStore,
+                    store);
+
+                investigation = InvestigationDocumentNormalizer.Normalize(investigation);
+
                 string filePath;
 
-                if (projectId is Guid selectedProjectId)
+                var selectedProjectId = exportRequest.ProjectId ?? projectId;
+                if (selectedProjectId is Guid resolvedProjectId)
                 {
                     if (!projectStore.TrySaveInvestigation(
-                            selectedProjectId,
+                            resolvedProjectId,
                             investigation,
                             out var projectPath,
                             out var error)
@@ -318,5 +373,32 @@ internal static class InvestigationEndpoints
             ErrorCode = error.Code,
             Error = error.Message
         };
+    }
+
+    private static ExportedInvestigation MergeExistingBookmarks(
+        ExportedInvestigation investigation,
+        Guid? projectId,
+        ProjectWorkspaceStore projectStore,
+        SessionInvestigationStore sessionStore)
+    {
+        ExportedInvestigation? previous = null;
+
+        if (projectId is Guid selectedProjectId)
+        {
+            projectStore.TryLoadInvestigation(
+                selectedProjectId,
+                investigation.InvestigationId,
+                out previous,
+                out _);
+        }
+        else
+        {
+            sessionStore.TryLoad(investigation.InvestigationId, out previous);
+        }
+
+        if (previous?.Bookmarks is not { Count: > 0 } bookmarks)
+            return investigation;
+
+        return investigation with { Bookmarks = bookmarks };
     }
 }
