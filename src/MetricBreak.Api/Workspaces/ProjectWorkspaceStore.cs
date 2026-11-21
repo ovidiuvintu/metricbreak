@@ -408,6 +408,7 @@ public sealed class ProjectWorkspaceStore
                 return false;
             }
 
+            investigation = InvestigationBookmarkMutations.Normalize(investigation);
             return true;
         }
         catch (JsonException)

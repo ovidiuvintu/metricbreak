@@ -8,19 +8,20 @@ import { AppSidebar, type AppSection } from "./AppSidebar";
 interface AppShellProps {
   children: ReactNode;
   onToggleTheme: () => void;
+  selected: AppSection;
+  onSelectSection: (section: AppSection) => void;
 }
 
 export function AppShell({
   children,
   onToggleTheme,
+  selected,
+  onSelectSection,
 }: AppShellProps) {
-  const [selected, setSelected] =
-    useState<AppSection>("recordings");
-
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleSelectSection = (section: AppSection) => {
-    setSelected(section);
+    onSelectSection(section);
     setMobileOpen(false);
   };
 

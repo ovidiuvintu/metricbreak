@@ -113,7 +113,8 @@ public sealed class ReplaySessionManager
                         snapshot.ExecutionState.Status.ToString(),
                     PauseReason:
                         snapshot.ExecutionState.PauseReason.ToString()),
-                Breakpoints: breakpoints);
+                Breakpoints: breakpoints,
+                Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>());
 
             return true;
         }

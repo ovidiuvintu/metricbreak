@@ -9,6 +9,7 @@ import {
 
 import { createMetricBreakTheme } from "./theme/theme";
 import { AppShell } from "./app/AppShell";
+import type { AppSection } from "./app/AppSidebar";
 import { RecordingDashboard } from "./features/recordings/RecordingDashboard";
 
 const THEME_STORAGE_KEY = "metricbreak-theme";
@@ -31,6 +32,8 @@ export default function App() {
   const [mode, setMode] = useState<PaletteMode>(
     getInitialThemeMode
   );
+
+  const [section, setSection] = useState<AppSection>("dashboard");
 
   const theme = useMemo(
     () => createMetricBreakTheme(mode),
@@ -60,8 +63,15 @@ export default function App() {
           color: "text.primary",
         }}
       >
-        <AppShell onToggleTheme={toggleTheme}>
-          <RecordingDashboard />
+        <AppShell
+          onToggleTheme={toggleTheme}
+          selected={section}
+          onSelectSection={setSection}
+        >
+          <RecordingDashboard
+            section={section}
+            onSelectSection={setSection}
+          />
         </AppShell>
       </Box>
     </ThemeProvider>

@@ -6,7 +6,8 @@ public sealed record ExportedInvestigation(
     DateTimeOffset ExportedAtUtc,
     RecordingExportSnapshot Recording,
     SessionExportSnapshot Session,
-    IReadOnlyList<BreakpointExportSnapshot> Breakpoints);
+    IReadOnlyList<BreakpointExportSnapshot> Breakpoints,
+    IReadOnlyList<InvestigationBookmarkSnapshot>? Bookmarks = null);
 
 public sealed record RecordingExportSnapshot(
     string SourceName,

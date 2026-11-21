@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<ReplaySessionManager>();
 builder.Services.AddSingleton<SessionInvestigationStore>();
 builder.Services.AddSingleton<ProjectWorkspaceStore>();
+builder.Services.AddSingleton<InvestigationBookmarkService>();
 builder.Services.AddScoped<CsvSessionImportService>();
 
 builder.Services.AddOpenApi();
