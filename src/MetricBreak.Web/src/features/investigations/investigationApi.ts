@@ -101,6 +101,7 @@ export const investigationApi = {
         uiState?: {
             selectedChannelIds: string[];
             rightAxisChannelIds: string[];
+            axisPins?: Partial<Record<string, "left" | "right">>;
             chartViewport?: {
                 pageStart: number;
                 dataZoomStartPercent: number;
