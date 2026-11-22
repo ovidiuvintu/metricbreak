@@ -15,12 +15,15 @@ public sealed class ImportedCsvRecording
 
     public RecordingTimeline Timeline { get; }
 
+    public TimestampMapping? TimestampMapping { get; }
+
     public ImportedCsvRecording(
         Recording recording,
         IReadOnlyList<ChannelDefinition> channels,
         ITelemetryReader reader,
         TimestampOrigin timestampOrigin = TimestampOrigin.Unix,
-        RecordingTimeline? timeline = null)
+        RecordingTimeline? timeline = null,
+        TimestampMapping? timestampMapping = null)
     {
         ArgumentNullException.ThrowIfNull(recording);
         ArgumentNullException.ThrowIfNull(channels);
@@ -40,6 +43,7 @@ public sealed class ImportedCsvRecording
         Reader = reader;
         TimestampOrigin = timestampOrigin;
         Timeline = timeline ?? RecordingTimeline.Empty;
+        TimestampMapping = timestampMapping;
     }
 }
 

@@ -155,7 +155,9 @@ public sealed class ReplaySessionManager
                     SourceSizeInBytes: entry.Imported.Recording.Source.SizeInBytes,
                     RecordingName: entry.Imported.Recording.Name,
                     SampleCount: entry.Imported.Reader.SampleCount,
-                    RecordingId: entry.Imported.Recording.Id),
+                    RecordingId: entry.Imported.Recording.Id,
+                    TimestampMapping: TimestampMappingSnapshots.From(
+                        entry.Imported.TimestampMapping)),
                 Session: new SessionExportSnapshot(
                     SequenceNumber: snapshot.Position.SequenceNumber,
                     ExecutionState:

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using MetricBreak.Api.Recordings;
 
 namespace MetricBreak.Api.Tests.Sessions;
 
@@ -171,6 +172,119 @@ public sealed class InvestigationOpenEndpointTests
             breakpointsJson.RootElement
                 .GetProperty("breakpoints")
                 .GetArrayLength());
+    }
+
+    [Fact]
+    public async Task OpenInvestigation_ReusesTheTimestampMappingFromImport()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        const string csv =
+            "time,Pressure\n" +
+            "0,10\n" +
+            "1,11\n";
+
+        using var upload = CreateCsvUploadContent(csv, "elapsed.csv");
+        upload.Add(new StringContent("0"), "timestampColumn");
+        upload.Add(new StringContent("RelativeElapsedSeconds"), "timestampFormat");
+
+        using var createSessionResponse = await client.PostAsync("/api/sessions", upload);
+        var createBody = await createSessionResponse.Content.ReadAsStringAsync();
+        Assert.True(createSessionResponse.StatusCode == HttpStatusCode.Created, createBody);
+
+        using var created = JsonDocument.Parse(createBody);
+        var sessionId = created.RootElement.GetProperty("sessionId").GetGuid();
+        var recordingId = created.RootElement.GetProperty("recordingId").GetGuid();
+
+        using (var state = await client.GetAsync($"/api/sessions/{sessionId}"))
+        {
+            using var json = await ReadJsonAsync(state);
+            Assert.Equal("Elapsed", json.RootElement.GetProperty("timestampOrigin").GetString());
+        }
+
+        Guid investigationId;
+        using (var exportResponse = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/export",
+                   new { name = "Elapsed mapping" }))
+        {
+            Assert.Equal(HttpStatusCode.Created, exportResponse.StatusCode);
+            using var exported = await ReadJsonAsync(exportResponse);
+            investigationId = exported.RootElement.GetProperty("investigationId").GetGuid();
+        }
+
+        using (var saved = await client.GetAsync($"/api/investigations/{investigationId}"))
+        {
+            using var json = await ReadJsonAsync(saved);
+            var mapping = json.RootElement
+                .GetProperty("recording")
+                .GetProperty("timestampMapping");
+            Assert.Equal(0, mapping.GetProperty("columnIndex").GetInt32());
+            Assert.Equal("RelativeElapsedSeconds", mapping.GetProperty("format").GetString());
+        }
+
+        using var reopen = await client.PostAsync(
+            $"/api/investigations/{investigationId}/open?closeSessionId={sessionId}",
+            content: null);
+        var reopenBody = await reopen.Content.ReadAsStringAsync();
+        Assert.True(reopen.StatusCode == HttpStatusCode.Created, reopenBody);
+
+        using var reopenJson = JsonDocument.Parse(reopenBody);
+        var reopenedSessionId = reopenJson.RootElement.GetProperty("sessionId").GetGuid();
+        using var reopenedState = await client.GetAsync($"/api/sessions/{reopenedSessionId}");
+        using var reopenedJson = await ReadJsonAsync(reopenedState);
+        Assert.Equal("Elapsed", reopenedJson.RootElement.GetProperty("timestampOrigin").GetString());
+
+        using var catalogOpen = await client.PostAsync(
+            $"/api/recordings/{recordingId}/open",
+            content: null);
+        var catalogBody = await catalogOpen.Content.ReadAsStringAsync();
+        Assert.True(catalogOpen.StatusCode == HttpStatusCode.Created, catalogBody);
+        using var catalogJson = JsonDocument.Parse(catalogBody);
+        var catalogSessionId = catalogJson.RootElement.GetProperty("sessionId").GetGuid();
+        using var catalogState = await client.GetAsync($"/api/sessions/{catalogSessionId}");
+        using var catalogStateJson = await ReadJsonAsync(catalogState);
+        Assert.Equal("Elapsed", catalogStateJson.RootElement.GetProperty("timestampOrigin").GetString());
+    }
+
+    [Fact]
+    public void Catalog_WithoutAStoredMapping_StillLoads()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "metricbreak-catalog-" + Guid.NewGuid().ToString("N"));
+        var recordingId = Guid.NewGuid();
+        Directory.CreateDirectory(root);
+        try
+        {
+            var catalogPath = Path.Combine(root, "recordings-catalog.json");
+            File.WriteAllText(
+                catalogPath,
+                $$"""
+                {
+                  "SchemaVersion": 1,
+                  "Recordings": [
+                    {
+                      "RecordingId": "{{recordingId}}",
+                      "Name": "legacy",
+                      "SourceName": "legacy.csv",
+                      "SourceContentHash": "abc",
+                      "SourceSizeInBytes": 3,
+                      "SampleCount": 1,
+                      "ArchiveFileName": "legacy.csv",
+                      "ImportedAtUtc": "2026-01-01T00:00:00Z"
+                    }
+                  ]
+                }
+                """);
+
+            var store = new RecordingCatalogStore(catalogPath, Path.Combine(root, "archive"));
+            Assert.True(store.TryGet(recordingId, out var entry));
+            Assert.NotNull(entry);
+            Assert.Null(entry!.ReadTimestampMapping());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static async Task<Guid> CreateSessionAsync(HttpClient client)
