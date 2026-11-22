@@ -20,7 +20,7 @@ import type { SampleRangeItem } from "./sampleTypes";
 
 interface ChannelListProps {
   sample?: CurrentSample | null;
-  previousSample?: SampleRangeItem | null;
+  previousSample?: CurrentSample | SampleRangeItem | null;
   channels: ChannelMetadata[];
   selectedChannelIds?: string[];
   navigationBusy?: boolean;
@@ -68,7 +68,7 @@ function readChannelValue(
 
 function hasChannelChanged(
   current: CurrentSample | null | undefined,
-  previous: SampleRangeItem | null | undefined,
+  previous: CurrentSample | SampleRangeItem | null | undefined,
   channelId: string,
 ): boolean {
   if (!current || !previous || current.sequence !== previous.sequence + 1) return false;
