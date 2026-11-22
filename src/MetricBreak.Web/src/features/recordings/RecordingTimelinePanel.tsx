@@ -46,11 +46,12 @@ export function RecordingTimelinePanel({
     tab === "events" ? timeline!.events : timeline!.stages;
 
   return (
-    <Stack spacing={1} sx={{ minHeight: 0 }}>
+    <Stack spacing={1} sx={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
       <Tabs
         value={tab}
         onChange={(_, value: "events" | "stages") => setTab(value)}
         variant="fullWidth"
+        sx={{ flexShrink: 0 }}
       >
         <Tab
           value="events"
@@ -62,7 +63,16 @@ export function RecordingTimelinePanel({
         />
       </Tabs>
 
-      <List dense disablePadding sx={{ overflowY: "auto" }}>
+      <List
+        dense
+        disablePadding
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+        }}
+      >
         {items.map((item) => (
           <ListItemButton
             key={`${item.sampleSequence}-${item.name}`}
