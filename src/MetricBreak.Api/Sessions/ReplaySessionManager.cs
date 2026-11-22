@@ -1040,6 +1040,43 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryMeasureBreakpointCoverage(
+        Guid sessionId,
+        out BreakpointCoverageResponse? response)
+    {
+        response = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            response = new BreakpointCoverageResponse(
+                entry.Controller.MeasureBreakpointCoverage(entry.Breakpoints)
+                    .Select(static coverage => new BreakpointCoverageItemResponse(
+                        coverage.BreakpointId,
+                        coverage.Crossings,
+                        coverage.MatchingSamples,
+                        coverage.MatchingNanoseconds,
+                        coverage.LongestRunSamples,
+                        coverage.LongestRunNanoseconds,
+                        coverage.Relation switch
+                        {
+                            Domain.Breakpoints.BreakpointCoverageRelation.Above => "above",
+                            Domain.Breakpoints.BreakpointCoverageRelation.AtOrAbove => "atOrAbove",
+                            Domain.Breakpoints.BreakpointCoverageRelation.Below => "below",
+                            Domain.Breakpoints.BreakpointCoverageRelation.AtOrBelow => "atOrBelow",
+                            _ => "matching",
+                        }))
+                    .ToArray());
+
+            return true;
+        }
+    }
+
     public bool TryStopPlaybackWithSnapshot(
         Guid sessionId,
         out ReplaySessionSnapshot? snapshot)

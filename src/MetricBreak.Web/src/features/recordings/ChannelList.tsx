@@ -36,7 +36,10 @@ interface ChannelListProps {
 
 const MAX_CHANNEL_NAME_LENGTH = 16;
 
-function formatChannelValue(sample: CurrentSample | null | undefined, channelId: string): string {
+function formatChannelValue(
+  sample: CurrentSample | SampleRangeItem | null | undefined,
+  channelId: string,
+): string {
   const typed = sample?.typedChannels?.[channelId];
   if (typed !== undefined) {
     if (typed.valueType === "Missing" || typed.value === null) return "N/A";
@@ -160,6 +163,15 @@ export function ChannelList({
           {visibleChannels.length}/{channels.length}
         </Typography>
       </Box>
+      {sample && previousSample && previousSample.sequence + 1 === sample.sequence && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ px: 1, pb: 0.5, display: "block" }}
+        >
+          A change shows the previous sample, then this one.
+        </Typography>
+      )}
 
       {/* Channel values */}
       <TableContainer
@@ -185,9 +197,9 @@ export function ChannelList({
           }}
         >
           <colgroup>
-            <col style={{ width: "55%" }} />
-            <col style={{ width: "28%" }} />
-            <col style={{ width: "17%" }} />
+            <col style={{ width: "38%" }} />
+            <col style={{ width: "47%" }} />
+            <col style={{ width: "15%" }} />
           </colgroup>
 
           <TableHead>
@@ -202,6 +214,12 @@ export function ChannelList({
             {visibleChannels.map((channel) => {
               const displayValue = formatChannelValue(sample, channel.channelId);
               const changed = hasChannelChanged(sample, previousSample, channel.channelId);
+              const previousValue = changed
+                ? formatChannelValue(previousSample, channel.channelId)
+                : null;
+              const comparison = previousValue != null
+                ? `${previousValue} → ${displayValue}`
+                : displayValue;
 
               return (
                 <TableRow key={channel.channelId} hover>
@@ -251,7 +269,7 @@ export function ChannelList({
                   {/* Current value */}
                   <TableCell align="right">
                     <Tooltip
-                      title={displayValue === "N/A" ? "No value available" : displayValue}
+                      title={comparison === "N/A" ? "No value available" : comparison}
                       arrow
                     >
                       <Typography
@@ -259,15 +277,14 @@ export function ChannelList({
                         variant="caption"
                         sx={{
                           display: "block",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          overflowWrap: "anywhere",
                           fontVariantNumeric: "tabular-nums",
+                          lineHeight: 1.35,
                           color: changed ? "warning.main" : "text.primary",
                           fontWeight: changed ? 700 : 400,
                         }}
                       >
-                        {displayValue}
+                        {comparison}
                       </Typography>
                     </Tooltip>
                   </TableCell>

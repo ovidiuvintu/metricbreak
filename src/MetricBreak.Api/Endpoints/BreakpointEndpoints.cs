@@ -457,6 +457,23 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
 
+        app.MapGet(
+            "/api/sessions/{sessionId:guid}/breakpoints/coverage",
+            (Guid sessionId, ReplaySessionManager manager) =>
+            {
+                if (!manager.TryMeasureBreakpointCoverage(sessionId, out var response)
+                    || response is null)
+                {
+                    return Results.NotFound();
+                }
+
+                return Results.Ok(response);
+            })
+            .WithName("MeasureSessionBreakpointCoverage")
+            .WithTags(_breakpointTag)
+            .Produces<BreakpointCoverageResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status404NotFound);
+
         return app;
     }
 }

@@ -148,7 +148,8 @@ export function RecordingTimelinePanel({
           const key = timelineEntryKey(item);
           const stage = tab === "events" ? timelineEntryAt(stages, item.sampleSequence) : null;
           const stageEvents = tab === "stages" ? eventsInStage(events, stages, item) : [];
-          const selected = key === scrollKey;
+          const isCurrentStage = tab === "stages" && currentStage != null && key === timelineEntryKey(currentStage);
+          const selected = tab === "events" ? key === scrollKey : isCurrentStage;
 
           return (
             <ListItemButton
@@ -158,7 +159,16 @@ export function RecordingTimelinePanel({
               onClick={() => onSeek(item.sampleSequence)}
             >
               <ListItemText
-                primary={item.name}
+                primary={
+                  isCurrentStage ? (
+                    <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
+                      {item.name}
+                      <Typography component="span" variant="caption" color="primary.main" sx={{ fontWeight: 700 }}>
+                        Current
+                      </Typography>
+                    </Box>
+                  ) : item.name
+                }
                 secondary={
                   <TimelineSecondary
                     item={item}

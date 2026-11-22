@@ -9,6 +9,8 @@ import NavigateNextIcon from "@mui/icons-material/NavigateNext";
 import {
   isRecordingGap,
   type Breakpoint,
+  type BreakpointCoverage,
+  type BreakpointCoverageRelation,
   type BreakpointOperator,
   type CompositeBreakpoint,
 } from "./breakpointApi";
@@ -27,6 +29,71 @@ interface BreakpointPanelProps {
   onDelete: (breakpointId: string) => void;
   onRunTo?: (breakpointId: string, direction: "forward" | "backward") => void;
   focusedBreakpointId?: string | null;
+  coverage?: BreakpointCoverage[];
+}
+
+const relationLabel: Record<BreakpointCoverageRelation, string> = {
+  above: "above",
+  atOrAbove: "at or above",
+  below: "below",
+  atOrBelow: "at or below",
+  matching: "matching",
+};
+
+function formatDuration(nanoseconds: number): string {
+  const seconds = Math.max(0, Math.round(nanoseconds / 1_000_000_000));
+  if (seconds < 60) return `${seconds.toLocaleString()}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (minutes < 60) return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
+}
+
+function formatSpan(samples: number, nanoseconds: number): string {
+  if (samples <= 0) return "0s";
+  if (nanoseconds <= 0) {
+    return samples === 1 ? "1 sample" : `${samples.toLocaleString()} samples`;
+  }
+  const seconds = Math.round(nanoseconds / 1_000_000_000);
+  if (Math.abs(seconds - samples) > 1) {
+    return `${samples.toLocaleString()} samples (${formatDuration(nanoseconds)})`;
+  }
+  return formatDuration(nanoseconds);
+}
+
+function formatCoverage(coverage: BreakpointCoverage): string {
+  const side = relationLabel[coverage.relation] ?? "matching";
+  const parts: string[] = [];
+  if (coverage.crossings != null) {
+    parts.push(
+      `${coverage.crossings.toLocaleString()} ${coverage.crossings === 1 ? "crossing" : "crossings"}`,
+    );
+  }
+  parts.push(`${formatSpan(coverage.matchingSamples, coverage.matchingNanoseconds)} ${side}`);
+  if (
+    coverage.longestRunSamples > 0
+    && coverage.longestRunSamples !== coverage.matchingSamples
+  ) {
+    parts.push(
+      `longest ${formatSpan(coverage.longestRunSamples, coverage.longestRunNanoseconds)}`,
+    );
+  }
+  return parts.join(" · ");
+}
+
+function describeCoverage(coverage: BreakpointCoverage): string {
+  const samples = coverage.matchingSamples.toLocaleString();
+  const longest = coverage.longestRunSamples.toLocaleString();
+  const run = coverage.longestRunSamples === coverage.matchingSamples
+    ? "one run"
+    : `longest run ${longest} samples`;
+  if (coverage.relation === "matching") {
+    return `${samples} samples match this rule, ${run}.`;
+  }
+  const side = relationLabel[coverage.relation] ?? "matching";
+  return `${samples} samples ${side} the threshold, ${run}.`;
 }
 
 const symbols: Record<BreakpointOperator, string> = {
@@ -35,9 +102,25 @@ const symbols: Record<BreakpointOperator, string> = {
   MissingLongerThan: "missing >",
 };
 
+function CoverageCaption({ coverage }: { coverage: BreakpointCoverage | undefined }) {
+  if (!coverage) return null;
+  return (
+    <Tooltip title={describeCoverage(coverage)}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: "block", overflowWrap: "anywhere" }}
+      >
+        {formatCoverage(coverage)}
+      </Typography>
+    </Tooltip>
+  );
+}
+
 export function BreakpointPanel({
   breakpoints, compositeBreakpoints, channels, loading, busy, error,
   onAdd, onAddComposite, onSetEnabled, onDelete, onRunTo, focusedBreakpointId,
+  coverage = [],
 }: BreakpointPanelProps) {
   const names = new Map(channels.map(c => [c.channelId, c.name]));
   const scopeName = (channelId: string) =>
@@ -47,6 +130,7 @@ export function BreakpointPanel({
       ? `${scopeName(c.channelId)} missing > ${c.threshold}s`
       : `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`;
   const total = breakpoints.length + compositeBreakpoints.length;
+  const coverageById = new Map(coverage.map(item => [item.breakpointId, item]));
 
   const actions = (id: string, enabled: boolean, label: string) => (
   <>
@@ -150,6 +234,7 @@ export function BreakpointPanel({
                     ? `missing > ${b.threshold}s`
                     : `${symbols[b.operator]} ${b.operator === "Changed" ? "" : b.value ?? b.threshold.toLocaleString()}`}
                 </Typography>
+                <CoverageCaption coverage={coverageById.get(b.breakpointId)} />
               </Box>
               {actions(b.breakpointId, b.isEnabled, format(b))}
             </Box>
@@ -181,6 +266,7 @@ export function BreakpointPanel({
                   <Tooltip title={expression}>
                     <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{expression}</Typography>
                   </Tooltip>
+                  <CoverageCaption coverage={coverageById.get(b.breakpointId)} />
                 </Box>
                 {actions(b.breakpointId, b.isEnabled, expression)}
               </Box>
