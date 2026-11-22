@@ -1540,11 +1540,9 @@ export function RecordingDashboard({
         sx={{
           flex: "1 1 0%",
           minHeight: 0,
-          overflowY: "auto",
-          overflowX: "hidden",
-          scrollbarGutter: "stable",
-          overscrollBehavior: "contain",
-          display: inspectorTab === 3 ? "block" : "none",
+          overflow: "hidden",
+          display: inspectorTab === 3 ? "flex" : "none",
+          flexDirection: "column",
           p: 1,
         }}
       >
