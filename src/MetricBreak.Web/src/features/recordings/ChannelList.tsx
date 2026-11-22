@@ -7,12 +7,6 @@ import {
   FormControlLabel,
   Paper,
   Switch,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -33,8 +27,6 @@ interface ChannelListProps {
   onNextChange?: (channelId: string) => void;
   onPreviousChange?: (channelId: string) => void;
 }
-
-const MAX_CHANNEL_NAME_LENGTH = 16;
 
 function formatChannelValue(
   sample: CurrentSample | SampleRangeItem | null | undefined,
@@ -83,14 +75,6 @@ function hasChannelChanged(
   const a = readChannelValue(current, channelId);
   const b = readChannelValue(previous, channelId);
   return a.type !== b.type || !Object.is(a.value, b.value);
-}
-
-function truncateChannelName(name: string): string {
-  if (name.length <= MAX_CHANNEL_NAME_LENGTH) {
-    return name;
-  }
-
-  return `${name.slice(0, MAX_CHANNEL_NAME_LENGTH - 3)}...`;
 }
 
 export function ChannelList({
@@ -173,8 +157,8 @@ export function ChannelList({
         </Typography>
       )}
 
-      {/* Channel values */}
-      <TableContainer
+      {/* Channel values. Name, value, and unit stay together; spare width stays at the end of the row. */}
+      <Box
         sx={{
           width: "100%",
           overflowX: "hidden",
@@ -183,154 +167,129 @@ export function ChannelList({
           minHeight: 0,
         }}
       >
-        <Table
-          stickyHeader
-          size="small"
-          sx={{
-            width: "100%",
-            tableLayout: "fixed",
-            "& .MuiTableCell-root": {
-              px: 0.75,
-              py: 0.75,
-              fontSize: "0.72rem",
-            },
-          }}
-        >
-          <colgroup>
-            <col style={{ width: "38%" }} />
-            <col style={{ width: "47%" }} />
-            <col style={{ width: "15%" }} />
-          </colgroup>
+        {visibleChannels.map((channel) => {
+          const displayValue = formatChannelValue(sample, channel.channelId);
+          const changed = hasChannelChanged(sample, previousSample, channel.channelId);
+          const previousValue = changed
+            ? formatChannelValue(previousSample, channel.channelId)
+            : null;
+          const comparison = previousValue != null
+            ? `${previousValue} → ${displayValue}`
+            : displayValue;
 
-          <TableHead>
-            <TableRow>
-              <TableCell>Channel</TableCell>
-              <TableCell align="right">Value</TableCell>
-              <TableCell>Unit</TableCell>
-            </TableRow>
-          </TableHead>
+          return (
+            <Box
+              key={channel.channelId}
+              sx={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 0.75,
+                minWidth: 0,
+                px: 1,
+                py: 0.5,
+                "&:hover": { bgcolor: "action.hover" },
+              }}
+            >
+              <Tooltip title={channel.name} arrow placement="left">
+                <Typography
+                  component="span"
+                  variant="caption"
+                  color="text.secondary"
+                  noWrap
+                  sx={{ flex: "0 1 auto", minWidth: 0 }}
+                >
+                  {channel.name}
+                </Typography>
+              </Tooltip>
 
-          <TableBody>
-            {visibleChannels.map((channel) => {
-              const displayValue = formatChannelValue(sample, channel.channelId);
-              const changed = hasChannelChanged(sample, previousSample, channel.channelId);
-              const previousValue = changed
-                ? formatChannelValue(previousSample, channel.channelId)
-                : null;
-              const comparison = previousValue != null
-                ? `${previousValue} → ${displayValue}`
-                : displayValue;
-
-              return (
-                <TableRow key={channel.channelId} hover>
-                  {/* Channel name and change navigation */}
-                  <TableCell>
-                    <Box sx={{ display: "flex", alignItems: "center", minWidth: 0, gap: 0.25 }}>
-                      <Tooltip title={channel.name} arrow placement="left">
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-                        >
-                          {truncateChannelName(channel.name)}
-                        </Typography>
-                      </Tooltip>
-                      <Box sx={{ display: "flex", flexShrink: 0 }}>
-                        <Tooltip title={`Previous change: ${channel.name}`}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              sx={{ p: 0.25 }}
-                              aria-label={`Previous change for ${channel.name}`}
-                              disabled={navigationBusy || !onPreviousChange || !sample || sample.sequence <= 0}
-                              onClick={() => onPreviousChange?.(channel.channelId)}
-                            >
-                              <NavigateBeforeIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title={`Next change: ${channel.name}`}>
-                          <span>
-                            <IconButton
-                              size="small"
-                              sx={{ p: 0.25 }}
-                              aria-label={`Next change for ${channel.name}`}
-                              disabled={navigationBusy || !onNextChange || !sample}
-                              onClick={() => onNextChange?.(channel.channelId)}
-                            >
-                              <NavigateNextIcon fontSize="small" />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                      </Box>
-                    </Box>
-                  </TableCell>
-
-                  {/* Current value */}
-                  <TableCell align="right">
-                    <Tooltip
-                      title={comparison === "N/A" ? "No value available" : comparison}
-                      arrow
-                    >
-                      <Typography
-                        component="span"
-                        variant="caption"
-                        sx={{
-                          display: "block",
-                          overflowWrap: "anywhere",
-                          fontVariantNumeric: "tabular-nums",
-                          lineHeight: 1.35,
-                          color: changed ? "warning.main" : "text.primary",
-                          fontWeight: changed ? 700 : 400,
-                        }}
-                      >
-                        {comparison}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-
-                  {/* Unit */}
-                  <TableCell>
-                    <Tooltip
-                      title={channel.unit ?? "No unit"}
-                      arrow
-                    >
-                      <Typography
-                        component="span"
-                        variant="caption"
-                        color="text.secondary"
-                        sx={{
-                          display: "block",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {channel.unit ?? "—"}
-                      </Typography>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-
-            {visibleChannels.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={3}>
+              <Tooltip
+                title={comparison === "N/A" ? "No value available" : comparison}
+                arrow
+              >
+                <Box sx={{ flexShrink: 0, lineHeight: 1.2 }}>
                   <Typography
+                    component="span"
                     variant="caption"
-                    color="text.secondary"
+                    noWrap
+                    sx={{
+                      display: "block",
+                      fontVariantNumeric: "tabular-nums",
+                      color: changed ? "warning.main" : "text.primary",
+                      fontWeight: changed ? 700 : 400,
+                    }}
                   >
-                    No channels selected. Select channels
-                    in the Channels tab or enable
-                    "Show all channels".
+                    {displayValue}
                   </Typography>
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                  {previousValue != null && (
+                    <Typography
+                      component="span"
+                      variant="caption"
+                      color="text.secondary"
+                      noWrap
+                      sx={{ display: "block", fontSize: "0.65rem", fontVariantNumeric: "tabular-nums" }}
+                    >
+                      was {previousValue}
+                    </Typography>
+                  )}
+                </Box>
+              </Tooltip>
+
+              <Tooltip title={channel.unit ?? "No unit"} arrow>
+                <Typography
+                  component="span"
+                  variant="caption"
+                  color="text.secondary"
+                  noWrap
+                  sx={{ flexShrink: 0 }}
+                >
+                  {channel.unit ?? "—"}
+                </Typography>
+              </Tooltip>
+
+              <Box sx={{ display: "flex", flexShrink: 0, ml: "auto" }}>
+                <Tooltip title={`Previous change: ${channel.name}`}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      sx={{ p: 0.25 }}
+                      aria-label={`Previous change for ${channel.name}`}
+                      disabled={navigationBusy || !onPreviousChange || !sample || sample.sequence <= 0}
+                      onClick={() => onPreviousChange?.(channel.channelId)}
+                    >
+                      <NavigateBeforeIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Tooltip title={`Next change: ${channel.name}`}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      sx={{ p: 0.25 }}
+                      aria-label={`Next change for ${channel.name}`}
+                      disabled={navigationBusy || !onNextChange || !sample}
+                      onClick={() => onNextChange?.(channel.channelId)}
+                    >
+                      <NavigateNextIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
+            </Box>
+          );
+        })}
+
+        {visibleChannels.length === 0 && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ display: "block", px: 1, py: 0.75 }}
+          >
+            No channels selected. Select channels
+            in the Channels tab or enable
+            "Show all channels".
+          </Typography>
+        )}
+      </Box>
     </Paper>
   );
 }
