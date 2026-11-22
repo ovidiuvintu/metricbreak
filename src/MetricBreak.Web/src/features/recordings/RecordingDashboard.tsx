@@ -374,11 +374,13 @@ export function RecordingDashboard({
     previousSampleResult.currentSequence === watchSequence
       ? previousSampleResult.sample
       : null;
+  const heldWatchSample = heldWatchSampleRef.current;
   const heldPreviousSample =
-    heldWatchSampleRef.current?.sessionId === watchSessionId &&
+    heldWatchSample != null &&
+    heldWatchSample.sessionId === watchSessionId &&
     session?.currentSample != null &&
-    heldWatchSampleRef.current.sample.sequence + 1 === session.currentSample.sequence
-      ? heldWatchSampleRef.current.sample
+    heldWatchSample.sample.sequence + 1 === session.currentSample.sequence
+      ? heldWatchSample.sample
       : null;
   const previousWatchSample = fetchedPreviousSample ?? heldPreviousSample;
 
