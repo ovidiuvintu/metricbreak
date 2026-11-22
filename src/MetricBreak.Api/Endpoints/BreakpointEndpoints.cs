@@ -89,6 +89,68 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status404NotFound);
 
         app.MapPost(
+            "/api/sessions/{sessionId:guid}/breakpoints/missing-data",
+            (
+                Guid sessionId,
+                CreateMissingDataBreakpointRequest request,
+                ReplaySessionManager manager) =>
+            {
+                try
+                {
+                    var found = manager.TryAddMissingDataBreakpoint(
+                        sessionId,
+                        request.MinimumSeconds,
+                        request.ChannelId,
+                        out var breakpoint,
+                        out var unknownChannel);
+
+                    if (!found)
+                        return Results.NotFound();
+
+                    if (unknownChannel)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            Error = "UnknownChannelId",
+                            Message = "Channel ID is not part of this recording."
+                        });
+                    }
+
+                    if (breakpoint is null)
+                        return Results.Problem(
+                            "Breakpoint was not created.");
+
+                    var response = BreakpointResponseMapper.Map(
+                        breakpoint,
+                        isEnabled: true);
+
+                    return Results.Created(
+                        $"/api/sessions/{sessionId}/breakpoints/{response.BreakpointId}",
+                        response);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+            })
+            .WithName("CreateSessionMissingDataBreakpoint")
+            .WithTags(_breakpointTag)
+            .Produces<BreakpointResponse>(
+                StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
+        app.MapPost(
             "/api/sessions/{sessionId:guid}/breakpoints/composite",
             (
                 Guid sessionId,
@@ -212,7 +274,7 @@ internal static class BreakpointEndpoints
                 Guid sessionId,
                 ReplaySessionManager manager) =>
             {
-                var found = manager.TryGetBreakpoints(
+                var found = manager.TryGetBreakpointResponses(
                     sessionId,
                     out var breakpoints);
 
@@ -224,12 +286,7 @@ internal static class BreakpointEndpoints
                     return Results.NotFound();
 
                 var response = new BreakpointsResponse(
-                    breakpoints
-                        .Select(registered =>
-                            BreakpointResponseMapper.Map(
-                                registered.Breakpoint,
-                                registered.IsEnabled))
-                        .ToArray(),
+                    breakpoints,
                     compositeBreakpoints
                         .Select(registered => new CompositeBreakpointResponse(
                             BreakpointId: registered.Breakpoint.Id,

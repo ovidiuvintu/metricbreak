@@ -31,6 +31,8 @@ public sealed record BreakpointHit
     // New composite properties.
     public bool IsComposite { get; }
 
+    public bool IsMissingData { get; }
+
     public LogicalOperator? LogicalOperator { get; }
 
     public IReadOnlyList<BreakpointConditionHit> Conditions { get; }
@@ -76,6 +78,7 @@ public sealed record BreakpointHit
         Threshold = threshold;
 
         IsComposite = false;
+        IsMissingData = false;
         LogicalOperator = null;
 
         Conditions = Array.AsReadOnly(
@@ -88,6 +91,65 @@ public sealed record BreakpointHit
                     threshold,
                     Matched: true)
             });
+    }
+
+    public static BreakpointHit ForMissingData(
+        Guid breakpointId,
+        SamplePosition position,
+        TelemetryTimestamp timestamp,
+        Guid channelId,
+        double gapSeconds,
+        double minimumSeconds)
+    {
+        return new BreakpointHit(
+            breakpointId,
+            position,
+            timestamp,
+            channelId,
+            gapSeconds,
+            minimumSeconds,
+            missingData: true);
+    }
+
+    private BreakpointHit(
+        Guid breakpointId,
+        SamplePosition position,
+        TelemetryTimestamp timestamp,
+        Guid channelId,
+        double gapSeconds,
+        double minimumSeconds,
+        bool missingData)
+    {
+        if (!missingData)
+        {
+            throw new ArgumentException(
+                "Use the comparison constructor for a value breakpoint.",
+                nameof(missingData));
+        }
+
+        ValidateCommon(breakpointId, position);
+
+        if (double.IsNaN(gapSeconds) || double.IsInfinity(gapSeconds) || gapSeconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(gapSeconds));
+        }
+
+        if (!double.IsFinite(minimumSeconds) || minimumSeconds <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumSeconds));
+        }
+
+        BreakpointId = breakpointId;
+        Position = position;
+        Timestamp = timestamp;
+        ChannelId = channelId;
+        ObservedValue = gapSeconds;
+        Operator = default;
+        Threshold = minimumSeconds;
+        IsComposite = false;
+        IsMissingData = true;
+        LogicalOperator = null;
+        Conditions = Array.AsReadOnly(Array.Empty<BreakpointConditionHit>());
     }
 
     /// <summary>
@@ -143,6 +205,7 @@ public sealed record BreakpointHit
         Timestamp = timestamp;
 
         IsComposite = true;
+        IsMissingData = false;
         LogicalOperator = logicalOperator;
         Conditions = Array.AsReadOnly(conditionArray);
 
@@ -170,6 +233,7 @@ public sealed record BreakpointHit
             && Operator == other.Operator
             && Threshold.Equals(other.Threshold)
             && IsComposite == other.IsComposite
+            && IsMissingData == other.IsMissingData
             && LogicalOperator == other.LogicalOperator
             && Conditions.SequenceEqual(other.Conditions);
     }
@@ -186,6 +250,7 @@ public sealed record BreakpointHit
         hash.Add(Operator);
         hash.Add(Threshold);
         hash.Add(IsComposite);
+        hash.Add(IsMissingData);
         hash.Add(LogicalOperator);
 
         foreach (var condition in Conditions)

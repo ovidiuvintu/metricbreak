@@ -13,6 +13,7 @@ public sealed class ReplaySession
 {
     private readonly ITelemetryReader _reader;
     private readonly ReplayCursor _cursor;
+    private readonly Func<long, TelemetrySample> _readSample;
 
     public Guid RecordingId => _cursor.RecordingId;
 
@@ -54,6 +55,7 @@ public sealed class ReplaySession
         }
 
         _reader = reader;
+        _readSample = sequence => _reader.Read(sequence);
 
         _cursor = new ReplayCursor(
             recording.Id,
@@ -358,7 +360,8 @@ public sealed class ReplaySession
                         breakpoint,
                         _cursor.Position,
                         sample,
-                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null);
+                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null,
+                        _readSample);
 
                     if (hit is not null)
                         hits.Add(hit);
@@ -422,7 +425,8 @@ public sealed class ReplaySession
                 foreach (var breakpoint in active)
                 {
                     var hit = BreakpointEvaluator.EvaluateHit(breakpoint, _cursor.Position, sample,
-                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null);
+                        _cursor.CurrentSequenceNumber > 0 ? _reader.Read(_cursor.CurrentSequenceNumber - 1) : null,
+                        _readSample);
                     if (hit is not null)
                         hits.Add(hit);
                 }
@@ -539,7 +543,8 @@ public sealed class ReplaySession
                         breakpoint,
                         position,
                         sample,
-                        previous) is null)
+                        previous,
+                        _readSample) is null)
                 {
                     continue;
                 }

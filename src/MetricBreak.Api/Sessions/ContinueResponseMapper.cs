@@ -21,6 +21,16 @@ public static class ContinueResponseMapper
     private static BreakpointHitResponse MapHit(
         BreakpointHit hit)
     {
+        if (hit.IsMissingData)
+        {
+            return new BreakpointHitResponse(
+                BreakpointId: hit.BreakpointId,
+                ChannelId: hit.ChannelId,
+                ObservedValue: hit.ObservedValue,
+                Operator: MissingDataBreakpoint.OperatorName,
+                Threshold: hit.Threshold);
+        }
+
         if (!hit.IsComposite)
         {
             return new BreakpointHitResponse(

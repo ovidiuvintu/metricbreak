@@ -11,6 +11,14 @@ export type ComparisonOperator =
   | "RisingEdge"
   | "FallingEdge";
 
+export type BreakpointOperator = ComparisonOperator | "MissingLongerThan";
+
+export const recordingGapChannelId = "00000000-0000-0000-0000-000000000000";
+
+export function isRecordingGap(channelId: string | null | undefined): boolean {
+  return !channelId || channelId === recordingGapChannelId;
+}
+
 export type LogicalOperator = "And" | "Or";
 
 export interface CreateBreakpointRequest {
@@ -20,9 +28,18 @@ export interface CreateBreakpointRequest {
   value?: string;
 }
 
-export interface Breakpoint extends CreateBreakpointRequest {
+export interface CreateMissingDataBreakpointRequest {
+  minimumSeconds: number;
+  channelId?: string;
+}
+
+export interface Breakpoint {
   breakpointId: string;
+  channelId: string;
+  operator: BreakpointOperator;
+  threshold: number;
   isEnabled: boolean;
+  value?: string;
 }
 
 export interface BreakpointCondition extends CreateBreakpointRequest {}
@@ -61,6 +78,20 @@ export const breakpointApi = {
       throw new Error("Breakpoint threshold must be finite.");
     }
     return apiRequest<Breakpoint>(sessionPath(sessionId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  },
+
+  createMissingData(
+    sessionId: string,
+    request: CreateMissingDataBreakpointRequest,
+  ): Promise<Breakpoint> {
+    if (!Number.isFinite(request.minimumSeconds) || request.minimumSeconds <= 0) {
+      throw new Error("Missing-data duration must be greater than zero.");
+    }
+    return apiRequest<Breakpoint>(`${sessionPath(sessionId)}/missing-data`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),

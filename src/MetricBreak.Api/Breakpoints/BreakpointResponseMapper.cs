@@ -19,5 +19,19 @@ public static class BreakpointResponseMapper
             IsEnabled: isEnabled,
             Value: BreakpointValueParser.ToWire(breakpoint.ExpectedValue));
     }
+
+    public static BreakpointResponse Map(
+        MissingDataBreakpoint breakpoint,
+        bool isEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        return new BreakpointResponse(
+            BreakpointId: breakpoint.Id,
+            ChannelId: breakpoint.ChannelId ?? Guid.Empty,
+            Operator: MissingDataBreakpoint.OperatorName,
+            Threshold: breakpoint.MinimumSeconds,
+            IsEnabled: isEnabled);
+    }
 }
 

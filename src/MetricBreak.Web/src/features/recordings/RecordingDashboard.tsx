@@ -69,6 +69,7 @@ import {
   type CompositeBreakpoint,
   type CreateBreakpointRequest,
   type CreateCompositeBreakpointRequest,
+  type CreateMissingDataBreakpointRequest,
 } from "./breakpointApi";
 
 import type { CreateSessionResponse } from "./recordingTypes";
@@ -1025,6 +1026,28 @@ export function RecordingDashboard({
     }
   };
 
+  const handleCreateMissingDataBreakpoint = async (
+    request: CreateMissingDataBreakpointRequest,
+  ) => {
+    let createdBreakpointId: string | null = null;
+    const succeeded = await executeBreakpointMutation(
+      async (sessionId) => {
+        const created = await breakpointApi.createMissingData(sessionId, request);
+        createdBreakpointId = created.breakpointId;
+      },
+    );
+
+    if (succeeded) {
+      setBreakpointDialogOpen(false);
+      setBreakpointDraft(null);
+      setInspectorTab(1);
+      if (createdBreakpointId) {
+        setFocusedBreakpointId(createdBreakpointId);
+        await handleRunToBreakpoint(createdBreakpointId, "forward");
+      }
+    }
+  };
+
   const handleCreateBreakpointAtSample = (
     request: CreateBreakpointRequest,
     options?: { jumpToNext?: boolean },
@@ -1891,6 +1914,7 @@ export function RecordingDashboard({
           }
         }}
         onCreate={(request) => handleCreateBreakpoint(request)}
+        onCreateMissingData={handleCreateMissingDataBreakpoint}
       />
 
       <CompositeBreakpointDialog

@@ -34,7 +34,9 @@ import CenterFocusStrongOutlinedIcon from "@mui/icons-material/CenterFocusStrong
 import { recordingApi } from "./recordingApi";
 import {
   applyViewportPercents,
+  readChartPlotFrame,
   readSequenceViewport,
+  type ChartPlotFrame,
   resetViewport,
   sequenceInZoomedViewport,
   sequencesToViewportPercents,
@@ -571,6 +573,7 @@ export function RecordingChart({
 
   const chartRef = useRef<ReactECharts>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [plotFrame, setPlotFrame] = useState<ChartPlotFrame | null>(null);
   const plotAreaRef = useRef<HTMLDivElement>(null);
   const zoomSelectRef = useRef<HTMLDivElement>(null);
   const boxZoomRef = useRef<{
@@ -1695,8 +1698,31 @@ export function RecordingChart({
     lastChartReplayRef.current = { sessionId, pageStart, sequence: currentSequence };
     let followPending = replayMoved && previewSequence === null;
 
+    const publishPlotFrame = () => {
+      try {
+        const frame = readChartPlotFrame(chart, pageStart, pageEnd);
+        if (!frame) return;
+        setPlotFrame((current) => {
+          if (
+            current &&
+            Math.abs(current.left - frame.left) < 0.5 &&
+            Math.abs(current.width - frame.width) < 0.5 &&
+            Math.abs(current.axisTop - frame.axisTop) < 0.5 &&
+            Math.abs(current.min - frame.min) < 0.05 &&
+            Math.abs(current.max - frame.max) < 0.05
+          ) {
+            return current;
+          }
+          return frame;
+        });
+      } catch {
+        // Chart can throw while it is disposing or replacing axes.
+      }
+    };
+
     const update = () => {
       if (disposed || chart.isDisposed() || dragRef.current) return;
+      publishPlotFrame();
       const sequence = previewSequence ?? currentSequence;
       if (sequence === null || sequence < pageStart || sequence >= pageEnd ||
           samples.length === 0 || samples[0].sequence < pageStart ||
@@ -2896,6 +2922,8 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           compositeBreakpoints={compositeBreakpoints}
           channels={channels}
           refreshKey={breakpointHitsRefreshKey}
+          plotFrame={plotFrame}
+          plotAnchorRef={plotAreaRef}
           onHitClick={handleBreakpointTimelineHit}
         />
       )}

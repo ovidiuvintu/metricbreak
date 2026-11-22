@@ -6,7 +6,12 @@ import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import NavigateBeforeIcon from "@mui/icons-material/NavigateBefore";
 import NavigateNextIcon from "@mui/icons-material/NavigateNext";
-import type { Breakpoint, CompositeBreakpoint, ComparisonOperator } from "./breakpointApi";
+import {
+  isRecordingGap,
+  type Breakpoint,
+  type BreakpointOperator,
+  type CompositeBreakpoint,
+} from "./breakpointApi";
 import type { ChannelMetadata } from "./channelMetadata";
 
 interface BreakpointPanelProps {
@@ -24,9 +29,10 @@ interface BreakpointPanelProps {
   focusedBreakpointId?: string | null;
 }
 
-const symbols: Record<ComparisonOperator, string> = {
+const symbols: Record<BreakpointOperator, string> = {
   GreaterThan: ">", GreaterThanOrEqual: ">=", LessThan: "<",
   LessThanOrEqual: "<=", Equal: "==", NotEqual: "!=", Changed: "changed", RisingEdge: "rises above", FallingEdge: "falls below",
+  MissingLongerThan: "missing >",
 };
 
 export function BreakpointPanel({
@@ -34,8 +40,12 @@ export function BreakpointPanel({
   onAdd, onAddComposite, onSetEnabled, onDelete, onRunTo, focusedBreakpointId,
 }: BreakpointPanelProps) {
   const names = new Map(channels.map(c => [c.channelId, c.name]));
-  const format = (c: { channelId: string; operator: ComparisonOperator; threshold: number; value?: string }) =>
-    `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`;
+  const scopeName = (channelId: string) =>
+    isRecordingGap(channelId) ? "Recording" : (names.get(channelId) ?? channelId);
+  const format = (c: { channelId: string; operator: BreakpointOperator; threshold: number; value?: string }) =>
+    c.operator === "MissingLongerThan"
+      ? `${scopeName(c.channelId)} missing > ${c.threshold}s`
+      : `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`;
   const total = breakpoints.length + compositeBreakpoints.length;
 
   const actions = (id: string, enabled: boolean, label: string) => (
@@ -131,9 +141,15 @@ export function BreakpointPanel({
             >
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Tooltip title={format(b)}>
-                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>{names.get(b.channelId) ?? b.channelId}</Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+                    {b.operator === "MissingLongerThan" ? scopeName(b.channelId) : (names.get(b.channelId) ?? b.channelId)}
+                  </Typography>
                 </Tooltip>
-                <Typography variant="caption" color="text.secondary">{symbols[b.operator]} {b.operator === "Changed" ? "" : b.value ?? b.threshold.toLocaleString()}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {b.operator === "MissingLongerThan"
+                    ? `missing > ${b.threshold}s`
+                    : `${symbols[b.operator]} ${b.operator === "Changed" ? "" : b.value ?? b.threshold.toLocaleString()}`}
+                </Typography>
               </Box>
               {actions(b.breakpointId, b.isEnabled, format(b))}
             </Box>
