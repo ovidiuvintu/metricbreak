@@ -11,6 +11,7 @@ import {
   Tabs,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 
 import {
   eventsInStage,
@@ -28,14 +29,15 @@ interface RecordingTimelinePanelProps {
   onSeek: (sampleSequence: number) => void;
 }
 
-function scrollRowIntoView(container: HTMLElement, row: HTMLElement) {
+function scrollRowToCenter(container: HTMLElement, row: HTMLElement) {
   const containerRect = container.getBoundingClientRect();
   const rowRect = row.getBoundingClientRect();
-  if (rowRect.top < containerRect.top) {
-    container.scrollTop -= containerRect.top - rowRect.top;
-  } else if (rowRect.bottom > containerRect.bottom) {
-    container.scrollTop += rowRect.bottom - containerRect.bottom;
-  }
+  const delta =
+    rowRect.top -
+    containerRect.top +
+    rowRect.height / 2 -
+    container.clientHeight / 2;
+  container.scrollTop = Math.max(0, container.scrollTop + delta);
 }
 
 export function RecordingTimelinePanel({
@@ -67,8 +69,11 @@ export function RecordingTimelinePanel({
   useEffect(() => {
     const container = listRef.current;
     if (!container || !scrollKey) return;
-    const row = container.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(scrollKey)}"]`);
-    if (row) scrollRowIntoView(container, row);
+    const frame = requestAnimationFrame(() => {
+      const row = container.querySelector<HTMLElement>(`[data-timeline-key="${CSS.escape(scrollKey)}"]`);
+      if (row) scrollRowToCenter(container, row);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [scrollKey, tab, stageFilterKey]);
 
   if (loading) {
@@ -157,10 +162,24 @@ export function RecordingTimelinePanel({
               data-timeline-key={key}
               selected={selected}
               onClick={() => onSeek(item.sampleSequence)}
+              sx={{
+                borderLeft: 3,
+                borderColor: "transparent",
+                "&.Mui-selected": {
+                  borderColor: "primary.main",
+                  bgcolor: (theme) => alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.32 : 0.16),
+                  "&:hover": {
+                    bgcolor: (theme) => alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.42 : 0.22),
+                  },
+                  "& .MuiListItemText-primary": {
+                    fontWeight: 700,
+                  },
+                },
+              }}
             >
               <ListItemText
                 primary={
-                  isCurrentStage ? (
+                  selected ? (
                     <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}>
                       {item.name}
                       <Typography component="span" variant="caption" color="primary.main" sx={{ fontWeight: 700 }}>
