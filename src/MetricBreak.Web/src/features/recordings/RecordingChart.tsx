@@ -253,6 +253,8 @@ interface RecordingChartProps {
   onClearAxisPins?: () => void;
   onEffectiveRightAxisChange?: (rightAxisChannelIds: string[]) => void;
   currentSequence: number | null;
+  /** Replay marker. Hidden until the user starts playback on this file. */
+  showCursor?: boolean;
   currentTimestampNanoseconds?: number | string | null;
   timestampOrigin?: "Unix" | "Elapsed";
   onSeek: (sequence: number) => void;
@@ -289,8 +291,9 @@ type HoverDetails = {
   timestamp: string;
   x: number;
   y: number;
-  values: { name: string; value: string }[];
+  values: { name: string; value: string; color?: string }[];
   activeStage?: ChartTimelineEntry | null;
+  lastEvent?: ChartTimelineEntry | null;
 };
 
 function formatTimestamp(
@@ -362,6 +365,25 @@ function findNoDataWindows(samples: SampleRangeItem[], channelIds: string[]) {
 
 const PAGE_SIZE = 5000;
 const CHART_TOOLTIP_WIDTH = 340;
+
+type PendingChartViewport =
+  | { kind: "reset" }
+  | { kind: "restore"; sequence: number; visibleWidth: number; anchor: number };
+
+function alignedPageStarts(windowStart: number, windowEnd: number): number[] {
+  if (windowEnd <= windowStart) return [];
+  const first = Math.floor(windowStart / PAGE_SIZE) * PAGE_SIZE;
+  const last = Math.floor((windowEnd - 1) / PAGE_SIZE) * PAGE_SIZE;
+  const starts: number[] = [];
+  for (let start = first; start <= last; start += PAGE_SIZE) starts.push(start);
+  return starts;
+}
+
+function pageStartForSequence(sequence: number, sampleCount: number): number {
+  if (sampleCount <= 0) return 0;
+  const last = Math.floor((sampleCount - 1) / PAGE_SIZE) * PAGE_SIZE;
+  return Math.max(0, Math.min(last, Math.floor(sequence / PAGE_SIZE) * PAGE_SIZE));
+}
 
 type PlottedSeriesMeta = {
   yAxisIndex: number;
@@ -543,6 +565,7 @@ export function RecordingChart({
   onClearAxisPins,
   onEffectiveRightAxisChange,
   currentSequence,
+  showCursor = false,
   currentTimestampNanoseconds,
   timestampOrigin = "Unix",
   onSeek,
@@ -645,10 +668,23 @@ export function RecordingChart({
     pendingPagesRef.current.set(key, promise);
     return promise;
   };
-  const [pageIndex, setPageIndex] = useState(0);
+  const stitchWindow = (start: number, end: number): SampleRangeItem[] | null => {
+    if (end <= start) return [];
+    const parts: SampleRangeItem[] = [];
+    for (const aligned of alignedPageStarts(start, end)) {
+      const page = pageCacheRef.current.get(pageKey(aligned));
+      if (!page) return null;
+      parts.push(...page);
+    }
+    const sliced = parts.filter(
+      (sample) => sample.sequence >= start && sample.sequence < end,
+    );
+    return sliced.length > 0 ? sliced : null;
+  };
+  const [pageStart, setPageStart] = useState(0);
   const pageCount = Math.ceil(sampleCount / PAGE_SIZE);
-  const activePage = Math.min(pageIndex, Math.max(0, pageCount - 1));
-  const pageStart = activePage * PAGE_SIZE;
+  const maxPageStart = sampleCount <= 0 ? 0 : Math.floor((sampleCount - 1) / PAGE_SIZE) * PAGE_SIZE;
+  const activePage = Math.min(pageCount - 1, Math.max(0, Math.floor(pageStart / PAGE_SIZE)));
   const pageEnd = Math.min(sampleCount, pageStart + PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -781,8 +817,10 @@ export function RecordingChart({
           hasRightAxis,
         ),
         value: formatSampleValue(sample, channel.channelId),
+        color: seriesColorByChannelIdRef.current.get(channel.channelId),
       })),
       activeStage: resolveActiveStage(timelineStages, sample.sequence),
+      lastEvent: resolveActiveStage(timelineEvents, sample.sequence),
     });
     setChartMenu(null);
   };
@@ -1061,7 +1099,17 @@ export function RecordingChart({
   const selectedIdsRef = useRef(selectedChannelIds);
   const rightAxisSetRef = useRef(rightAxisSet);
   const hasRightAxisRef = useRef(hasRightAxis);
+  const seriesColorByChannelIdRef = useRef<Map<string, string>>(new Map());
   const pageWindowRef = useRef({ pageStart, pageEnd });
+  const sampleCountRef = useRef(sampleCount);
+  const pendingChartViewportRef = useRef<PendingChartViewport | null>(null);
+  const chartViewRef = useRef<{ pageStart: number; pageEnd: number; samples: SampleRangeItem[] }>({
+    pageStart: 0,
+    pageEnd: 0,
+    samples: [],
+  });
+  const chartViewSessionRef = useRef(sessionId);
+  const edgeScrollAtRef = useRef(0);
   const cursorUiRef = useRef({ cursorHovered, previewSequence, paletteMode: theme.palette.mode });
 
   pageWindowRef.current = { pageStart, pageEnd };
@@ -1071,6 +1119,7 @@ export function RecordingChart({
   onScrubStartRef.current = onScrubStart;
   onScrubEndRef.current = onScrubEnd;
   samplesRef.current = samples;
+  sampleCountRef.current = sampleCount;
   currentSequenceRef.current = currentSequence;
   channelsRef.current = channels;
   selectedIdsRef.current = selectedChannelIds;
@@ -1081,6 +1130,23 @@ export function RecordingChart({
   // A page change must never be interpreted as a replay cursor movement.
   // Manual page browsing is independent of the replay cursor.
   const manualPageRef = useRef(false);
+  // A window left between page boundaries follows the cursor onto the real page.
+  if (
+    sampleCount > 0 &&
+    currentSequence !== null &&
+    !manualPageRef.current &&
+    dragRef.current === null &&
+    pageStart % PAGE_SIZE !== 0
+  ) {
+    const aligned = pageStartForSequence(
+      Math.max(0, Math.min(currentSequence, sampleCount - 1)),
+      sampleCount,
+    );
+    if (aligned !== pageStart) {
+      pendingChartViewportRef.current = { kind: "reset" };
+      setPageStart(aligned);
+    }
+  }
   const activePageRef = useRef(activePage);
   activePageRef.current = activePage;
   const pageLoadGenerationRef = useRef(0);
@@ -1132,26 +1198,42 @@ export function RecordingChart({
     // Manual Next/Previous page navigation does not change either value.
     if (!sessionChanged && !sequenceChanged) return;
 
-    const targetPage =
-      currentSequence === null || sampleCount <= 0
-        ? 0
-        : Math.floor(
-            Math.max(0, Math.min(currentSequence, sampleCount - 1)) /
-              PAGE_SIZE,
-          );
+    if (currentSequence === null || sampleCount <= 0) {
+      pendingChartViewportRef.current = { kind: "reset" };
+      setPageStart(0);
+      return;
+    }
 
-    setPageIndex((previousPage) =>
-      previousPage === targetPage ? previousPage : targetPage,
-    );
+    const sequence = Math.max(0, Math.min(currentSequence, sampleCount - 1));
+    const aligned = pageStartForSequence(sequence, sampleCount);
+    if (sessionChanged) {
+      pendingChartViewportRef.current = { kind: "reset" };
+      setPageStart((current) => (current === aligned ? current : aligned));
+      return;
+    }
+
+    // Stay on an aligned page while the cursor is still inside it. A window
+    // that starts between page boundaries (for example 1,001) snaps to the
+    // page that actually contains the cursor, which begins at 5,000.
+    const windowEnd = Math.min(sampleCount, pageStart + PAGE_SIZE);
+    const insideAlignedPage = pageStart % PAGE_SIZE === 0
+      && sequence >= pageStart
+      && sequence < windowEnd;
+    if (insideAlignedPage || aligned === pageStart) return;
+
+    pendingChartViewportRef.current = { kind: "reset" };
+    setPageStart(aligned);
   }, [sessionId, currentSequence, sampleCount, previewSequence]);
 
   // Layout effect applies prefetched data before the browser paints a new page.
-  // Uncached pages still show the existing loading indicator.
+  // Keep the current traces up until the overlapping window is ready.
   useLayoutEffect(() => {
     const loadId = ++pageLoadGenerationRef.current;
-    setHover(null);
-    setInspectedSample(null);
-    setCursorLabelX(null);
+    if (!dragRef.current) {
+      setHover(null);
+      setInspectedSample(null);
+      setCursorLabelX(null);
+    }
 
     if (sampleCount <= 0 || pageStart >= sampleCount) {
       setSamples([]);
@@ -1167,6 +1249,7 @@ export function RecordingChart({
       return;
     }
 
+    const windowEnd = Math.min(sampleCount, pageStart + PAGE_SIZE);
     const applySamples = (loaded: SampleRangeItem[]) => {
       if (pageLoadGenerationRef.current !== loadId) return;
       setSamples(loaded);
@@ -1174,15 +1257,26 @@ export function RecordingChart({
       setError("");
     };
 
-    const cached = pageCacheRef.current.get(pageKey(pageStart));
-    if (cached) {
-      applySamples(cached);
-    } else {
-      setSamples([]);
-      setLoading(true);
-      setError("");
-      void requestPage(pageStart)
-        .then(applySamples)
+    const publish = () => {
+      const stitched = stitchWindow(pageStart, windowEnd);
+      if (!stitched) return false;
+      applySamples(stitched);
+      return true;
+    };
+
+    if (!publish()) {
+      if (samplesRef.current.length === 0) {
+        setLoading(true);
+        setError("");
+      }
+      void Promise.all(alignedPageStarts(pageStart, windowEnd).map((start) => requestPage(start)))
+        .then(() => {
+          if (!publish()) {
+            if (pageLoadGenerationRef.current !== loadId) return;
+            setError("Unable to load recording samples.");
+            setLoading(false);
+          }
+        })
         .catch((caught) => {
           if (pageLoadGenerationRef.current !== loadId) return;
           setError(
@@ -1194,9 +1288,12 @@ export function RecordingChart({
         });
     }
 
-    // Prefetch both directions. This is a data-only optimization: replay
-    // position, breakpoint behavior, and manual page selection are unchanged.
-    for (const neighbor of [pageStart - PAGE_SIZE, pageStart + PAGE_SIZE]) {
+    const covered = alignedPageStarts(pageStart, windowEnd);
+    const neighbors = [
+      (covered[0] ?? pageStart) - PAGE_SIZE,
+      (covered[covered.length - 1] ?? pageStart) + PAGE_SIZE,
+    ];
+    for (const neighbor of neighbors) {
       if (neighbor >= 0 && neighbor < sampleCount) {
         void requestPage(neighbor).catch(() => { /* Retry on actual navigation. */ });
       }
@@ -1247,32 +1344,48 @@ export function RecordingChart({
 
   // Browsing another chart page must not seek or invalidate playback.
   // Keep the selected page visible until the user explicitly scrubs/seeks.
-  const navigateToPage = (targetPage: number) => {
-    if (targetPage < 0 || targetPage >= pageCount || targetPage === activePage) return;
+  const navigateToPage = (direction: -1 | 1) => {
+    const aligned = Math.floor(pageStart / PAGE_SIZE) * PAGE_SIZE;
+    const next = Math.max(0, Math.min(maxPageStart, aligned + direction * PAGE_SIZE));
+    if (next === pageStart) return;
     manualPageRef.current = true;
-    // Clear the old page's handle before the new chart finishes loading.
+    pendingChartViewportRef.current = { kind: "reset" };
     setCursorLabelX(null);
-    setPageIndex(targetPage);
+    setPageStart(next);
   };
 
-  const lineWidth = getLineWidth(samples.length);
+  const samplesMatchWindow =
+    samples.length > 0 &&
+    samples[0].sequence >= pageStart &&
+    samples[samples.length - 1].sequence < pageEnd;
+  if (chartViewSessionRef.current !== sessionId) {
+    chartViewSessionRef.current = sessionId;
+    chartViewRef.current = { pageStart: 0, pageEnd: 0, samples: [] };
+  } else if (samplesMatchWindow) {
+    chartViewRef.current = { pageStart, pageEnd, samples };
+  }
+  const plotPageStart = chartViewRef.current.pageStart;
+  const plotPageEnd = chartViewRef.current.pageEnd;
+  const plotSamples = chartViewRef.current.samples;
+
+  const lineWidth = getLineWidth(plotSamples.length);
 
   const hasPlottedSeries = useMemo(() => {
-    if (selectedChannelIds.length === 0 || samples.length === 0) return false;
+    if (selectedChannelIds.length === 0 || plotSamples.length === 0) return false;
     return channels.some(
       (channel) =>
         selectedChannelIds.includes(channel.channelId) &&
-        isNumericChartChannel(samples, channel.channelId),
+        isNumericChartChannel(plotSamples, channel.channelId),
     );
-  }, [channels, selectedChannelIds, samples]);
+  }, [channels, selectedChannelIds, plotSamples]);
 
   const visibleInvestigationBookmarkCount = useMemo(
     () =>
       investigationBookmarks.filter(
         (item) =>
-          item.sampleSequence >= pageStart && item.sampleSequence < pageEnd,
+          item.sampleSequence >= plotPageStart && item.sampleSequence < plotPageEnd,
       ).length,
-    [investigationBookmarks, pageStart, pageEnd],
+    [investigationBookmarks, plotPageStart, plotPageEnd],
   );
 
   const showAxisRangeWarning = useMemo(() => {
@@ -1302,6 +1415,9 @@ export function RecordingChart({
   }, [samples, channels, selectedChannelIds, rightAxisSet, axisPins]);
 
   const option = useMemo(() => {
+    const pageStart = plotPageStart;
+    const pageEnd = plotPageEnd;
+    const samples = plotSamples;
     const selectedIds = new Set(selectedChannelIds);
 
     const plotCandidates = channels
@@ -1333,6 +1449,7 @@ export function RecordingChart({
       })),
       hasRightAxis,
     );
+    seriesColorByChannelIdRef.current = seriesColorByChannelId;
 
     const builtSeries = plotCandidates.map(({ channel, channelIndex }) => {
         const yAxisIndex = rightAxisSet.has(channel.channelId) ? 1 : 0;
@@ -1469,7 +1586,7 @@ export function RecordingChart({
       },
     });
 
-    const cursorSequence = previewSequence ?? currentSequence;
+    const cursorSequence = showCursor ? previewSequence ?? currentSequence : null;
     // Viewport clipping for mark lines is applied after mount via dataZoom sync;
     // do not read the ECharts instance here (disposed during page changes).
     const seriesMarkLine =
@@ -1581,7 +1698,9 @@ export function RecordingChart({
                   if (!match) return label;
                   const side =
                     match.yAxisIndex === 1 ? "Right Y-axis" : "Left Y-axis";
-                  return `${label}<br/>${side}`;
+                  const swatch =
+                    `<span style="display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:${match.lineStyle.color};vertical-align:middle"></span>`;
+                  return `${swatch}${label}<br/>${side}`;
                 },
               },
             }
@@ -1691,17 +1810,18 @@ export function RecordingChart({
     };
   }, [
       channels,
-      samples,
+      plotSamples,
       selectedChannelIds,
       rightAxisSet,
       hasRightAxis,
       chartTheme,
       currentSequence,
+      showCursor,
       cursorHovered,
       previewSequence,
       lineWidth,
-      pageStart,
-      pageEnd,
+      plotPageStart,
+      plotPageEnd,
       theme.palette.mode,
       investigationBookmarks,
       timelineEvents,
@@ -1749,9 +1869,79 @@ export function RecordingChart({
     };
 
     const update = () => {
-      if (disposed || chart.isDisposed() || dragRef.current) return;
+      if (disposed || chart.isDisposed()) return;
+      const pending = pendingChartViewportRef.current;
+      const samplesReady = samples.length > 0
+        && samples[0].sequence >= pageStart
+        && samples[samples.length - 1].sequence < pageEnd;
+      if (pending && samplesReady) {
+        try {
+          const axis = (chart.getOption().xAxis as Array<{ min?: number; max?: number }> | undefined)?.[0];
+          const axisReady = Number(axis?.min) === pageStart
+            && Number(axis?.max) === Math.max(pageStart + 1, pageEnd - 1);
+          if (axisReady) {
+            pendingChartViewportRef.current = null;
+            const viewport = readSequenceViewport(chart, pageStart, pageEnd);
+            if (viewport) {
+              if (pending.kind === "reset") {
+                if (viewport.startPercent > 0.5 || viewport.endPercent < 99.5) {
+                  chart.dispatchAction({
+                    type: "dataZoom",
+                    dataZoomIndex: 0,
+                    start: 0,
+                    end: 100,
+                  });
+                  return;
+                }
+              } else {
+                const fullSpan = Math.max(0.001, viewport.fullMax - viewport.fullMin);
+                const width = Math.min(Math.max(pending.visibleWidth, 1), fullSpan);
+                const min = Math.max(
+                  viewport.fullMin,
+                  Math.min(viewport.fullMax - width, pending.sequence - width * pending.anchor),
+                );
+                chart.dispatchAction({
+                  type: "dataZoom",
+                  dataZoomIndex: 0,
+                  start: ((min - viewport.fullMin) / fullSpan) * 100,
+                  end: ((min + width - viewport.fullMin) / fullSpan) * 100,
+                });
+                return;
+              }
+            }
+          }
+        } catch {
+          // Axis is still settling after the window change.
+        }
+      }
+      if (dragRef.current) return;
       publishPlotFrame();
-      const sequence = previewSequence ?? currentSequence;
+      const sequence = showCursor ? previewSequence ?? currentSequence : null;
+      if (!showCursor) {
+        setCursorLabelX(null);
+        try {
+          const seriesId = (option.series?.[0] as { id?: string } | undefined)?.id;
+          if (seriesId && (option.series as unknown[]).length > 0) {
+            const markLine = buildFirstSeriesMarkLine({
+              cursorSequence: null,
+              pageStart,
+              pageEnd,
+              seriesLength: (option.series as unknown[]).length,
+              cursorHovered,
+              previewSequence,
+              paletteMode: theme.palette.mode,
+              bookmarks: investigationBookmarks,
+            });
+            chart.setOption(
+              { series: [{ id: seriesId, markLine: markLine ?? { data: [] } }] },
+              { lazyUpdate: true },
+            );
+          }
+        } catch {
+          // Chart can throw while it is disposing.
+        }
+        return;
+      }
       if (sequence === null || sequence < pageStart || sequence >= pageEnd ||
           samples.length === 0 || samples[0].sequence < pageStart ||
           samples[0].sequence >= pageEnd) {
@@ -1785,7 +1975,7 @@ export function RecordingChart({
           const seriesId = (option.series?.[0] as { id?: string } | undefined)?.id;
           if (seriesId && (option.series as unknown[]).length > 0) {
             const markLine = buildFirstSeriesMarkLine({
-              cursorSequence: previewSequence ?? currentSequence,
+              cursorSequence: sequence,
               pageStart,
               pageEnd,
               seriesLength: (option.series as unknown[]).length,
@@ -1873,7 +2063,7 @@ export function RecordingChart({
       chart.off("datazoom", scheduleUpdate);
       observer.disconnect();
     };
-  }, [sessionId, currentSequence, previewSequence, pageStart, pageEnd, samples, option]);
+  }, [sessionId, currentSequence, showCursor, previewSequence, pageStart, pageEnd, samples, option]);
 
   useEffect(() => {
     if (viewportFocusRequestId <= 0 || viewportFocusSequence == null) return;
@@ -1888,9 +2078,9 @@ export function RecordingChart({
   useEffect(() => {
     if (restoreChartViewportRequestId <= 0 || !restoreChartViewport) return;
     pendingViewportRestoreRef.current = restoreChartViewport;
-    const targetPage = Math.floor(restoreChartViewport.pageStart / PAGE_SIZE);
+    pendingChartViewportRef.current = null;
     manualPageRef.current = true;
-    setPageIndex(targetPage);
+    setPageStart(restoreChartViewport.pageStart);
   }, [restoreChartViewportRequestId, restoreChartViewport]);
 
   useEffect(() => {
@@ -2017,6 +2207,63 @@ export function RecordingChart({
       return;
     }
     if (!Number.isFinite(rawSequence)) return;
+
+    const window = pageWindowRef.current;
+    const count = sampleCountRef.current;
+    let axisLeft = Number.NaN;
+    let axisRight = Number.NaN;
+    try {
+      axisLeft = chart.convertToPixel({ xAxisIndex: 0 }, window.pageStart) as number;
+      axisRight = chart.convertToPixel(
+        { xAxisIndex: 0 },
+        Math.max(window.pageStart, window.pageEnd - 1),
+      ) as number;
+    } catch {
+      axisLeft = Number.NaN;
+      axisRight = Number.NaN;
+    }
+
+    const holdOnEdge = (direction: -1 | 1, edgePixel: number) => {
+      const now = performance.now();
+      const maxStart = count <= 1 ? 0 : Math.floor((count - 1) / PAGE_SIZE) * PAGE_SIZE;
+      const aligned = Math.floor(window.pageStart / PAGE_SIZE) * PAGE_SIZE;
+      const nextStart = Math.max(0, Math.min(maxStart, aligned + direction * PAGE_SIZE));
+      if (nextStart !== window.pageStart && now - edgeScrollAtRef.current >= 400) {
+        edgeScrollAtRef.current = now;
+        // Enter the next page at its first sample, or the previous page at its last.
+        dragRef.current!.sequence = direction > 0
+          ? nextStart
+          : Math.min(count - 1, nextStart + PAGE_SIZE - 1);
+        pendingChartViewportRef.current = { kind: "reset" };
+        setPageStart(nextStart);
+        return;
+      }
+      const sequence = nextStart !== window.pageStart
+        ? dragRef.current!.sequence
+        : direction > 0
+          ? Math.min(count - 1, window.pageEnd - 1)
+          : window.pageStart;
+      dragRef.current!.sequence = Math.max(0, Math.min(count - 1, sequence));
+      let pixel = edgePixel;
+      try {
+        const converted = chart.convertToPixel({ xAxisIndex: 0 }, dragRef.current!.sequence) as number;
+        if (Number.isFinite(converted)) pixel = converted;
+      } catch {
+        // The axis is still the page being left.
+      }
+      pendingDragXRef.current = pixel;
+      renderDragPosition(pixel, dragRef.current!.sequence);
+    };
+
+    if (Number.isFinite(axisRight) && x > axisRight + 6 && window.pageEnd < count) {
+      holdOnEdge(1, axisRight);
+      return;
+    }
+    if (Number.isFinite(axisLeft) && x < axisLeft - 6 && window.pageStart > 0) {
+      holdOnEdge(-1, axisLeft);
+      return;
+    }
+
     const sequence = Math.max(loaded[0].sequence,
       Math.min(loaded[loaded.length - 1].sequence, Math.round(rawSequence)));
     dragRef.current.sequence = sequence;
@@ -2107,6 +2354,11 @@ export function RecordingChart({
     finishLabelDrag(event, false);
   const handleLabelPointerCancel = (event: PointerEvent<HTMLDivElement>) =>
     finishLabelDrag(event, true);
+
+  useLayoutEffect(() => {
+    if (!dragRef.current || pendingDragXRef.current == null) return;
+    renderDragPosition(pendingDragXRef.current, dragRef.current.sequence);
+  }, [pageStart, samples]);
 
   useEffect(() => () => {
     if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
@@ -2303,6 +2555,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               hasRightAxisRef.current,
             ),
             value: formatSampleValue(closest, channel.channelId),
+            color: seriesColorByChannelIdRef.current.get(channel.channelId),
           }));
         setHover({
           sequence: closest.sequence,
@@ -2312,6 +2565,10 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           values,
           activeStage: resolveActiveStage(
             timelineStagesRef.current,
+            closest.sequence,
+          ),
+          lastEvent: resolveActiveStage(
+            timelineEventsRef.current,
             closest.sequence,
           ),
         });
@@ -2542,7 +2799,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           position: "relative",
         }}
       >
-        {loading && selectedChannelIds.length > 0 ? (
+        {loading && plotSamples.length === 0 && selectedChannelIds.length > 0 ? (
           <Box
             sx={{
               height: "100%",
@@ -2553,7 +2810,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           >
             <CircularProgress />
           </Box>
-        ) : hasPlottedSeries && samples.length > 0 ? (
+        ) : hasPlottedSeries && plotSamples.length > 0 ? (
           <>
           <Box
             ref={plotAreaRef}
@@ -2593,7 +2850,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             }}
           />
           <ReactECharts
-            key={`${sessionId}:${pageStart}`}
+            key={sessionId}
             ref={chartRef}
             option={option}
             notMerge={false}
@@ -2643,10 +2900,12 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               zIndex: 11,
             }}
           />
-          {cursorLabelX !== null &&
+          {showCursor && (dragRef.current !== null || (
+            cursorLabelX !== null &&
             (previewSequence ?? currentSequence) !== null &&
-            (previewSequence ?? currentSequence)! >= pageStart &&
-            (previewSequence ?? currentSequence)! < pageEnd && (
+            (previewSequence ?? currentSequence)! >= plotPageStart &&
+            (previewSequence ?? currentSequence)! < plotPageEnd
+          )) && (
             <Box
               ref={cursorHandleRef}
               onPointerDown={handleLabelPointerDown}
@@ -2654,7 +2913,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               onPointerUp={handleLabelPointerUp}
               onPointerCancel={handleLabelPointerCancel}
               onContextMenu={(event) => {
-                const sequence = previewSequence ?? currentSequence;
+                const sequence = dragRef.current?.sequence ?? previewSequence ?? currentSequence;
                 if (sequence === null) return;
                 openSampleContextMenu(event, sequence, {
                   x: cursorLabelX ?? event.nativeEvent.offsetX,
@@ -2667,7 +2926,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 position: "absolute",
                 // Place the handle between the legend and the plot (grid starts at 42px).
                 top: 22,
-                left: cursorLabelX,
+                left: cursorLabelX ?? pendingDragXRef.current ?? 0,
                 transform: "translateX(-50%)",
                 zIndex: 12,
                 px: 1,
@@ -2683,7 +2942,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 whiteSpace: "nowrap",
               }}
             >
-              {(previewSequence ?? currentSequence)?.toLocaleString()}
+              {(dragRef.current?.sequence ?? previewSequence ?? currentSequence)?.toLocaleString()}
             </Box>
           )}
           </Box>
@@ -2810,11 +3069,26 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                     <Typography
                       variant="caption"
                       color="text.secondary"
-                      sx={{ display: "block", mb: 1, fontWeight: 600 }}
+                      sx={{ display: "block", mb: 0.5, fontWeight: 600 }}
                     >
                       Stage: {displayedSample.activeStage.name}
                       {displayedSample.activeStage.description?.trim()
                         ? ` — ${displayedSample.activeStage.description.trim()}`
+                        : ""}
+                    </Typography>
+                  )}
+                  {displayedSample.lastEvent && (
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ display: "block", mb: 1, fontWeight: 600 }}
+                    >
+                      Last event: {displayedSample.lastEvent.name}
+                      {displayedSample.lastEvent.sampleSequence !== displayedSample.sequence
+                        ? ` · sample ${displayedSample.lastEvent.sampleSequence.toLocaleString()}`
+                        : ""}
+                      {displayedSample.lastEvent.description?.trim()
+                        ? ` — ${displayedSample.lastEvent.description.trim()}`
                         : ""}
                     </Typography>
                   )}
@@ -2843,12 +3117,35 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                         alignItems: "flex-start",
                       }}
                     >
-                      <Typography
-                        variant="caption"
-                        sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 0.75,
+                          flex: 1,
+                          minWidth: 0,
+                        }}
                       >
-                        {entry.name}
-                      </Typography>
+                        {entry.color && (
+                          <Box
+                            aria-hidden
+                            sx={{
+                              width: 8,
+                              height: 8,
+                              mt: "0.28rem",
+                              borderRadius: "50%",
+                              bgcolor: entry.color,
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
+                        <Typography
+                          variant="caption"
+                          sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}
+                        >
+                          {entry.name}
+                        </Typography>
+                      </Box>
                       <Typography variant="caption" sx={{ fontWeight: 600, flexShrink: 0 }}>
                         {entry.value}
                       </Typography>
@@ -2960,8 +3257,8 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
       {sampleCount > 0 && (
         <BreakpointHitTimeline
           sessionId={sessionId}
-          pageStart={pageStart}
-          pageEnd={pageEnd}
+          pageStart={plotSamples.length > 0 ? plotPageStart : pageStart}
+          pageEnd={plotSamples.length > 0 ? plotPageEnd : pageEnd}
           sampleCount={sampleCount}
           currentSequence={currentSequence}
           breakpoints={breakpoints}
@@ -2989,8 +3286,8 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           }}
         >
           <Typography variant="caption" color="text.secondary" noWrap>
-            Samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of {sampleCount.toLocaleString()}
-            {pageCount > 1 ? ` · Page ${activePage + 1} of ${pageCount}` : ""}
+            Samples {((plotSamples.length > 0 ? plotPageStart : pageStart) + 1).toLocaleString()}–{(plotSamples.length > 0 ? plotPageEnd : pageEnd).toLocaleString()} of {sampleCount.toLocaleString()}
+            {pageCount > 1 ? ` · Page ${Math.floor((plotSamples.length > 0 ? plotPageStart : pageStart) / PAGE_SIZE) + 1} of ${pageCount}` : ""}
             {visibleInvestigationBookmarkCount > 0
               ? ` · ${visibleInvestigationBookmarkCount} bookmark${visibleInvestigationBookmarkCount === 1 ? "" : "s"} (dashed violet — click to seek)`
               : ""}
@@ -2998,12 +3295,12 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
-              <Button disabled={activePage === 0} onClick={() => navigateToPage(activePage - 1)}>
+              <Button disabled={pageStart <= 0} onClick={() => navigateToPage(-1)}>
                 Previous
               </Button>
               <Button
-                disabled={activePage >= pageCount - 1}
-                onClick={() => navigateToPage(activePage + 1)}
+                disabled={pageStart >= maxPageStart}
+                onClick={() => navigateToPage(1)}
               >
                 Next
               </Button>
