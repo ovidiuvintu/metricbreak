@@ -48,6 +48,7 @@ import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashbo
 import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
 import { AppSettingsPanel } from "../../app/AppSettingsPanel";
 import { ProjectDashboard } from "../projects/ProjectDashboard";
+import { AnalysisPanel } from "../analysis/AnalysisPanel";
 import type { PaletteMode } from "@mui/material";
 import { formatOpenInvestigationError } from "../investigations/formatOpenInvestigationError";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
@@ -1765,6 +1766,25 @@ export function RecordingDashboard({
     </Box>
   );
 
+  const analysisView = (
+    <Box
+      sx={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+      }}
+    >
+      <AnalysisPanel
+        session={session}
+        channels={channels}
+        selectedChannelIds={selectedChannelIds}
+        onInspectSample={(sequence) => {
+          void handleSeek(sequence).then(() => onSelectSection("recordings"));
+        }}
+      />
+    </Box>
+  );
+
   const settingsView = (
     <Box
       sx={{
@@ -1952,6 +1972,7 @@ export function RecordingDashboard({
               </Box>
             )
           ) : section === "projects" ? projectsView
+          : section === "analysis" ? analysisView
           : section === "settings" ? settingsView
           : sectionPlaceholder}
       </Box>
