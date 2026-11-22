@@ -66,6 +66,7 @@ import { replayApi } from "./replayApi";
 import {
   breakpointApi,
   type Breakpoint,
+  type BreakpointCoverage,
   type CompositeBreakpoint,
   type CreateBreakpointRequest,
   type CreateCompositeBreakpointRequest,
@@ -173,6 +174,7 @@ export function RecordingDashboard({
   );
 
   const [compositeBreakpoints, setCompositeBreakpoints] = useState<CompositeBreakpoint[]>([]);
+  const [breakpointCoverage, setBreakpointCoverage] = useState<BreakpointCoverage[]>([]);
 
   const [inspectorTab, setInspectorTab] =
     useState<InspectorTab>(0);
@@ -316,6 +318,32 @@ export function RecordingDashboard({
     if (!session?.recordingId || session.currentSample == null) return;
     saveResumeSequence(session.recordingId, session.currentSample.sequence);
   }, [session?.recordingId, session?.currentSample?.sequence]);
+
+  const breakpointCoverageKey = [
+    breakpoints.map(item => item.breakpointId).join(","),
+    compositeBreakpoints.map(item => item.breakpointId).join(","),
+  ].join("|");
+
+  useEffect(() => {
+    const sessionId = session?.sessionId;
+    if (!sessionId || breakpointCoverageKey === "|") {
+      setBreakpointCoverage([]);
+      return;
+    }
+
+    let cancelled = false;
+    void breakpointApi.coverage(sessionId)
+      .then(response => {
+        if (!cancelled) setBreakpointCoverage(response.coverages ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setBreakpointCoverage([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.sessionId, breakpointCoverageKey]);
 
   const previousWatchSample =
     previousSampleResult != null &&
@@ -1493,6 +1521,7 @@ export function RecordingDashboard({
               void handleRunToBreakpoint(breakpointId, direction);
             }}
             focusedBreakpointId={focusedBreakpointId}
+            coverage={breakpointCoverage}
             onAddComposite={() => setCompositeDialogOpen(true)}
             onSetEnabled={handleSetBreakpointEnabled}
             onDelete={handleDeleteBreakpoint}

@@ -69,6 +69,27 @@ export interface BreakpointHitsResponse {
   truncated: boolean;
 }
 
+export type BreakpointCoverageRelation =
+  | "above"
+  | "atOrAbove"
+  | "below"
+  | "atOrBelow"
+  | "matching";
+
+export interface BreakpointCoverage {
+  breakpointId: string;
+  crossings: number | null;
+  matchingSamples: number;
+  matchingNanoseconds: number;
+  longestRunSamples: number;
+  longestRunNanoseconds: number;
+  relation: BreakpointCoverageRelation;
+}
+
+export interface BreakpointCoverageResponse {
+  coverages: BreakpointCoverage[];
+}
+
 const sessionPath = (sessionId: string) =>
   `/api/sessions/${encodeURIComponent(sessionId)}/breakpoints`;
 
@@ -139,6 +160,10 @@ export const breakpointApi = {
       `${sessionPath(sessionId)}/${encodeURIComponent(breakpointId)}`,
       { method: "DELETE" },
     );
+  },
+
+  coverage(sessionId: string): Promise<BreakpointCoverageResponse> {
+    return apiRequest<BreakpointCoverageResponse>(`${sessionPath(sessionId)}/coverage`);
   },
 
   listHits(

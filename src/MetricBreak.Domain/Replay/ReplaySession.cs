@@ -555,4 +555,14 @@ public sealed class ReplaySession
 
         return results;
     }
+
+    /// <summary>
+    /// Counts threshold crossings and time on each side without moving the cursor.
+    /// </summary>
+    public IReadOnlyList<BreakpointCoverage> MeasureBreakpointCoverage(
+        IReadOnlyList<IBreakpoint> breakpoints) =>
+        BreakpointCoverageAnalyzer.Measure(
+            breakpoints,
+            SampleCount,
+            _readSample);
 }

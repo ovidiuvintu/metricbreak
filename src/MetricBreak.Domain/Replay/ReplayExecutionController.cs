@@ -104,4 +104,15 @@ public sealed class ReplayExecutionController
             maxHits);
     }
 
+    public IReadOnlyList<BreakpointCoverage> MeasureBreakpointCoverage(
+        BreakpointCollection breakpoints)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoints);
+
+        return _session.MeasureBreakpointCoverage(
+            breakpoints.GetAllRegistered()
+                .Select(entry => entry.Breakpoint)
+                .ToArray());
+    }
+
 }
