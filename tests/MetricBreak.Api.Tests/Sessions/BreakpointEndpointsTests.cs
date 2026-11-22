@@ -335,6 +335,67 @@ public sealed class BreakpointEndpointsTests
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    public async Task CreateMissingDataBreakpoint_ThenContinue_StopsOnTimeGap()
+    {
+        const string csv =
+            "Timestamp,Pressure\n" +
+            "2026-11-08T10:00:00Z,1\n" +
+            "2026-11-08T10:00:01Z,1\n" +
+            "2026-11-08T10:00:07Z,1\n" +
+            "2026-11-08T10:00:08Z,1\n";
+
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+        var sessionId = CreateSession(factory, csv, "gap.csv");
+
+        using (var created = await client.PostAsJsonAsync(
+                   $"/api/sessions/{sessionId}/breakpoints/missing-data",
+                   new { minimumSeconds = 5d }))
+        {
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            using var createdJson = await ReadJsonAsync(created);
+            Assert.Equal("MissingLongerThan", createdJson.RootElement.GetProperty("operator").GetString());
+            Assert.Equal(5d, createdJson.RootElement.GetProperty("threshold").GetDouble());
+            Assert.Equal(Guid.Empty, createdJson.RootElement.GetProperty("channelId").GetGuid());
+        }
+
+        using var list = await client.GetAsync($"/api/sessions/{sessionId}/breakpoints");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        using var listJson = await ReadJsonAsync(list);
+        var listed = Assert.Single(listJson.RootElement.GetProperty("breakpoints").EnumerateArray());
+        Assert.Equal("MissingLongerThan", listed.GetProperty("operator").GetString());
+
+        using var continued = await client.PostAsync($"/api/sessions/{sessionId}/continue", content: null);
+        Assert.Equal(HttpStatusCode.OK, continued.StatusCode);
+        using var continuedJson = await ReadJsonAsync(continued);
+        Assert.True(continuedJson.RootElement.GetProperty("hitBreakpoint").GetBoolean());
+        Assert.Equal(2, continuedJson.RootElement.GetProperty("stop").GetProperty("sequence").GetInt64());
+        Assert.Equal(
+            "MissingLongerThan",
+            continuedJson.RootElement.GetProperty("stop").GetProperty("hits")[0].GetProperty("operator").GetString());
+
+        using var after = await client.PostAsync($"/api/sessions/{sessionId}/continue", content: null);
+        Assert.Equal(HttpStatusCode.OK, after.StatusCode);
+        using var afterJson = await ReadJsonAsync(after);
+        Assert.False(afterJson.RootElement.GetProperty("hitBreakpoint").GetBoolean());
+        Assert.True(afterJson.RootElement.GetProperty("reachedEndOfRecording").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CreateMissingDataBreakpoint_ZeroDuration_Returns400()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+        var (sessionId, _, _) = CreateSession(factory);
+
+        using var response = await client.PostAsJsonAsync(
+            $"/api/sessions/{sessionId}/breakpoints/missing-data",
+            new { minimumSeconds = 0d });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     private static async Task<JsonDocument> ReadJsonAsync(
         HttpResponseMessage response)
     {
@@ -379,5 +440,26 @@ public sealed class BreakpointEndpointsTests
             sessionId,
             parsed.Channels[0].Id,
             parsed.Channels[1].Id);
+    }
+
+    private static Guid CreateSession(
+        MetricBreakApiFactory factory,
+        string csv,
+        string sourceName)
+    {
+        var parser = new CsvTelemetryParser();
+        using var reader = new StringReader(csv);
+        var parsed = parser.Parse(reader);
+        var recordingId = Guid.NewGuid();
+        var recording = new Recording(
+            recordingId,
+            sourceName,
+            new RecordingSource(sourceName, "gap-hash", csv.Length),
+            DateTimeOffset.UtcNow);
+        var imported = new ImportedCsvRecording(
+            recording,
+            parsed.Channels,
+            new CsvTelemetryReader(recordingId, parsed));
+        return factory.SessionManager.Create(imported);
     }
 }

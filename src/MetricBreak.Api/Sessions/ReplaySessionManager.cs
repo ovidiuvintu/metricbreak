@@ -103,22 +103,29 @@ public sealed class ReplaySessionManager
                     channel => channel.Name);
 
             var breakpoints = entry.Breakpoints
-                .GetRegistered()
-                .Select(registered =>
+                .GetAllRegistered()
+                .Select(registered => registered.Breakpoint switch
                 {
-                    var breakpoint = registered.Breakpoint;
-
-                    channelNames.TryGetValue(
-                        breakpoint.ChannelId,
-                        out var channelName);
-
-                    return new BreakpointExportSnapshot(
+                    ConditionalBreakpoint breakpoint => new BreakpointExportSnapshot(
                         BreakpointId: breakpoint.Id,
-                        ChannelName: channelName ?? breakpoint.ChannelId.ToString(),
+                        ChannelName: channelNames.TryGetValue(breakpoint.ChannelId, out var channelName)
+                            ? channelName
+                            : breakpoint.ChannelId.ToString(),
                         Operator: breakpoint.Operator.ToString(),
                         Threshold: breakpoint.Threshold,
-                        IsEnabled: registered.IsEnabled);
+                        IsEnabled: registered.IsEnabled),
+                    MissingDataBreakpoint missing => new BreakpointExportSnapshot(
+                        BreakpointId: missing.Id,
+                        ChannelName: missing.ChannelId is Guid channelId &&
+                                     channelNames.TryGetValue(channelId, out var missingChannel)
+                            ? missingChannel
+                            : "",
+                        Operator: MissingDataBreakpoint.OperatorName,
+                        Threshold: missing.MinimumSeconds,
+                        IsEnabled: registered.IsEnabled),
+                    _ => null,
                 })
+                .OfType<BreakpointExportSnapshot>()
                 .ToArray();
 
             var investigationId = request?.InvestigationId is Guid existingId &&
@@ -219,6 +226,47 @@ public sealed class ReplaySessionManager
 
         foreach (var exportedBreakpoint in investigation.Breakpoints)
         {
+            if (string.Equals(
+                    exportedBreakpoint.Operator,
+                    MissingDataBreakpoint.OperatorName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                Guid? missingChannelId = null;
+                if (!string.IsNullOrWhiteSpace(exportedBreakpoint.ChannelName))
+                {
+                    if (!channelByName.TryGetValue(
+                            exportedBreakpoint.ChannelName,
+                            out var missingChannel))
+                    {
+                        error = $"Channel '{exportedBreakpoint.ChannelName}' was not found in the uploaded recording.";
+                        return false;
+                    }
+
+                    missingChannelId = missingChannel.Id;
+                }
+
+                MissingDataBreakpoint missingBreakpoint;
+                try
+                {
+                    missingBreakpoint = new MissingDataBreakpoint(
+                        exportedBreakpoint.BreakpointId,
+                        exportedBreakpoint.Threshold,
+                        missingChannelId);
+                }
+                catch (ArgumentException exception)
+                {
+                    error = exception.Message;
+                    return false;
+                }
+
+                entry.Breakpoints.Add(missingBreakpoint);
+
+                if (!exportedBreakpoint.IsEnabled)
+                    entry.Breakpoints.Disable(missingBreakpoint.Id);
+
+                continue;
+            }
+
             if (!channelByName.TryGetValue(
                     exportedBreakpoint.ChannelName,
                     out var channel))
@@ -465,6 +513,45 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryAddMissingDataBreakpoint(
+        Guid sessionId,
+        double minimumSeconds,
+        Guid? channelId,
+        out MissingDataBreakpoint? breakpoint,
+        out bool unknownChannel)
+    {
+        breakpoint = null;
+        unknownChannel = false;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            Guid? resolvedChannel = null;
+            if (channelId is Guid id && id != Guid.Empty)
+            {
+                if (entry.Imported.Channels.All(channel => channel.Id != id))
+                {
+                    unknownChannel = true;
+                    return true;
+                }
+
+                resolvedChannel = id;
+            }
+
+            breakpoint = new MissingDataBreakpoint(
+                Guid.NewGuid(),
+                minimumSeconds,
+                resolvedChannel);
+            entry.Breakpoints.Add(breakpoint);
+            return true;
+        }
+    }
+
     private static MetricBreak.Domain.Recordings.ChannelValue? ParseExpected(
         MetricBreak.Domain.Recordings.ChannelValueType type, ComparisonOperator op, string? value)
     {
@@ -490,9 +577,9 @@ public sealed class ReplaySessionManager
         }
     }
 
-    public bool TryGetBreakpoints(
-    Guid sessionId,
-    out IReadOnlyList<RegisteredBreakpointSnapshot>? breakpoints)
+    public bool TryGetBreakpointResponses(
+        Guid sessionId,
+        out IReadOnlyList<BreakpointResponse>? breakpoints)
     {
         breakpoints = null;
 
@@ -505,10 +592,16 @@ public sealed class ReplaySessionManager
                 return false;
 
             breakpoints = entry.Breakpoints
-                .GetRegistered()
-                .Select(registered => new RegisteredBreakpointSnapshot(
-                    Breakpoint: registered.Breakpoint,
-                    IsEnabled: registered.IsEnabled))
+                .GetAllRegistered()
+                .Select(registered => registered.Breakpoint switch
+                {
+                    ConditionalBreakpoint conditional =>
+                        BreakpointResponseMapper.Map(conditional, registered.IsEnabled),
+                    MissingDataBreakpoint missing =>
+                        BreakpointResponseMapper.Map(missing, registered.IsEnabled),
+                    _ => null,
+                })
+                .OfType<BreakpointResponse>()
                 .ToArray();
 
             return true;

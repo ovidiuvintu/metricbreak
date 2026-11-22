@@ -49,6 +49,16 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
+    /// Registers a missing-data breakpoint, enabled by default.
+    /// </summary>
+    public void Add(MissingDataBreakpoint breakpoint)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        AddCore(breakpoint);
+    }
+
+    /// <summary>
     /// Registers a breakpoint while enforcing unique IDs.
     /// </summary>
     private void AddCore(IBreakpoint breakpoint)

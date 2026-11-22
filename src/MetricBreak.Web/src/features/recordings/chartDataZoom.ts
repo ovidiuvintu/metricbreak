@@ -31,6 +31,51 @@ function pageBounds(pageStart: number, pageEnd: number) {
   return { fullMin, fullMax, fullWidth };
 }
 
+export type ChartPlotFrame = {
+  left: number;
+  width: number;
+  /** Y pixel of the x-axis line inside the chart. */
+  axisTop: number;
+  min: number;
+  max: number;
+};
+
+/** Pixel span of the x-axis line and the sequence range it currently shows. */
+export function readChartPlotFrame(
+  chart: EChartsType,
+  pageStart: number,
+  pageEnd: number,
+): ChartPlotFrame | null {
+  const viewport = readSequenceViewport(chart, pageStart, pageEnd);
+  if (!viewport || viewport.visibleWidth <= 0) return null;
+
+  // getModel is public at runtime and private on the published type.
+  const model = (chart as unknown as {
+    getModel: () => {
+      getComponent: (
+        type: string,
+        index: number,
+      ) => {
+        coordinateSystem?: {
+          getRect: () => { x: number; y: number; width: number; height: number };
+        };
+      } | null;
+    };
+  }).getModel();
+  const rect = model.getComponent("grid", 0)?.coordinateSystem?.getRect();
+  if (!rect || !(rect.width > 1) || !Number.isFinite(rect.x) || !Number.isFinite(rect.y)) {
+    return null;
+  }
+
+  return {
+    left: rect.x,
+    width: rect.width,
+    axisTop: rect.y + rect.height,
+    min: viewport.visibleMin,
+    max: viewport.visibleMax,
+  };
+}
+
 export function readSequenceViewport(
   chart: EChartsType,
   pageStart: number,

@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Box, LinearProgress, Tooltip, Typography } from "@mui/material";
 
-import { breakpointApi, type Breakpoint, type BreakpointHitOccurrence, type CompositeBreakpoint } from "./breakpointApi";
+import {
+  breakpointApi,
+  isRecordingGap,
+  type Breakpoint,
+  type BreakpointHitOccurrence,
+  type CompositeBreakpoint,
+} from "./breakpointApi";
 import type { ChannelMetadata } from "./channelMetadata";
 
 const HIT_COLORS = [
@@ -29,6 +36,15 @@ interface BreakpointHitTimelineProps {
   compositeBreakpoints: CompositeBreakpoint[];
   channels: ChannelMetadata[];
   refreshKey?: number;
+  /** X-axis line in the chart, so hit marks share its scale and sit on it. */
+  plotFrame?: {
+    left: number;
+    width: number;
+    axisTop: number;
+    min: number;
+    max: number;
+  } | null;
+  plotAnchorRef?: RefObject<HTMLElement | null>;
   onHitClick: (sampleSequence: number, breakpointId: string) => void;
 }
 
@@ -42,6 +58,8 @@ export function BreakpointHitTimeline({
   compositeBreakpoints,
   channels,
   refreshKey = 0,
+  plotFrame = null,
+  plotAnchorRef,
   onHitClick,
 }: BreakpointHitTimelineProps) {
   const [hits, setHits] = useState<BreakpointHitOccurrence[]>([]);
@@ -65,6 +83,13 @@ export function BreakpointHitTimeline({
   const breakpointLabels = useMemo(() => {
     const map = new Map<string, string>();
     for (const bp of breakpoints) {
+      if (bp.operator === "MissingLongerThan") {
+        const scope = isRecordingGap(bp.channelId)
+          ? "Recording"
+          : (channelNames.get(bp.channelId) ?? bp.channelId);
+        map.set(bp.breakpointId, `${scope} missing > ${bp.threshold}s`);
+        continue;
+      }
       const name = channelNames.get(bp.channelId) ?? bp.channelId;
       map.set(bp.breakpointId, `${name} ${bp.operator}`);
     }
@@ -127,113 +152,110 @@ export function BreakpointHitTimeline({
     return null;
   }
 
-  const span = Math.max(1, pageEnd - pageStart);
-  const cursorPercent = currentSequence == null
-    ? null
-    : Math.max(0, Math.min(100, ((currentSequence - pageStart) / span) * 100));
+  const domainMin = plotFrame?.min ?? pageStart;
+  const domainMax = plotFrame?.max ?? Math.max(pageStart + 1, pageEnd - 1);
+  const span = Math.max(0.001, domainMax - domainMin);
+  const percentFor = (sequence: number): number | null => {
+    const percent = ((sequence - domainMin) / span) * 100;
+    if (percent < -0.5 || percent > 100.5) return null;
+    return Math.max(0, Math.min(100, percent));
+  };
+  const cursorPercent = currentSequence == null ? null : percentFor(currentSequence);
+  const visibleHits = hits.filter((hit) => percentFor(hit.sampleSequence) != null);
+
+  const anchor = plotAnchorRef?.current ?? null;
+  const marks = (
+    <Box
+      role="list"
+      aria-label="Breakpoint hit timeline"
+      sx={{
+        position: "absolute",
+        left: plotFrame ? `${plotFrame.left}px` : 0,
+        width: plotFrame ? `${plotFrame.width}px` : "100%",
+        top: plotFrame ? `${plotFrame.axisTop}px` : undefined,
+        height: 14,
+        transform: plotFrame ? "translateY(-50%)" : undefined,
+        zIndex: 8,
+        pointerEvents: "none",
+      }}
+    >
+      {cursorPercent != null && (
+        <Box
+          aria-hidden
+          sx={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: `${cursorPercent}%`,
+            width: "2px",
+            transform: "translateX(-50%)",
+            bgcolor: "warning.main",
+            pointerEvents: "none",
+            zIndex: 2,
+          }}
+        />
+      )}
+      {hits.map((hit) => {
+        const percent = percentFor(hit.sampleSequence);
+        if (percent == null) return null;
+        const colorIndex = colorIndexById.get(hit.breakpointId) ?? 0;
+        const label = breakpointLabels.get(hit.breakpointId) ?? hit.breakpointId;
+
+        return (
+          <Tooltip
+            key={`${hit.breakpointId}-${hit.sampleSequence}`}
+            title={`${label} · #${hit.sampleSequence.toLocaleString()} (click to seek)`}
+          >
+            <Box
+              component="button"
+              type="button"
+              role="listitem"
+              aria-label={`${label} at sample ${hit.sampleSequence}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onHitClick(hit.sampleSequence, hit.breakpointId)}
+              sx={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: `${percent}%`,
+                width: 6,
+                transform: "translateX(-50%)",
+                border: 0,
+                borderRadius: 0.5,
+                p: 0,
+                cursor: "pointer",
+                pointerEvents: "auto",
+                bgcolor: colorForBreakpoint(colorIndex),
+                opacity: 0.95,
+                zIndex: 1,
+                "&:hover": { opacity: 1, boxShadow: 2 },
+              }}
+            />
+          </Tooltip>
+        );
+      })}
+    </Box>
+  );
 
   return (
-    <Box sx={{ flexShrink: 0, px: 0.5, pb: 0.25 }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, mb: 0.25 }}>
-        <Typography variant="caption" color="text.secondary">
-          Breakpoint hits on this page
-          {truncated ? " (truncated)" : ""}
-        </Typography>
-        {loading && (
-          <Typography variant="caption" color="text.secondary">
-            Scanning…
-          </Typography>
-        )}
-      </Box>
-      {loading && <LinearProgress sx={{ mb: 0.25, height: 2 }} />}
+    <Box sx={{ flexShrink: 0, pb: 0.25 }}>
+      {loading && <LinearProgress sx={{ height: 2 }} />}
       {error && (
-        <Typography variant="caption" color="error">
+        <Typography variant="caption" color="error" sx={{ px: 0.5 }}>
           {error}
         </Typography>
       )}
-      <Box
-        role="list"
-        aria-label="Breakpoint hit timeline"
-        sx={{
-          position: "relative",
-          height: 28,
-          borderRadius: 0.5,
-          border: 1,
-          borderColor: "divider",
-          bgcolor: "action.hover",
-          overflow: "hidden",
-        }}
-      >
-        {cursorPercent != null && (
-          <Box
-            aria-hidden
-            sx={{
-              position: "absolute",
-              top: 0,
-              bottom: 0,
-              left: `${cursorPercent}%`,
-              width: "2px",
-              transform: "translateX(-50%)",
-              bgcolor: "warning.main",
-              opacity: 0.9,
-              pointerEvents: "none",
-              zIndex: 2,
-            }}
-          />
-        )}
-        {hits.map((hit) => {
-          const percent = Math.max(0, Math.min(100, ((hit.sampleSequence - pageStart) / span) * 100));
-          const colorIndex = colorIndexById.get(hit.breakpointId) ?? 0;
-          const label = breakpointLabels.get(hit.breakpointId) ?? hit.breakpointId;
-
-          return (
-            <Tooltip
-              key={`${hit.breakpointId}-${hit.sampleSequence}`}
-              title={`${label} · #${hit.sampleSequence.toLocaleString()} (click to seek)`}
-            >
-              <Box
-                component="button"
-                type="button"
-                role="listitem"
-                aria-label={`${label} at sample ${hit.sampleSequence}`}
-                onClick={() => onHitClick(hit.sampleSequence, hit.breakpointId)}
-                sx={{
-                  position: "absolute",
-                  top: 2,
-                  bottom: 2,
-                  left: `${percent}%`,
-                  width: 6,
-                  transform: "translateX(-50%)",
-                  border: 0,
-                  borderRadius: 0.5,
-                  p: 0,
-                  cursor: "pointer",
-                  bgcolor: colorForBreakpoint(colorIndex),
-                  opacity: 0.92,
-                  zIndex: 1,
-                  "&:hover": { opacity: 1, boxShadow: 2 },
-                }}
-              />
-            </Tooltip>
-          );
-        })}
-        {!loading && hits.length === 0 && !error && (
-          <Typography
-            variant="caption"
-            color="text.secondary"
-            sx={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            No hits on samples {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()}
-          </Typography>
-        )}
-      </Box>
-      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 0.25 }}>
+      {plotFrame && anchor ? createPortal(marks, anchor) : null}
+      <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.75, mt: 0.25, px: 0.5 }}>
+        <Typography variant="caption" color="text.secondary">
+          {loading
+            ? "Scanning breakpoint hits…"
+            : !error && visibleHits.length === 0
+              ? hits.length === 0
+                ? `No hits on samples ${(pageStart + 1).toLocaleString()}–${pageEnd.toLocaleString()}`
+                : "No hits in the current zoom"
+              : `Breakpoint hits on this page${truncated ? " (truncated)" : ""}`}
+        </Typography>
         {enabledBreakpoints.slice(0, 6).map((bp) => {
           const colorIndex = colorIndexById.get(bp.breakpointId) ?? 0;
           return (

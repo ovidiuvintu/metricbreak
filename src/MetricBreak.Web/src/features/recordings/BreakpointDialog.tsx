@@ -19,6 +19,7 @@ import type { ChannelMetadata } from "./channelMetadata";
 import type {
   ComparisonOperator,
   CreateBreakpointRequest,
+  CreateMissingDataBreakpointRequest,
 } from "./breakpointApi";
 
 export interface BreakpointDialogDraft {
@@ -35,6 +36,7 @@ interface BreakpointDialogProps {
   draft?: BreakpointDialogDraft | null;
   onClose: () => void;
   onCreate: (request: CreateBreakpointRequest) => Promise<void>;
+  onCreateMissingData: (request: CreateMissingDataBreakpointRequest) => Promise<void>;
 }
 
 const operators: {
@@ -59,15 +61,20 @@ export function BreakpointDialog({
   draft,
   onClose,
   onCreate,
+  onCreateMissingData,
 }: BreakpointDialogProps) {
+  const [kind, setKind] = useState<"comparison" | "missing">("comparison");
   const [channelId, setChannelId] = useState("");
   const [operator, setOperator] =
     useState<ComparisonOperator>("GreaterThan");
   const [threshold, setThreshold] = useState("");
   const [typedValue, setTypedValue] = useState("");
+  const [missingSeconds, setMissingSeconds] = useState("5");
+  const [missingChannelId, setMissingChannelId] = useState("recording");
 
   useEffect(() => {
     if (!open) return;
+    setKind("comparison");
     setChannelId(draft?.channelId ?? "");
     setOperator(draft?.operator ?? "GreaterThan");
     setThreshold(
@@ -76,6 +83,8 @@ export function BreakpointDialog({
         : "",
     );
     setTypedValue("");
+    setMissingSeconds("5");
+    setMissingChannelId("recording");
   }, [open, draft]);
 
   const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
@@ -86,6 +95,12 @@ export function BreakpointDialog({
   const numericThreshold = needsThreshold ? Number(threshold) : 0;
 
   const needsTypedValue = selectedType !== "Numeric" && ["Equal", "NotEqual"].includes(operator);
+  const missingDuration = Number(missingSeconds);
+  const validMissing =
+    missingSeconds.trim() !== "" &&
+    Number.isFinite(missingDuration) &&
+    missingDuration > 0 &&
+    (missingChannelId === "recording" || channels.some((channel) => channel.channelId === missingChannelId));
   const valid =
     channelId !== "" &&
     channels.some((channel) => channel.channelId === channelId) &&
@@ -94,7 +109,18 @@ export function BreakpointDialog({
     (!needsTypedValue || (selectedType === "Boolean" ? ["true", "false"].includes(typedValue) : typedValue.length > 0));
 
   const handleCreate = async () => {
-    if (!valid || busy) return;
+    if (busy) return;
+
+    if (kind === "missing") {
+      if (!validMissing) return;
+      await onCreateMissingData({
+        minimumSeconds: missingDuration,
+        ...(missingChannelId !== "recording" ? { channelId: missingChannelId } : {}),
+      });
+      return;
+    }
+
+    if (!valid) return;
 
     await onCreate({
       channelId,
@@ -116,6 +142,46 @@ export function BreakpointDialog({
               {draft.caption}
             </Typography>
           )}
+          <FormControl fullWidth size="small">
+            <InputLabel>Type</InputLabel>
+            <Select
+              label="Type"
+              value={kind}
+              onChange={(event) => setKind(event.target.value as "comparison" | "missing")}
+            >
+              <MenuItem value="comparison">Value comparison</MenuItem>
+              <MenuItem value="missing">Missing data</MenuItem>
+            </Select>
+          </FormControl>
+          {kind === "missing" ? (
+            <>
+              <FormControl fullWidth size="small">
+                <InputLabel>Scope</InputLabel>
+                <Select
+                  label="Scope"
+                  value={missingChannelId}
+                  onChange={(event) => setMissingChannelId(event.target.value)}
+                >
+                  <MenuItem value="recording">Recording time gap</MenuItem>
+                  {channels.map((channel) => (
+                    <MenuItem key={channel.channelId} value={channel.channelId}>
+                      {channel.name} empty
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <TextField
+                label="Longer than (seconds)"
+                type="number"
+                size="small"
+                value={missingSeconds}
+                onChange={(event) => setMissingSeconds(event.target.value)}
+                helperText="Stops when the gap is longer than this. A recording time gap is the clock jump between samples. A channel stops once that channel has stayed empty for longer than this."
+                fullWidth
+              />
+            </>
+          ) : (
+          <>
           <FormControl fullWidth size="small">
             <InputLabel>Channel</InputLabel>
             <Select
@@ -171,6 +237,8 @@ export function BreakpointDialog({
             onChange={(event) => setThreshold(event.target.value)}
             fullWidth
           />}
+          </>
+          )}
         </Stack>
       </DialogContent>
 
@@ -181,7 +249,7 @@ export function BreakpointDialog({
         <Button
           variant="contained"
           onClick={handleCreate}
-          disabled={!valid || busy}
+          disabled={(kind === "missing" ? !validMissing : !valid) || busy}
         >
           Create Breakpoint
         </Button>
