@@ -706,7 +706,35 @@ export function RecordingChart({
     event.preventDefault();
   };
 
+  const openSampleContextMenu = (
+    event: ReactMouseEvent,
+    sequence: number,
+    anchor: { x: number; y: number },
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const sample = samples.find((item) => item.sequence === sequence);
+    const timestamp = sample
+      ? formatTimestamp(sample.timestampNanoseconds, timestampOrigin)
+      : sequence === currentSequence && currentTimestampNanoseconds != null
+        ? formatTimestamp(String(currentTimestampNanoseconds), timestampOrigin)
+        : "";
+
+    setHover(null);
+    setInspectedSample(null);
+    setChartMenu({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      sequence,
+      timestamp,
+      x: anchor.x,
+      y: anchor.y,
+    });
+  };
+
   // Sample menu only inside the plot grid; elsewhere on the chart block the browser menu.
+  // The cursor label uses the replay sequence itself, so it does not snap to a pixel.
   const handlePlotContextMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -2357,14 +2385,22 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           <Typography
             variant="body2"
             noWrap
+            onContextMenu={(event) => {
+              if (currentSequence === null) return;
+              openSampleContextMenu(event, currentSequence, {
+                x: cursorLabelX ?? 24,
+                y: 48,
+              });
+            }}
             sx={{
               fontWeight: 400,
               color: "warning.main",
               fontVariantNumeric: "tabular-nums",
               flexShrink: 0,
               mr: "auto",
+              cursor: "context-menu",
             }}
-            title="Actual replay position (independent of chart page)"
+            title="Replay cursor. Right-click for actions at this sample."
           >
             Current sample: {currentSequence?.toLocaleString() ?? "—"}
             {currentTimestampNanoseconds != null && (() => {
@@ -2617,6 +2653,16 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               onPointerMove={handleLabelPointerMove}
               onPointerUp={handleLabelPointerUp}
               onPointerCancel={handleLabelPointerCancel}
+              onContextMenu={(event) => {
+                const sequence = previewSequence ?? currentSequence;
+                if (sequence === null) return;
+                openSampleContextMenu(event, sequence, {
+                  x: cursorLabelX ?? event.nativeEvent.offsetX,
+                  y: 48,
+                });
+              }}
+              aria-label="Replay cursor. Right-click for actions at this sample."
+              title="Drag to move the replay cursor. Right-click for actions at this sample."
               sx={{
                 position: "absolute",
                 // Place the handle between the legend and the plot (grid starts at 42px).

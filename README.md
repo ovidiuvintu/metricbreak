@@ -5,7 +5,7 @@
 
 MetricBreak is an offline-first, industry-independent debugger for recorded time-series telemetry. It helps engineers investigate what happened, find when conditions occurred, inspect the exact samples around an event, and preserve reproducible debugging context.
 
-> **Project status (November 2026):** Active development. CSV ingestion with typed channel values, recording/session management, deterministic forward/reverse replay, simulation-style playback, numeric conditional and composite breakpoints, a .NET API, and a React debugging interface are implemented. Investigation persistence, expanded analysis, and release hardening remain ongoing or planned. This README is not a release-readiness claim.
+> **Project status (November 2026):** Active development. CSV ingestion with typed channel values, recording/session management, deterministic forward/reverse replay, simulation-style playback, conditional, missing-data, and composite breakpoints, a .NET API, and a React debugging interface are implemented. Investigation persistence, expanded analysis, and release hardening remain ongoing or planned. This README is not a release-readiness claim.
 
 ## Why MetricBreak?
 
@@ -16,7 +16,7 @@ Example questions:
 - When did pressure first fall below 4,000 psi?
 - At which sample were pressure above 9,000 psi **and** flow rate below 50 bpm?
 - What happened immediately before and after a breakpoint triggered?
-- Was a valve `ON` when pressure spiked? *(Categorical values can be inspected; typed breakpoint comparisons remain a separate extension.)*
+- Was a valve `ON` when pressure spiked?
 - How did an abnormal recording differ from a known-good run? *(Planned comparison capability.)*
 
 MetricBreak's core remains **industry-neutral**. Industrial telemetry, vehicle diagnostics, infrastructure/SRE recordings, and scientific measurements are use cases—not hardcoded assumptions.
@@ -29,10 +29,11 @@ The following capabilities are implemented; full end-to-end validation and relea
 - **Recording and session management:** Create and inspect recording sessions through the ASP.NET Core API.
 - **Deterministic replay:** Seek, step forward/backward, and navigate conditional breakpoint hits in either direction.
 - **Simulation-style playback:** Play/pause, forward/reverse traversal, adjustable speed, and time-based or sample-based pacing. Breakpoint evaluation remains authoritative even when UI rendering is batched.
-- **Breakpoints:** Numeric conditional rules and composite `AND`/`OR` rules, with API and React management UI.
+- **Breakpoints:** Conditional rules on numeric, Boolean, and categorical values, missing-data rules (a recording time gap or a channel that stays empty longer than a duration), and composite `AND`/`OR` rules. Each breakpoint shows how often it matches and how long the signal stays on that side, including the longest run, without moving the replay cursor.
 - **Recording chart:** Numeric-only plotted series and legend, channel selection, paginated sample windows (up to 5,000 samples per page), zoom, and a replay-position indicator and scrub control. Missing values appear as gaps rather than invented zero readings.
-- **Sample inspection:** Inspector tabs for Channels, Breakpoints, and Values. Categorical and Boolean values remain inspectable even though they are not plotted as numeric chart series.
-- **Chart context menu:** Right-click to move the replay cursor to a sample, inspect its values without seeking, or copy its sequence or timestamp. The chart uses a standard arrow cursor.
+- **Sample inspection:** Inspector tabs for Channels, Breakpoints, Values, and Timeline. Categorical and Boolean values remain inspectable even though they are not plotted as numeric chart series. In Values, the reading sits next to the channel name. When the value changed from the previous sample, that earlier reading is shown underneath. Stepping one sample does not blank the comparison.
+- **Chart context menu:** Right-click the plot, the current-sample label, or the replay-cursor chip to move the cursor, inspect values without seeking, bookmark the sample, add a breakpoint, or copy the sequence or timestamp. The label and the chip use the replay sequence itself, so the breakpoint lands on that sample rather than the nearest chart pixel. The chart uses a standard arrow cursor.
+- **Recording duration:** The dashboard duration counts every sample interval, including the last sample. A recording of 10,800 one-second samples lasts 3 hours. The clock from the first timestamp to the last is one interval shorter.
 - **Local project workspace foundation:** Project create/open workflows and local persistence infrastructure.
 - **Automated tests:** Core domain and API tests; comprehensive browser and end-to-end validation remains a release task.
 
@@ -45,25 +46,25 @@ The following capabilities are implemented; full end-to-end validation and relea
 | Type | Examples | Current behavior |
 | --- | --- | --- |
 | Numeric | `1200`, `45.2` | Numeric plotting, inspection, and numeric breakpoint conditions |
-| Boolean | `true`, `false` | Typed inspection; excluded from numeric plots |
-| Categorical | `ON`, `OFF`, `RUNNING` | Typed inspection; excluded from numeric plots |
+| Boolean | `true`, `false` | Typed inspection and equality, inequality, and edge breakpoints; excluded from numeric plots |
+| Categorical | `ON`, `OFF`, `RUNNING` | Typed inspection and equality, inequality, and change breakpoints; excluded from numeric plots |
 | Missing | Empty CSV cell | Explicit missing value; chart gaps instead of fabricated zeros |
 
-Channel typing preserves the distinction between measurements and states. `ON`/`OFF` are categorical rather than silently converted to numeric values. Typed equality/transition breakpoints remain a future extension.
+Channel typing preserves the distinction between measurements and states. `ON`/`OFF` are categorical rather than silently converted to numeric values. Equality, inequality, and change breakpoints apply to Boolean and categorical channels. Numeric channels also support threshold and edge comparisons.
 
 ### Simulation-style playback — implemented foundation
 
 - Play, pause, seek, step, and continue through recorded samples.
 - Play forward or backward with adjustable speed.
 - Use timestamp-based or sample-based playback.
-- Stop at matching numeric conditional or composite breakpoints in either direction.
+- Stop at matching conditional, missing-data, or composite breakpoints in either direction.
 - Keep breakpoint evaluation independent of throttled or batched chart updates.
 
 **Playback never generates or predicts telemetry.** It traverses immutable recorded samples. The replay engine owns sample ordering and breakpoint results; playback controls handle direction, timing, and speed.
 
-### Typed breakpoints — planned extension
+### Typed breakpoints
 
-Numeric conditions will be extended to Boolean and categorical values, for example:
+Boolean and categorical conditions use operators that fit the type. A composite rule can mix them with a numeric threshold:
 
 ```text
 ValveState == ON
@@ -71,13 +72,13 @@ ValveState == ON
 Pressure > 1400
 ```
 
-Boolean and categorical comparisons will use operators appropriate to their types. The debugger must not impose numeric ordering on text values.
+The debugger does not impose numeric ordering on text values.
 
 ## Product areas
 
 ### Recording Dashboard — execute and inspect
 
-The Recording Dashboard is the primary debugging surface. It provides recording/channel inspection, replay navigation, and breakpoint management. The existing interface includes playback controls, paginated numeric charts, a replay scrubber, sample-value inspection, and right-click navigation. Planned additions include categorical state timelines and richer breakpoint-hit inspection.
+The Recording Dashboard is the primary debugging surface. It provides recording/channel inspection, replay navigation, and breakpoint management. The interface includes playback controls, paginated numeric charts, a replay scrubber, sample-value inspection, and right-click actions on the plot and on the current-sample label. Imported CSV events and stages appear on the Timeline tab and can move the replay cursor. Breakpoint hits are marked on the chart sequence axis. A categorical state timeline derived from channel values is still planned.
 
 ### Investigations — preserve debugging context
 
@@ -153,8 +154,8 @@ ASP.NET Core API
         v
 React / TypeScript UI
    |           |           |
-Recording  Investigations   Analysis
-Dashboard   (planned)      (planned)
+Recording      Investigations    Analysis
+Dashboard                        (planned)
 ```
 
 The diagram shows the **target separation of responsibilities**, not a claim that every component is already implemented. Future data sources should adapt to the same recording and telemetry abstractions without changing the replay and breakpoint engines.
@@ -196,13 +197,16 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 - [x] Implement forward/reverse playback with adjustable speed and time/sample pacing.
 - [x] Expose typed channel metadata and sample values for inspection.
 - [x] Add paginated numeric-only chart plotting, missing-data gaps, replay scrubbing, and context-menu sample actions.
+- [x] Add missing-data breakpoints, breakpoint coverage, and right-click breakpoint actions on the current sample.
+- [x] Show imported CSV events and stages on the recording timeline.
+- [x] Count every sample interval in the dashboard duration.
 
 ### Complete the CSV MVP
 
-- [ ] Extend simple/composite breakpoint evaluation and UI to Boolean and categorical conditions.
+- [x] Extend simple/composite breakpoint evaluation and UI to Boolean and categorical conditions.
 - [x] Investigation persistence, restoration, bookmarks, chart layout in workspace (notes/description supported; project-scoped delete pending).
 - [ ] Add initial Analysis functionality: statistics, time-window inspection, and multi-channel comparison.
-- [ ] Add categorical state timelines and richer breakpoint-hit inspection.
+- [ ] Add categorical state timelines derived from channel values.
 - [ ] Validate and complete project-free quick analysis and Save as Project.
 - [ ] Test the full CSV workflow end to end, including large files, malformed data, recovery, and performance.
 
