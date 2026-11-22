@@ -188,6 +188,13 @@ export function RecordingDashboard({
     currentSequence: number;
     sample: SampleRangeItem;
   } | null>(null);
+  // The sample shown before the latest cursor move. A one-step update can
+  // compare against it immediately, instead of blanking the Values list
+  // while the preceding sample is fetched.
+  const heldWatchSampleRef = useRef<{
+    sessionId: string;
+    sample: SessionState["currentSample"];
+  } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -293,6 +300,11 @@ export function RecordingDashboard({
       return;
     }
 
+    const held = heldWatchSampleRef.current;
+    if (held?.sessionId === watchSessionId && held.sample.sequence + 1 === watchSequence) {
+      return;
+    }
+
     let cancelled = false;
     void recordingApi.getSamples(watchSessionId, watchSequence - 1, 1)
       .then((response) => {
@@ -313,6 +325,17 @@ export function RecordingDashboard({
 
     return () => { cancelled = true; };
   }, [inspectorTab, watchSessionId, watchSequence]);
+
+  useEffect(() => {
+    if (watchSessionId && session?.currentSample) {
+      heldWatchSampleRef.current = {
+        sessionId: watchSessionId,
+        sample: session.currentSample,
+      };
+    } else {
+      heldWatchSampleRef.current = null;
+    }
+  }, [watchSessionId, session?.currentSample]);
 
   useEffect(() => {
     if (!session?.recordingId || session.currentSample == null) return;
@@ -345,12 +368,19 @@ export function RecordingDashboard({
     };
   }, [session?.sessionId, breakpointCoverageKey]);
 
-  const previousWatchSample =
+  const fetchedPreviousSample =
     previousSampleResult != null &&
     previousSampleResult.sessionId === watchSessionId &&
     previousSampleResult.currentSequence === watchSequence
       ? previousSampleResult.sample
       : null;
+  const heldPreviousSample =
+    heldWatchSampleRef.current?.sessionId === watchSessionId &&
+    session?.currentSample != null &&
+    heldWatchSampleRef.current.sample.sequence + 1 === session.currentSample.sequence
+      ? heldWatchSampleRef.current.sample
+      : null;
+  const previousWatchSample = fetchedPreviousSample ?? heldPreviousSample;
 
   useEffect(() => {
     const sessionId = session?.sessionId;

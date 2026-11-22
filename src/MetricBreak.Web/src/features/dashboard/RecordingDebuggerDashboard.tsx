@@ -20,7 +20,7 @@ import { investigationApi } from "../investigations/investigationApi";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
 import type { InvestigationBookmark } from "../investigations/investigationTypes";
 import { formatBookmarkTime } from "../investigations/formatBookmarkTime";
-import { formatDurationBetweenNanoseconds } from "./formatDuration";
+import { formatRecordingDuration } from "./formatDuration";
 import { InvestigationsResumeList } from "../investigations/InvestigationsResumeList";
 
 interface RecordingDebuggerDashboardProps {
@@ -98,10 +98,10 @@ export function RecordingDebuggerDashboard({
                 if (!first || !last) return;
 
                 setDurationLabel(
-                    formatDurationBetweenNanoseconds(
-                        Number(first.timestampNanoseconds),
-                        Number(last.timestampNanoseconds),
-                        timestampOrigin,
+                    formatRecordingDuration(
+                        first.timestampNanoseconds,
+                        last.timestampNanoseconds,
+                        session.sampleCount,
                     ),
                 );
             } catch {
@@ -110,7 +110,7 @@ export function RecordingDebuggerDashboard({
         })();
 
         return () => { cancelled = true; };
-    }, [session, timestampOrigin]);
+    }, [session]);
 
     useEffect(() => {
         if (!session) {
