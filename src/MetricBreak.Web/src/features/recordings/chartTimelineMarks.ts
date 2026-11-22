@@ -101,23 +101,66 @@ export function buildTimelineEventScatterSeries(options: {
     z: 8,
     legendHoverLink: false,
     tooltip: {
-      show: true,
+      show: false,
     },
   };
 }
 
-export function formatTimelineEventTooltip(
-  param: {
-    data?: TimelineEventScatterPoint;
-  },
-): string {
-  const data = param.data;
-  if (!data) return "";
-  const lines = [
-    data.eventName,
-    `Sample ${data.value[0].toLocaleString()}`,
-  ];
-  const description = data.eventDescription?.trim();
-  if (description) lines.push(description);
-  return lines.join("\n");
+/** Pointer must enter this radius before an event tooltip appears. */
+export const TIMELINE_EVENT_HIT_ENTER_PX = 18;
+
+/** A shown event tooltip stays until the pointer leaves this larger radius. */
+export const TIMELINE_EVENT_HIT_EXIT_PX = 36;
+
+export type TimelineEventHitCandidate = {
+  key: string;
+  name: string;
+  description: string | null;
+  sampleSequence: number;
+  x: number;
+  y: number;
+  distance: number;
+};
+
+export type TimelineEventHit = Omit<TimelineEventHitCandidate, "distance">;
+
+/**
+ * Keeps the current event while the pointer stays inside the exit radius,
+ * so a tooltip does not flicker between a marker and a nearby series line.
+ */
+export function pickTimelineEventHit(
+  candidates: TimelineEventHitCandidate[],
+  latchedKey: string | null,
+  enterPx = TIMELINE_EVENT_HIT_ENTER_PX,
+  exitPx = TIMELINE_EVENT_HIT_EXIT_PX,
+): TimelineEventHit | null {
+  if (latchedKey) {
+    const latched = candidates.find((candidate) => candidate.key === latchedKey);
+    if (latched && latched.distance <= exitPx) {
+      return toTimelineEventHit(latched);
+    }
+  }
+
+  let nearest: TimelineEventHitCandidate | null = null;
+  for (const candidate of candidates) {
+    if (!nearest || candidate.distance < nearest.distance) {
+      nearest = candidate;
+    }
+  }
+
+  if (!nearest || nearest.distance > enterPx) return null;
+  return toTimelineEventHit(nearest);
+}
+
+function toTimelineEventHit(
+  candidate: TimelineEventHitCandidate,
+): TimelineEventHit {
+  return {
+    key: candidate.key,
+    name: candidate.name,
+    description: candidate.description,
+    sampleSequence: candidate.sampleSequence,
+    x: candidate.x,
+    y: candidate.y,
+  };
 }

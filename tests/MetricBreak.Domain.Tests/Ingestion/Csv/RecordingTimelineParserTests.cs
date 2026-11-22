@@ -57,6 +57,28 @@ public sealed class RecordingTimelineParserTests
     }
 
     [Fact]
+    public void Parse_TreatmentDataFile_ImportsEventsAndStages()
+    {
+        var path = SamplePath("hydraulic_fracturing_3hr_1sec_treatment_data.csv");
+        Assert.True(File.Exists(path), $"Missing sample: {path}");
+
+        using var reader = OpenReader(path);
+        var parsed = new IndexedCsvTelemetryParser().Parse(reader);
+
+        Assert.Equal(10_800, parsed.Samples.Count);
+        Assert.Equal(11, parsed.Timeline.Events.Count);
+        Assert.Equal(7, parsed.Timeline.Stages.Count);
+
+        var breakdown = parsed.Timeline.Events.Single(
+            item => item.Name == "Formation Breakdown");
+        Assert.Contains("pressure drop", breakdown.Description, StringComparison.Ordinal);
+
+        var acid = parsed.Timeline.Stages.Single(
+            item => item.Name == "Stage 1: Acid Spearhead");
+        Assert.Contains("hydrochloric acid", acid.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Parse_TelemetryOnlyFile_HasEmptyTimeline()
     {
         var path = SamplePath("hydraulic_fracturing_treatment_3hr_1s.csv");

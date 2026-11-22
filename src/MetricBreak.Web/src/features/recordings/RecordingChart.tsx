@@ -74,12 +74,13 @@ import type {
 } from "../investigations/investigationTypes";
 import {
   buildTimelineEventScatterSeries,
-  formatTimelineEventTooltip,
+  pickTimelineEventHit,
   resolveActiveStage,
   TIMELINE_EVENTS_SERIES_ID,
   timelineEventMarkerY,
   timelineEventsOnPage,
   type ChartTimelineEntry,
+  type TimelineEventHit,
 } from "./chartTimelineMarks";
 
 export type ChartViewportSnapshot = NonNullable<
@@ -649,6 +650,9 @@ export function RecordingChart({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [hover, setHover] = useState<HoverDetails | null>(null);
+  const [eventTip, setEventTip] = useState<TimelineEventHit | null>(null);
+  const eventTipKeyRef = useRef<string | null>(null);
+  const eventTipPosRef = useRef<{ x: number; y: number } | null>(null);
   const [inspectedSample, setInspectedSample] = useState<HoverDetails | null>(null);
   const [cursorHovered, setCursorHovered] = useState(false);
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
@@ -754,13 +758,30 @@ export function RecordingChart({
 
 
 
-  const displayedSample = inspectedSample ?? (tooltipsEnabled ? hover : null);
+  const displayedSample =
+    inspectedSample ?? (tooltipsEnabled && !eventTip ? hover : null);
+
+  const clearEventTip = () => {
+    if (eventTipKeyRef.current === null && eventTipPosRef.current === null) return;
+    eventTipKeyRef.current = null;
+    eventTipPosRef.current = null;
+    setEventTip(null);
+  };
+
+  useEffect(() => {
+    eventTipKeyRef.current = null;
+    eventTipPosRef.current = null;
+    setEventTip(null);
+  }, [sessionId, pageStart]);
 
   const toggleTooltips = () => {
     const next = !tooltipsEnabledRef.current;
     tooltipsEnabledRef.current = next;
     setTooltipsEnabled(next);
-    if (!next) setHover(null);
+    if (!next) {
+      setHover(null);
+      clearEventTip();
+    }
   };
   const withChart = (action: (chart: EChartsType) => void) => {
     const chart = chartRef.current?.getEchartsInstance();
@@ -998,6 +1019,9 @@ export function RecordingChart({
   investigationBookmarksRef.current = investigationBookmarks;
   const timelineStagesRef = useRef(timelineStages);
   timelineStagesRef.current = timelineStages;
+  const timelineEventsRef = useRef(timelineEvents);
+  timelineEventsRef.current = timelineEvents;
+  const eventMarkerRef = useRef<{ y: number; yAxisIndex: 0 | 1 } | null>(null);
   const onScrubStartRef = useRef(onScrubStart);
   const onScrubEndRef = useRef(onScrubEnd);
   const samplesRef = useRef(samples);
@@ -1469,25 +1493,24 @@ export function RecordingChart({
       pageStart,
       pageEnd,
     );
-    const eventScatter = primaryExtent
-      ? buildTimelineEventScatterSeries({
+    const markerY = primaryExtent
+      ? timelineEventMarkerY(primaryExtent.dataMin, primaryExtent.dataMax)
+      : null;
+    eventMarkerRef.current =
+      markerY === null
+        ? null
+        : { y: markerY, yAxisIndex: primaryYAxisIndex };
+    const eventScatter = markerY === null
+      ? null
+      : buildTimelineEventScatterSeries({
           events: pageEvents,
-          markerY: timelineEventMarkerY(
-            primaryExtent.dataMin,
-            primaryExtent.dataMax,
-          ),
+          markerY,
           yAxisIndex: primaryYAxisIndex,
           darkMode: theme.palette.mode === "dark",
-        })
-      : null;
+        });
     const allSeries = eventScatter
       ? [...chartSeries, eventScatter]
       : chartSeries;
-
-    const tooltipBackground =
-      theme.palette.mode === "dark" ? "#1E293B" : "#FFFFFF";
-    const tooltipBorder =
-      theme.palette.mode === "dark" ? "#334155" : "#E2E8F0";
 
     return {
       animation: false,
@@ -1496,30 +1519,10 @@ export function RecordingChart({
       color: chartTheme.color,
       textStyle: chartTheme.textStyle,
 
+      // Event text is a latched panel. ECharts item tips flicker on these dots
+      // because series lines and the hover panel steal the pointer.
       tooltip: {
-        show: true,
-        trigger: "item",
-        confine: true,
-        backgroundColor: tooltipBackground,
-        borderColor: tooltipBorder,
-        borderWidth: 1,
-        textStyle: {
-          color: chartTheme.axisTextColor,
-          fontSize: 11,
-        },
-        formatter: (param: unknown) => {
-          if (!param || Array.isArray(param)) return "";
-          const seriesParam = param as {
-            seriesId?: string;
-            data?: { eventName?: string; eventDescription?: string | null; value?: [number, number] };
-          };
-          if (seriesParam.seriesId !== TIMELINE_EVENTS_SERIES_ID) return "";
-          return formatTimelineEventTooltip({ data: seriesParam.data as {
-            eventName: string;
-            eventDescription: string | null;
-            value: [number, number];
-          } });
-        },
+        show: false,
       },
 
       legend: {
@@ -2077,6 +2080,9 @@ export function RecordingChart({
 
         event.preventDefault();
         event.stopPropagation();
+        eventTipKeyRef.current = null;
+        eventTipPosRef.current = null;
+        setEventTip(null);
 
         const coordinates = chart.convertFromPixel(
           { gridIndex: 0 },
@@ -2151,13 +2157,67 @@ export function RecordingChart({
          }
        };
 
+const publishEventTip = (next: TimelineEventHit | null) => {
+        const key = next?.key ?? null;
+        const previous = eventTipPosRef.current;
+        const samePosition = next !== null && previous !== null
+          && Math.abs(previous.x - next.x) < 0.5
+          && Math.abs(previous.y - next.y) < 0.5;
+        if (key === eventTipKeyRef.current && (next === null || samePosition)) return;
+        eventTipKeyRef.current = key;
+        eventTipPosRef.current = next ? { x: next.x, y: next.y } : null;
+        setEventTip(next);
+      };
+
+      const updateEventTip = (x: number, y: number) => {
+        const marker = eventMarkerRef.current;
+        const events = timelineEventsRef.current;
+        const { pageStart: tipPageStart, pageEnd: tipPageEnd } = pageWindowRef.current;
+        if (!marker || events.length === 0) {
+          publishEventTip(null);
+          return;
+        }
+
+        const candidates = [];
+        for (const item of events) {
+          if (item.sampleSequence < tipPageStart || item.sampleSequence >= tipPageEnd) {
+            continue;
+          }
+          let pixel: number[];
+          try {
+            pixel = chart.convertToPixel(
+              { xAxisIndex: 0, yAxisIndex: marker.yAxisIndex },
+              [item.sampleSequence, marker.y],
+            ) as number[];
+          } catch {
+            continue;
+          }
+          if (!pixel || pixel.length < 2 || !Number.isFinite(pixel[0]) || !Number.isFinite(pixel[1])) {
+            continue;
+          }
+          candidates.push({
+            key: `${item.sampleSequence}:${item.name}`,
+            name: item.name,
+            description: item.description,
+            sampleSequence: item.sampleSequence,
+            x: pixel[0],
+            y: pixel[1],
+            distance: Math.hypot(pixel[0] - x, pixel[1] - y),
+          });
+        }
+
+        publishEventTip(pickTimelineEventHit(candidates, eventTipKeyRef.current));
+      };
+
 const handleMove = (event: { offsetX: number; offsetY: number }) => {
         if (!tooltipsEnabledRef.current) return;
         const pixel: [number, number] = [event.offsetX, event.offsetY];
         if (!chart.containPixel({ gridIndex: 0 }, pixel)) {
           setHover(null);
+          publishEventTip(null);
           return;
         }
+        updateEventTip(event.offsetX, event.offsetY);
         const coordinates = chart.convertFromPixel(
           { gridIndex: 0 }, pixel,
         ) as number[];
@@ -2205,6 +2265,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
 
       const handleLeave = () => {
         setHover(null);
+        publishEventTip(null);
         setCursorHovered(false);
       };
 
@@ -2554,6 +2615,58 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             </Box>
           )}
           </Box>
+          {eventTip && tooltipsEnabled && !inspectedSample && (
+            <Box
+              sx={{
+                position: "absolute",
+                zIndex: 11,
+                pointerEvents: "none",
+                width: 300,
+                left: Math.max(
+                  8,
+                  Math.min(
+                    eventTip.x - 150,
+                    (plotAreaRef.current?.clientWidth ?? 450) - 308,
+                  ),
+                ),
+                top: eventTip.y > 140 ? eventTip.y - 12 : eventTip.y + 16,
+                transform: eventTip.y > 140 ? "translateY(-100%)" : "none",
+              }}
+            >
+              <Box
+                sx={{
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  bgcolor: "background.paper",
+                  boxShadow: 4,
+                  px: 1.25,
+                  py: 1,
+                  maxHeight: 220,
+                  overflow: "hidden",
+                }}
+              >
+                <Typography variant="caption" sx={{ display: "block", fontWeight: 700 }}>
+                  {eventTip.name}
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", mt: 0.25 }}
+                >
+                  Sample {eventTip.sampleSequence.toLocaleString()}
+                </Typography>
+                {eventTip.description?.trim() && (
+                  <Typography
+                    variant="caption"
+                    sx={{ display: "block", mt: 0.75, overflowWrap: "anywhere" }}
+                  >
+                    {eventTip.description.trim()}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          )}
           {displayedSample && (
             <Box
               sx={{
@@ -2583,7 +2696,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
                 onClick={inspectedSample ? (event) => event.stopPropagation() : undefined}
                 onMouseDown={inspectedSample ? (event) => event.stopPropagation() : undefined}
                 sx={{
-                  pointerEvents: "auto",
+                  pointerEvents: inspectedSample ? "auto" : "none",
                   display: "flex",
                   flexDirection: "column",
                   maxHeight: "100%",
