@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import {
     Box,
     Button,
@@ -29,6 +29,9 @@ interface RecordingDebuggerDashboardProps {
     breakpoints: Breakpoint[];
     compositeBreakpoints: CompositeBreakpoint[];
     onImport: () => void;
+    onQuickOpenFile: (file: File) => void;
+    quickOpenBusy?: boolean;
+    onSaveAsProject?: () => void;
     onResumeDebugging: () => void;
     onManageBreakpoints: () => void;
     onOpenInvestigations: () => void;
@@ -58,6 +61,9 @@ export function RecordingDebuggerDashboard({
     breakpoints,
     compositeBreakpoints,
     onImport,
+    onQuickOpenFile,
+    quickOpenBusy = false,
+    onSaveAsProject,
     onResumeDebugging,
     onManageBreakpoints,
     onOpenInvestigations,
@@ -179,6 +185,7 @@ export function RecordingDebuggerDashboard({
 
     if (!session) {
         return (
+            <QuickOpenSurface busy={quickOpenBusy} onFile={onQuickOpenFile}>
             <Box
                 sx={{
                     display: "flex",
@@ -196,17 +203,38 @@ export function RecordingDebuggerDashboard({
                 <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                     Recording Dashboard
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 380 }}>
-                    Import a CSV recording to see replay position, breakpoints, and bookmarks.
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
+                    Drop a CSV here to open a single-file session. Save as Project when you want to keep the work.
                 </Typography>
-                <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<UploadFileIcon />}
-                    onClick={onImport}
-                >
-                    Import CSV
-                </Button>
+                <Stack direction="row" spacing={1}>
+                    <Button
+                        component="label"
+                        variant="contained"
+                        size="small"
+                        startIcon={<UploadFileIcon />}
+                        disabled={quickOpenBusy}
+                    >
+                        {quickOpenBusy ? "Opening..." : "Choose CSV"}
+                        <input
+                            type="file"
+                            accept=".csv,text/csv"
+                            hidden
+                            onChange={(event) => {
+                                const selected = event.target.files?.[0];
+                                event.target.value = "";
+                                if (selected) onQuickOpenFile(selected);
+                            }}
+                        />
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={onImport}
+                        disabled={quickOpenBusy}
+                    >
+                        Import options
+                    </Button>
+                </Stack>
                 {onOpenInvestigation && (
                     <Box sx={{ mt: 2, width: "100%", maxWidth: 420, textAlign: "left" }}>
                         <InvestigationsResumeList
@@ -217,6 +245,7 @@ export function RecordingDebuggerDashboard({
                     </Box>
                 )}
             </Box>
+            </QuickOpenSurface>
         );
     }
 
@@ -236,6 +265,7 @@ export function RecordingDebuggerDashboard({
             : "ISO-8601 UTC";
 
     return (
+        <QuickOpenSurface busy={quickOpenBusy} onFile={onQuickOpenFile}>
         <Box
             sx={{
                 flex: 1,
@@ -281,6 +311,16 @@ export function RecordingDebuggerDashboard({
                         color="info"
                         sx={{ height: 22 }}
                     />
+                    {onSaveAsProject && (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={onSaveAsProject}
+                            sx={{ height: 22 }}
+                        >
+                            Save as Project
+                        </Button>
+                    )}
                 </Box>
 
                 <Box
@@ -416,6 +456,92 @@ export function RecordingDebuggerDashboard({
                     )}
                 </SectionCard>
             </Box>
+        </Box>
+        </QuickOpenSurface>
+    );
+}
+
+function QuickOpenSurface({
+    children,
+    busy,
+    onFile,
+}: {
+    children: ReactNode;
+    busy: boolean;
+    onFile: (file: File) => void;
+}) {
+    const [dragDepth, setDragDepth] = useState(0);
+    const dragging = dragDepth > 0;
+
+    const acceptsFiles = (event: DragEvent) =>
+        Array.from(event.dataTransfer?.types ?? []).includes("Files");
+
+    const handleDragEnter = (event: DragEvent) => {
+        if (!acceptsFiles(event) || busy) return;
+        event.preventDefault();
+        setDragDepth((depth) => depth + 1);
+    };
+
+    const handleDragOver = (event: DragEvent) => {
+        if (!acceptsFiles(event) || busy) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+    };
+
+    const handleDragLeave = (event: DragEvent) => {
+        if (!acceptsFiles(event)) return;
+        event.preventDefault();
+        setDragDepth((depth) => Math.max(0, depth - 1));
+    };
+
+    const handleDrop = (event: DragEvent) => {
+        event.preventDefault();
+        setDragDepth(0);
+        if (busy) return;
+        const file = event.dataTransfer.files?.[0];
+        if (file) onFile(file);
+    };
+
+    return (
+        <Box
+            data-quick-open="true"
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            sx={{
+                position: "relative",
+                flex: 1,
+                minHeight: 0,
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                outline: dragging ? "2px dashed" : "none",
+                outlineColor: "primary.main",
+                outlineOffset: -6,
+                borderRadius: 1,
+            }}
+        >
+            {children}
+            {dragging && (
+                <Box
+                    sx={{
+                        position: "absolute",
+                        inset: 8,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: 1,
+                        bgcolor: "action.hover",
+                        pointerEvents: "none",
+                        zIndex: 2,
+                    }}
+                >
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                        Drop CSV to open a session
+                    </Typography>
+                </Box>
+            )}
         </Box>
     );
 }

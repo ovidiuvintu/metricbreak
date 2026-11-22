@@ -48,6 +48,8 @@ import { RecordingDebuggerDashboard } from "../dashboard/RecordingDebuggerDashbo
 import { RecordingsCatalogPanel } from "./RecordingsCatalogPanel";
 import { AppSettingsPanel } from "../../app/AppSettingsPanel";
 import { ProjectDashboard } from "../projects/ProjectDashboard";
+import { SaveAsProjectDialog } from "../projects/SaveAsProjectDialog";
+import { projectApi } from "../projects/projectApi";
 import { AnalysisPanel } from "../analysis/AnalysisPanel";
 import type { PaletteMode } from "@mui/material";
 import { formatOpenInvestigationError } from "../investigations/formatOpenInvestigationError";
@@ -84,7 +86,11 @@ type PlaybackState = "stopped" | "playing" | "paused";
 
 type SessionNavigationAction =
   | { kind: "open"; investigationId: string; projectId: string }
-  | { kind: "import"; result: CreateSessionResponse };
+  | {
+      kind: "import";
+      result: CreateSessionResponse;
+      destination?: "dashboard" | "recordings";
+    };
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -115,7 +121,7 @@ export function RecordingDashboard({
   themeMode = "light",
   onToggleTheme,
 }: RecordingDashboardProps) {
-  const { context, setRecordingSession, setActiveInvestigation } = useWorkspace();
+  const { context, setRecordingSession, setActiveInvestigation, clearInvestigation } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
     null,
   );
@@ -227,6 +233,11 @@ export function RecordingDashboard({
   >(null);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
+  const [quickOpenBusy, setQuickOpenBusy] = useState(false);
+  const [saveAsProjectOpen, setSaveAsProjectOpen] = useState(false);
+  const [saveAsProjectBusy, setSaveAsProjectBusy] = useState(false);
+  const [saveAsProjectError, setSaveAsProjectError] = useState("");
 
   const [breakpointDialogOpen, setBreakpointDialogOpen] =
     useState(false);
@@ -463,6 +474,9 @@ export function RecordingDashboard({
         loadedSession.recordingId,
         loadedSession.recordingName,
       );
+      if (!isSameSession) {
+        clearInvestigation();
+      }
       setChannels(loadedChannels);
       setBreakpoints(loadedBreakpoints.breakpoints);
       setCompositeBreakpoints(loadedBreakpoints.compositeBreakpoints ?? []);
@@ -539,15 +553,17 @@ export function RecordingDashboard({
 
   const executeImportSuccess = async (
     result: CreateSessionResponse,
+    destination: "dashboard" | "recordings" = "dashboard",
   ) => {
     setDialogOpen(false);
+    setPendingImportFile(null);
     setImportSuccess(null);
 
     const loaded = await loadRecording(result.sessionId);
 
     if (loaded) {
       setImportSuccess("Recording imported successfully.");
-      onSelectSection("dashboard");
+      onSelectSection(destination);
     }
   };
 
@@ -556,7 +572,7 @@ export function RecordingDashboard({
       await executeOpenInvestigation(action.investigationId, action.projectId);
       return;
     }
-    await executeImportSuccess(action.result);
+    await executeImportSuccess(action.result, action.destination ?? "dashboard");
   };
 
   const requestSessionNavigation = (action: SessionNavigationAction) => {
@@ -570,6 +586,53 @@ export function RecordingDashboard({
 
   const handleImportSuccess = (result: CreateSessionResponse) => {
     requestSessionNavigation({ kind: "import", result });
+  };
+
+  const closeImportDialog = () => {
+    setDialogOpen(false);
+    setPendingImportFile(null);
+  };
+
+  const quickOpenCsv = async (file: File) => {
+    const csvName = file.name.toLowerCase().endsWith(".csv");
+    const csvType = file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+    if (!csvName && !csvType) {
+      setLoadError("Drop a .csv file to open a session.");
+      return;
+    }
+
+    if (quickOpenBusy || loading) return;
+
+    setQuickOpenBusy(true);
+    setLoadError(null);
+
+    try {
+      const preview = await recordingApi.previewTimestamp(file);
+      const ready = !preview.ambiguous
+        && preview.suggestedFormat.trim().length > 0
+        && Number.isInteger(preview.suggestedColumnIndex);
+      if (!ready) {
+        setPendingImportFile(file);
+        setDialogOpen(true);
+        return;
+      }
+
+      const created = await recordingApi.importCsv(file, {
+        columnIndex: preview.suggestedColumnIndex,
+        format: preview.suggestedFormat,
+      });
+      requestSessionNavigation({
+        kind: "import",
+        result: created,
+        destination: "recordings",
+      });
+    } catch (error) {
+      setPendingImportFile(file);
+      setDialogOpen(true);
+      setLoadError(errorMessage(error, "Unable to open the CSV. Confirm the timestamp column."));
+    } finally {
+      setQuickOpenBusy(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -1277,6 +1340,7 @@ export function RecordingDashboard({
 
       <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
         {session && (
+          <>
           <Button
             size="small"
             variant="outlined"
@@ -1288,6 +1352,20 @@ export function RecordingDashboard({
           >
             Refresh
           </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => {
+              setSaveAsProjectError("");
+              setSaveAsProjectOpen(true);
+            }}
+            disabled={
+              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy || saveAsProjectBusy
+            }
+          >
+            Save as Project
+          </Button>
+          </>
         )}
 
         <Button
@@ -1334,6 +1412,39 @@ export function RecordingDashboard({
     axisPins,
     chartViewport: chartViewportReaderRef.current?.read() ?? null,
   }), [selectedChannelIds, effectiveRightAxisIds, axisPins]);
+
+  const handleSaveAsProject = async (projectName: string, rootPath: string) => {
+    if (!session) return;
+
+    setSaveAsProjectBusy(true);
+    setSaveAsProjectError("");
+
+    try {
+      const project = await projectApi.createProject({ projectName, rootPath });
+      const exported = await investigationApi.exportSession(session.sessionId, {
+        name: projectName,
+        projectId: project.projectId,
+        uiState: resolveExportUiState(),
+      });
+      setActiveInvestigation({
+        investigationId: exported.investigationId,
+        investigationName: projectName,
+        projectId: project.projectId,
+      });
+      saveInvestigationSelection({
+        recordingName: session.recordingName,
+        projectId: project.projectId,
+        investigationId: exported.investigationId,
+      });
+      rememberInvestigationUiBaseline(exported.investigationId, resolveExportUiState());
+      setSaveAsProjectOpen(false);
+      setImportSuccess(`Saved as project ${project.projectName}.`);
+    } catch (error) {
+      setSaveAsProjectError(errorMessage(error, "Unable to save this session as a project."));
+    } finally {
+      setSaveAsProjectBusy(false);
+    }
+  };
 
   const isInvestigationUiDirty = useCallback(() => {
     const investigationId = context.investigationId;
@@ -1879,6 +1990,12 @@ export function RecordingDashboard({
       breakpoints={breakpoints}
       compositeBreakpoints={compositeBreakpoints}
       onImport={() => setDialogOpen(true)}
+      onQuickOpenFile={(file) => void quickOpenCsv(file)}
+      quickOpenBusy={quickOpenBusy}
+      onSaveAsProject={() => {
+        setSaveAsProjectError("");
+        setSaveAsProjectOpen(true);
+      }}
       onResumeDebugging={() => onSelectSection("recordings")}
       onManageBreakpoints={() => {
         onSelectSection("recordings");
@@ -1992,8 +2109,20 @@ export function RecordingDashboard({
 
       <ImportRecordingDialog
         open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
+        initialFile={pendingImportFile}
+        onClose={closeImportDialog}
         onImported={handleImportSuccess}
+      />
+
+      <SaveAsProjectDialog
+        open={saveAsProjectOpen}
+        defaultName={session?.recordingName.replace(/\.csv$/i, "") ?? ""}
+        busy={saveAsProjectBusy}
+        error={saveAsProjectError}
+        onClose={() => {
+          if (!saveAsProjectBusy) setSaveAsProjectOpen(false);
+        }}
+        onSave={(projectName, rootPath) => void handleSaveAsProject(projectName, rootPath)}
       />
 
       <BreakpointDialog
