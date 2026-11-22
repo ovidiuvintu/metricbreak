@@ -37,6 +37,7 @@ public sealed class InvestigationOpenService
 
         string archivePath;
         Guid importRecordingId;
+        TryResolveCatalogEntry(investigation, out var catalogEntry);
 
         if (projectId is Guid selectedProjectId
             && _projectStore.TryGetRecordingArchivePath(
@@ -48,8 +49,7 @@ public sealed class InvestigationOpenService
             archivePath = projectArchivePath!;
             importRecordingId = investigation.Recording.RecordingId;
         }
-        else if (TryResolveCatalogEntry(investigation, out var catalogEntry)
-            && catalogEntry is not null)
+        else if (catalogEntry is not null)
         {
             archivePath = _catalog.GetArchiveFilePath(catalogEntry);
             importRecordingId = catalogEntry.RecordingId;
@@ -67,12 +67,15 @@ public sealed class InvestigationOpenService
             return false;
         }
 
+        var mapping = TimestampMappingSnapshots.ToMapping(investigation.Recording.TimestampMapping)
+            ?? catalogEntry?.ReadTimestampMapping();
+
         ImportedCsvRecording imported;
         try
         {
             imported = _importer.Import(
                 archivePath,
-                mapping: null,
+                mapping,
                 recordingId: importRecordingId != Guid.Empty
                     ? importRecordingId
                     : null);

@@ -121,7 +121,8 @@ public sealed class IndexedCsvTelemetryParser
             channels,
             samples,
             applied.Origin,
-            timeline);
+            timeline,
+            applied);
     }
 
     private static bool IsFiniteNumeric(string value) =>

@@ -43,7 +43,7 @@ internal static class RecordingEndpoints
                 {
                     imported = importer.Import(
                         archivePath,
-                        mapping: null,
+                        entry.ReadTimestampMapping(),
                         recordingId: entry.RecordingId);
                 }
                 catch (Exception exception) when (

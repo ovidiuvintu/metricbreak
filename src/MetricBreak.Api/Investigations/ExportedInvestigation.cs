@@ -18,7 +18,16 @@ public sealed record RecordingExportSnapshot(
     long SourceSizeInBytes,
     string RecordingName,
     long SampleCount,
-    Guid RecordingId = default);
+    Guid RecordingId = default,
+    TimestampMappingSnapshot? TimestampMapping = null);
+
+/// <summary>
+/// The timestamp column and format used when this recording was imported.
+/// Reopening replays that choice instead of detecting it again.
+/// </summary>
+public sealed record TimestampMappingSnapshot(
+    int ColumnIndex,
+    string Format);
 
 public sealed record SessionExportSnapshot(
     long SequenceNumber,

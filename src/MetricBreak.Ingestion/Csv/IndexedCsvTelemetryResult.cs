@@ -16,11 +16,14 @@ public sealed class IndexedCsvTelemetryResult
 
     public RecordingTimeline Timeline { get; }
 
+    public TimestampMapping? TimestampMapping { get; }
+
     public IndexedCsvTelemetryResult(
         IEnumerable<ChannelDefinition> channels,
         IEnumerable<TelemetrySample> samples,
         TimestampOrigin timestampOrigin = TimestampOrigin.Unix,
-        RecordingTimeline? timeline = null)
+        RecordingTimeline? timeline = null,
+        TimestampMapping? timestampMapping = null)
     {
         ArgumentNullException.ThrowIfNull(channels);
         ArgumentNullException.ThrowIfNull(samples);
@@ -34,6 +37,7 @@ public sealed class IndexedCsvTelemetryResult
         Samples = Array.AsReadOnly(_samples);
         TimestampOrigin = timestampOrigin;
         Timeline = timeline ?? RecordingTimeline.Empty;
+        TimestampMapping = timestampMapping;
     }
 }
 

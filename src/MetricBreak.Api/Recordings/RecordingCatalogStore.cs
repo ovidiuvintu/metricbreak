@@ -97,6 +97,7 @@ public sealed class RecordingCatalogStore
             .Where(item => item.RecordingId != recording.Id)
             .ToList();
 
+        var timestampMapping = imported.TimestampMapping;
         entries.Add(new RecordingCatalogEntry(
             recording.Id,
             recording.Name,
@@ -105,7 +106,9 @@ public sealed class RecordingCatalogStore
             recording.Source.SizeInBytes,
             imported.Reader.SampleCount,
             archiveFileName.Replace('\\', '/'),
-            DateTimeOffset.UtcNow));
+            DateTimeOffset.UtcNow,
+            timestampMapping?.ColumnIndex,
+            timestampMapping?.Format.ToString()));
 
         SaveCatalog(new RecordingCatalogDocument(_catalogSchemaVersion, entries));
     }
@@ -169,5 +172,25 @@ public sealed class RecordingCatalogStore
         long SourceSizeInBytes,
         long SampleCount,
         string ArchiveFileName,
-        DateTimeOffset ImportedAtUtc);
+        DateTimeOffset ImportedAtUtc,
+        int? TimestampColumnIndex = null,
+        string? TimestampFormat = null)
+    {
+        public TimestampMapping? ReadTimestampMapping()
+        {
+            if (TimestampColumnIndex is not int column || column < 0 ||
+                string.IsNullOrWhiteSpace(TimestampFormat))
+            {
+                return null;
+            }
+
+            if (!Enum.TryParse<TimestampFormat>(TimestampFormat, ignoreCase: true, out var format) ||
+                !Enum.IsDefined(format))
+            {
+                return null;
+            }
+
+            return new TimestampMapping(column, format);
+        }
+    }
 }
