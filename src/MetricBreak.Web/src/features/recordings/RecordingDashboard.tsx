@@ -1549,6 +1549,7 @@ export function RecordingDashboard({
         <RecordingTimelinePanel
           timeline={recordingTimeline}
           loading={timelineLoading}
+          currentSequence={session?.currentSample?.sequence ?? null}
           onSeek={(sequence) => void handleSeek(sequence)}
         />
       </Box>
