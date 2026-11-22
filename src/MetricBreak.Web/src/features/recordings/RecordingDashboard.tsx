@@ -21,6 +21,7 @@ import {
 
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import AddIcon from "@mui/icons-material/Add";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 
 import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
@@ -1184,13 +1185,6 @@ export function RecordingDashboard({
     }
   };
 
-  const handleCreateBreakpointAtSample = (
-    request: CreateBreakpointRequest,
-    options?: { jumpToNext?: boolean },
-  ) => {
-    void handleCreateBreakpoint(request, { jumpToNext: options?.jumpToNext ?? true });
-  };
-
   const handleQuickBookmark = async (payload?: {
     sequence?: number;
     timestampNanoseconds?: number | string;
@@ -1351,6 +1345,22 @@ export function RecordingDashboard({
             }
           >
             Refresh
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<AddIcon />}
+            onClick={() => {
+              setBreakpointDraft(null);
+              setBreakpointDialogOpen(true);
+              setInspectorTab(1);
+            }}
+            disabled={
+              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
+              || channels.length === 0
+            }
+          >
+            Add breakpoint
           </Button>
           <Button
             size="small"
@@ -1525,7 +1535,6 @@ export function RecordingDashboard({
             onScrubStart={handleScrubStart}
             onScrubEnd={(sequence) => void handleScrubEnd(sequence)}
             onOpenBreakpointDialog={handleOpenBreakpointDialog}
-            onCreateBreakpointAtSample={handleCreateBreakpointAtSample}
             onQuickBookmarkSample={(payload) => void handleQuickBookmark(payload)}
             investigationBookmarks={chartInvestigationBookmarks}
             timelineEvents={recordingTimeline?.events ?? []}
@@ -2128,6 +2137,7 @@ export function RecordingDashboard({
       <BreakpointDialog
         open={breakpointDialogOpen}
         channels={channels}
+        displayedChannelIds={selectedChannelIds}
         busy={breakpointBusy}
         draft={breakpointDraft}
         onClose={() => {

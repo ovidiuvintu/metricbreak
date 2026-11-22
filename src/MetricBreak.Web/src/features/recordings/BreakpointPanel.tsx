@@ -205,7 +205,7 @@ export function BreakpointPanel({
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}><CircularProgress size={24} /></Box>
       ) : total === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-          No breakpoints configured. Right-click the current sample label for an exact breakpoint, or right-click the chart. You can also use Add.
+          No breakpoints configured. Use Add breakpoint in the toolbar, or Add here.
         </Typography>
       ) : (
         <Stack divider={<Divider flexItem />} spacing={0}>

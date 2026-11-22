@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -32,11 +33,40 @@ export interface BreakpointDialogDraft {
 interface BreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
+  /** Channels currently plotted on the chart. */
+  displayedChannelIds?: string[];
   busy: boolean;
   draft?: BreakpointDialogDraft | null;
   onClose: () => void;
   onCreate: (request: CreateBreakpointRequest) => Promise<void>;
   onCreateMissingData: (request: CreateMissingDataBreakpointRequest) => Promise<void>;
+}
+
+function ChannelOptionLabel({
+  name,
+  displayed,
+}: {
+  name: string;
+  displayed: boolean;
+}) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, width: "100%" }}>
+      <Box
+        aria-hidden
+        title={displayed ? "On chart" : undefined}
+        sx={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          flexShrink: 0,
+          bgcolor: displayed ? "primary.main" : "transparent",
+        }}
+      />
+      <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {name}
+      </Box>
+    </Box>
+  );
 }
 
 const operators: {
@@ -57,6 +87,7 @@ const operators: {
 export function BreakpointDialog({
   open,
   channels,
+  displayedChannelIds = [],
   busy,
   draft,
   onClose,
@@ -87,6 +118,7 @@ export function BreakpointDialog({
     setMissingChannelId("recording");
   }, [open, draft]);
 
+  const displayedIds = new Set(displayedChannelIds);
   const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
   const allowedOperators = operators.filter(o => selectedType === "Numeric" ||
     (selectedType === "Boolean" && ["Equal", "NotEqual", "Changed", "RisingEdge", "FallingEdge"].includes(o.value)) ||
@@ -199,7 +231,10 @@ export function BreakpointDialog({
                   key={channel.channelId}
                   value={channel.channelId}
                 >
-                  {channel.name}
+                  <ChannelOptionLabel
+                    name={channel.name}
+                    displayed={displayedIds.has(channel.channelId)}
+                  />
                 </MenuItem>
               ))}
             </Select>
