@@ -387,22 +387,18 @@ type PlottedSeriesMeta = {
   unit: string | null;
 };
 
-// Axis side: left = solid, right = dashed (always). Additional series on the
-// same axis use slightly different widths so overlaps stay visible without
-// fading the traces (low opacity reads as "disabled" on dark charts).
+// Same dash length for every right-axis series. A shared pixel pattern keeps
+// the gaps identical even when several dashed traces share that axis.
+const RIGHT_AXIS_DASH = [8, 5];
+
 function seriesLineStyleForAxis(
   yAxisIndex: number,
-  indexOnAxis: number,
   baseWidth: number,
 ) {
-  const tier = Math.min(indexOnAxis, 2);
-  const widthScale = [1, 0.94, 0.88][tier];
-
-  const width = Math.max(1.35, baseWidth * widthScale);
+  const width = Math.max(1.35, baseWidth);
   return {
-    type: (yAxisIndex === 1 ? "dashed" : "solid") as "solid" | "dashed",
-    // Dashed strokes look thinner at the same pixel width — nudge right-axis series up slightly.
-    width: yAxisIndex === 1 ? width * 1.1 : width,
+    type: (yAxisIndex === 1 ? RIGHT_AXIS_DASH : "solid") as "solid" | number[],
+    width,
     opacity: 1,
   };
 }
@@ -1423,16 +1419,6 @@ export function RecordingChart({
         selectedIds.has(channel.channelId) && isNumericChartChannel(samples, channel.channelId),
       );
 
-    const indexOnYAxis = new Map<string, number>();
-    let leftAxisSeriesCount = 0;
-    let rightAxisSeriesCount = 0;
-    for (const { channel } of plotCandidates) {
-      const yAxisIndex = rightAxisSet.has(channel.channelId) ? 1 : 0;
-      const indexOnAxis =
-        yAxisIndex === 1 ? rightAxisSeriesCount++ : leftAxisSeriesCount++;
-      indexOnYAxis.set(channel.channelId, indexOnAxis);
-    }
-
     const seriesColorByChannelId = assignChartSeriesColors(
       theme.palette.mode,
       plotCandidates.map(({ channel, channelIndex }) => ({
@@ -1447,13 +1433,11 @@ export function RecordingChart({
 
     const builtSeries = plotCandidates.map(({ channel, channelIndex }) => {
         const yAxisIndex = rightAxisSet.has(channel.channelId) ? 1 : 0;
-        const indexOnAxis = indexOnYAxis.get(channel.channelId) ?? 0;
         const seriesColor =
           seriesColorByChannelId.get(channel.channelId) ??
           getSeriesColor(theme.palette.mode, channelIndex);
         const axisLineStyle = seriesLineStyleForAxis(
           yAxisIndex,
-          indexOnAxis,
           lineWidth,
         );
         const legendName = formatChannelSeriesLabel(channel, yAxisIndex === 1, false);

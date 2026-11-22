@@ -229,9 +229,11 @@ function domainColorCandidates(
         ? ["#E5C95C", "#FBBF24", "#FDE047"]
         : ["#A16207", "#CA8A04", "#D97706"];
     case "pressure":
+      // Red, then green. A second pink or magenta reads as the same series
+      // when both traces share the right axis.
       return dark
-        ? ["#F87171", "#EF4444", "#F472B6"]
-        : ["#DC2626", "#B91C1C", "#BE185D"];
+        ? ["#FF2D55", "#3DDC5A", "#FF9F0A"]
+        : ["#BE123C", "#15803D", "#C2410C"];
     case "density":
       return dark
         ? ["#FB923C", "#F97316", "#FDBA74"]
