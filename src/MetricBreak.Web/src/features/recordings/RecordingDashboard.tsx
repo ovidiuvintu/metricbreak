@@ -200,6 +200,8 @@ export function RecordingDashboard({
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
   const [playbackState, setPlaybackState] = useState<PlaybackState>("stopped");
+  // The chart cursor stays hidden until the user starts replay on this file.
+  const [replayCursorVisible, setReplayCursorVisible] = useState(false);
   const [playbackBusy, setPlaybackBusy] = useState(false);
   const playbackEpochRef = useRef(0);
   const playbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -429,6 +431,9 @@ export function RecordingDashboard({
     playbackSessionRef.current = null;
     playbackStateRef.current = "stopped";
     setPlaybackState("stopped");
+    if (sessionId !== loadedSessionIdRef.current) {
+      setReplayCursorVisible(false);
+    }
     const version = ++loadVersionRef.current;
 
     setLoading(true);
@@ -622,6 +627,7 @@ export function RecordingDashboard({
   };
 
   const handleStepForward = async () => {
+    setReplayCursorVisible(true);
     await executeReplay(
       async (sessionId) =>
         (await replayApi.stepForward(sessionId)).session,
@@ -630,6 +636,7 @@ export function RecordingDashboard({
   };
 
   const handleStepBackward = async () => {
+    setReplayCursorVisible(true);
     await executeReplay(
       async (sessionId) =>
         (await replayApi.stepBackward(sessionId)).session,
@@ -654,11 +661,13 @@ export function RecordingDashboard({
       return;
     }
 
+    setReplayCursorVisible(true);
     handleScrubStart();
     await handleScrubEnd(sequence);
   };
 
   const handleContinue = async () => {
+    setReplayCursorVisible(true);
     await executeReplay(async (sessionId) => {
       const response = await replayApi.continue(sessionId);
 
@@ -683,6 +692,7 @@ export function RecordingDashboard({
     channelId: string,
     direction: "next" | "previous",
   ) => {
+    setReplayCursorVisible(true);
     await executeReplay(async (sessionId) => {
       const response = direction === "next"
         ? await replayApi.nextChange(sessionId, channelId)
@@ -722,6 +732,7 @@ export function RecordingDashboard({
       playbackRunningRef.current = true;
       playbackStateRef.current = "playing";
       setPlaybackState("playing");
+      setReplayCursorVisible(true);
 
        // V2: schedule against an absolute recorded-time clock. Network and
        // rendering latency do not accumulate into the replay timeline.
@@ -1031,6 +1042,7 @@ export function RecordingDashboard({
     breakpointId: string,
     direction: "forward" | "backward",
   ) => {
+    setReplayCursorVisible(true);
     await executeReplay(async (sessionId) => {
       const response = await breakpointApi.runTo(sessionId, breakpointId, direction);
       setFocusedBreakpointId(breakpointId);
@@ -1395,6 +1407,7 @@ export function RecordingDashboard({
             currentSequence={
               session.currentSample?.sequence ?? null
             }
+            showCursor={replayCursorVisible}
             currentTimestampNanoseconds={session.currentSample?.timestampNanoseconds ?? null}
             timestampOrigin={session.timestampOrigin ?? "Unix"}
             onSeek={handleSeek}
