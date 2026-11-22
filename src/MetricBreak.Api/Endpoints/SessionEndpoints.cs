@@ -1,5 +1,6 @@
 
 using Microsoft.AspNetCore.Mvc;
+using MetricBreak.Api.Analysis;
 using MetricBreak.Api.Sessions;
 
 namespace MetricBreak.Api.Endpoints;
@@ -231,6 +232,35 @@ internal static class SessionEndpoints
             .WithName("GetSessionSamples")     
             .Produces<SampleRangeResponse>(
                 StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
+        group.MapGet(
+            "/{sessionId:guid}/analysis",
+            (
+                Guid sessionId,
+                [FromQuery] long? start,
+                [FromQuery] long? end,
+                [FromQuery] Guid[]? channelId,
+                ReplaySessionManager manager) =>
+            {
+                if (!manager.TryAnalyzeWindow(
+                        sessionId,
+                        start,
+                        end,
+                        channelId,
+                        out var analysis,
+                        out var error))
+                {
+                    return error is null
+                        ? Results.NotFound(new { Error = "Replay session not found." })
+                        : Results.BadRequest(new { Error = error });
+                }
+
+                return Results.Ok(analysis);
+            })
+            .WithName("AnalyzeSessionWindow")
+            .Produces<WindowAnalysisResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
 

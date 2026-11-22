@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using MetricBreak.Api.Analysis;
 using MetricBreak.Api.Breakpoints;
 using MetricBreak.Api.Investigations;
+using MetricBreak.Domain.Analysis;
 using MetricBreak.Domain.Breakpoints;
+using MetricBreak.Domain.Recordings;
 using MetricBreak.Domain.Replay;
 using MetricBreak.Ingestion.Csv;
 
@@ -1245,6 +1248,81 @@ public sealed class ReplaySessionManager
                 TotalSamples: totalSamples,
                 Samples: samples);
 
+            return true;
+        }
+    }
+
+    public bool TryAnalyzeWindow(
+        Guid sessionId,
+        long? start,
+        long? end,
+        IReadOnlyList<Guid>? channelIds,
+        out WindowAnalysisResponse? response,
+        out string? error)
+    {
+        response = null;
+        error = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            var available = entry.Imported.Channels;
+            IReadOnlyList<ChannelDefinition> channels;
+            if (channelIds is null || channelIds.Count == 0)
+            {
+                channels = available;
+            }
+            else
+            {
+                var selected = new List<ChannelDefinition>(channelIds.Count);
+                foreach (var channelId in channelIds)
+                {
+                    var channel = available.FirstOrDefault(item => item.Id == channelId);
+                    if (channel is null)
+                    {
+                        error = "Unknown channel ID.";
+                        return false;
+                    }
+
+                    selected.Add(channel);
+                }
+
+                channels = selected;
+            }
+
+            if (channels.Count == 0)
+            {
+                error = "Recording has no channels to analyze.";
+                return false;
+            }
+
+            var sampleCount = entry.Imported.Reader.SampleCount;
+            if (sampleCount == 0)
+            {
+                error = "Recording contains no samples.";
+                return false;
+            }
+
+            var startSequence = start ?? 0;
+            var endSequence = end ?? sampleCount - 1;
+            if (startSequence < 0 || endSequence < startSequence || endSequence >= sampleCount)
+            {
+                error = "Sample window is outside the recording.";
+                return false;
+            }
+
+            var analysis = WindowAnalyzer.Analyze(
+                entry.Imported.Reader,
+                channels,
+                startSequence,
+                endSequence);
+
+            response = WindowAnalysisResponse.From(analysis);
             return true;
         }
     }
