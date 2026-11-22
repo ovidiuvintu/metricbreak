@@ -26,6 +26,77 @@ function colorForBreakpoint(colorIndex: number): string {
   return HIT_COLORS[colorIndex % HIT_COLORS.length];
 }
 
+/** Hits closer than this share one tick, so a long run does not paint a bar on the axis. */
+const MERGE_GAP_PERCENT = 0.4;
+const TICK_TRACK_HEIGHT = 8;
+
+interface AxisHitMark {
+  key: string;
+  breakpointId: string;
+  colorIndex: number;
+  label: string;
+  startPercent: number;
+  endPercent: number;
+  seekSequence: number;
+  firstSequence: number;
+  lastSequence: number;
+  sampleCount: number;
+}
+
+function buildAxisHitMarks(
+  hits: BreakpointHitOccurrence[],
+  percentFor: (sequence: number) => number | null,
+  colorIndexById: Map<string, number>,
+  breakpointLabels: Map<string, string>,
+): AxisHitMark[] {
+  const byBreakpoint = new Map<string, BreakpointHitOccurrence[]>();
+  for (const hit of hits) {
+    if (percentFor(hit.sampleSequence) == null) continue;
+    const group = byBreakpoint.get(hit.breakpointId) ?? [];
+    group.push(hit);
+    byBreakpoint.set(hit.breakpointId, group);
+  }
+
+  const marks: AxisHitMark[] = [];
+  for (const [breakpointId, group] of byBreakpoint) {
+    group.sort((a, b) => a.sampleSequence - b.sampleSequence);
+    let run: AxisHitMark | null = null;
+
+    const flush = () => {
+      if (!run) return;
+      marks.push(run);
+      run = null;
+    };
+
+    for (const hit of group) {
+      const percent = percentFor(hit.sampleSequence);
+      if (percent == null) continue;
+      if (!run || percent - run.endPercent > MERGE_GAP_PERCENT) {
+        flush();
+        run = {
+          key: `${breakpointId}-${hit.sampleSequence}`,
+          breakpointId,
+          colorIndex: colorIndexById.get(breakpointId) ?? 0,
+          label: breakpointLabels.get(breakpointId) ?? breakpointId,
+          startPercent: percent,
+          endPercent: percent,
+          seekSequence: hit.sampleSequence,
+          firstSequence: hit.sampleSequence,
+          lastSequence: hit.sampleSequence,
+          sampleCount: 1,
+        };
+        continue;
+      }
+      run.endPercent = percent;
+      run.lastSequence = hit.sampleSequence;
+      run.sampleCount += 1;
+    }
+    flush();
+  }
+
+  return marks;
+}
+
 interface BreakpointHitTimelineProps {
   sessionId: string;
   pageStart: number;
@@ -162,6 +233,7 @@ export function BreakpointHitTimeline({
   };
   const cursorPercent = currentSequence == null ? null : percentFor(currentSequence);
   const visibleHits = hits.filter((hit) => percentFor(hit.sampleSequence) != null);
+  const axisMarks = buildAxisHitMarks(hits, percentFor, colorIndexById, breakpointLabels);
 
   const anchor = plotAnchorRef?.current ?? null;
   const marks = (
@@ -172,9 +244,10 @@ export function BreakpointHitTimeline({
         position: "absolute",
         left: plotFrame ? `${plotFrame.left}px` : 0,
         width: plotFrame ? `${plotFrame.width}px` : "100%",
-        top: plotFrame ? `${plotFrame.axisTop}px` : undefined,
-        height: 14,
-        transform: plotFrame ? "translateY(-50%)" : undefined,
+        // Sit on the axis and rise into the plot. Centering a tall bar on the
+        // axis painted a thick line across the bottom of the chart.
+        top: plotFrame ? `${plotFrame.axisTop - TICK_TRACK_HEIGHT}px` : undefined,
+        height: TICK_TRACK_HEIGHT,
         zIndex: 8,
         pointerEvents: "none",
       }}
@@ -195,40 +268,38 @@ export function BreakpointHitTimeline({
           }}
         />
       )}
-      {hits.map((hit) => {
-        const percent = percentFor(hit.sampleSequence);
-        if (percent == null) return null;
-        const colorIndex = colorIndexById.get(hit.breakpointId) ?? 0;
-        const label = breakpointLabels.get(hit.breakpointId) ?? hit.breakpointId;
+      {axisMarks.map((mark) => {
+        const rangeLabel = mark.firstSequence === mark.lastSequence
+          ? `#${mark.firstSequence.toLocaleString()}`
+          : `#${mark.firstSequence.toLocaleString()}–${mark.lastSequence.toLocaleString()} (${mark.sampleCount.toLocaleString()} hits)`;
 
         return (
           <Tooltip
-            key={`${hit.breakpointId}-${hit.sampleSequence}`}
-            title={`${label} · #${hit.sampleSequence.toLocaleString()} (click to seek)`}
+            key={mark.key}
+            title={`${mark.label} · ${rangeLabel} (click to seek)`}
           >
             <Box
               component="button"
               type="button"
               role="listitem"
-              aria-label={`${label} at sample ${hit.sampleSequence}`}
+              aria-label={`${mark.label} at sample ${mark.seekSequence}`}
               onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => onHitClick(hit.sampleSequence, hit.breakpointId)}
+              onClick={() => onHitClick(mark.seekSequence, mark.breakpointId)}
               sx={{
                 position: "absolute",
                 top: 0,
                 bottom: 0,
-                left: `${percent}%`,
-                width: 6,
+                left: `${mark.startPercent}%`,
+                width: 2,
                 transform: "translateX(-50%)",
                 border: 0,
-                borderRadius: 0.5,
                 p: 0,
                 cursor: "pointer",
                 pointerEvents: "auto",
-                bgcolor: colorForBreakpoint(colorIndex),
+                bgcolor: colorForBreakpoint(mark.colorIndex),
                 opacity: 0.95,
                 zIndex: 1,
-                "&:hover": { opacity: 1, boxShadow: 2 },
+                "&:hover": { opacity: 1 },
               }}
             />
           </Tooltip>

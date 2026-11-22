@@ -47,7 +47,6 @@ import {
 import type {
   Breakpoint,
   CompositeBreakpoint,
-  CreateBreakpointRequest,
 } from "./breakpointApi";
 import { BreakpointHitTimeline } from "./BreakpointHitTimeline";
 import type { BreakpointDialogDraft } from "./BreakpointDialog";
@@ -261,10 +260,6 @@ interface RecordingChartProps {
   onScrubStart: () => void;
   onScrubEnd: (sequence: number) => void;
   onOpenBreakpointDialog?: (draft: BreakpointDialogDraft) => void;
-  onCreateBreakpointAtSample?: (
-    request: CreateBreakpointRequest,
-    options?: { jumpToNext?: boolean },
-  ) => void;
   onQuickBookmarkSample?: (payload: {
     sequence: number;
     timestampNanoseconds?: number | string;
@@ -572,7 +567,6 @@ export function RecordingChart({
   onScrubStart,
   onScrubEnd,
   onOpenBreakpointDialog,
-  onCreateBreakpointAtSample,
   onQuickBookmarkSample,
   investigationBookmarks = [],
   timelineEvents = [],
@@ -3338,79 +3332,6 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             Bookmark this sample
           </MenuItem>
         )}
-        {chartMenu && onOpenBreakpointDialog && (() => {
-          const sample = samples.find((item) => item.sequence === chartMenu.sequence);
-          const plotted = channels.filter((channel) =>
-            selectedChannelIds.includes(channel.channelId));
-          const firstNumeric = plotted.find((channel) =>
-            sample && numericPlotValue(sample, channel.channelId) !== null);
-
-          return (
-            <>
-              <Divider />
-              <MenuItem
-                onClick={() => {
-                  const numericValue = firstNumeric && sample
-                    ? numericPlotValue(sample, firstNumeric.channelId)
-                    : null;
-                  onOpenBreakpointDialog({
-                    channelId: firstNumeric?.channelId,
-                    operator: "GreaterThan",
-                    threshold: numericValue ?? undefined,
-                    caption: `Sample ${chartMenu.sequence.toLocaleString()} · ${chartMenu.timestamp}`,
-                  });
-                  setChartMenu(null);
-                }}
-              >
-                Customize breakpoint at sample…
-              </MenuItem>
-              {onCreateBreakpointAtSample && sample && plotted.map((channel) => {
-                const value = numericPlotValue(sample, channel.channelId);
-                if (value === null) return null;
-                return (
-                  <MenuItem
-                    key={channel.channelId}
-                    onClick={() => {
-                      onCreateBreakpointAtSample(
-                        {
-                          channelId: channel.channelId,
-                          operator: "GreaterThan",
-                          threshold: value,
-                        },
-                        { jumpToNext: true },
-                      );
-                      setChartMenu(null);
-                    }}
-                  >
-                    Break when {channel.name} &gt; {value.toLocaleString()}
-                  </MenuItem>
-                );
-              })}
-              {onCreateBreakpointAtSample && sample && plotted.map((channel) => {
-                const value = numericPlotValue(sample, channel.channelId);
-                if (value === null) return null;
-                return (
-                  <MenuItem
-                    key={`${channel.channelId}-changed`}
-                    onClick={() => {
-                      onCreateBreakpointAtSample(
-                        {
-                          channelId: channel.channelId,
-                          operator: "Changed",
-                          threshold: 0,
-                        },
-                        { jumpToNext: true },
-                      );
-                      setChartMenu(null);
-                    }}
-                  >
-                    Break on {channel.name} change
-                  </MenuItem>
-                );
-              })}
-            </>
-          );
-        })()}
         <Divider />
         <MenuItem onClick={() => {
           if (chartMenu) void navigator.clipboard.writeText(String(chartMenu.sequence));
