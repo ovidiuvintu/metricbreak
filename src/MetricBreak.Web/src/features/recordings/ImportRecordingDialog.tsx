@@ -24,12 +24,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onImported: (session: CreateSessionResponse) => void;
+  /** When set, the dialog opens already reading this file. */
+  initialFile?: File | null;
 }
 
 export function ImportRecordingDialog({
   open,
   onClose,
   onImported,
+  initialFile = null,
 }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<TimestampPreview | null>(null);
@@ -47,8 +50,19 @@ export function ImportRecordingDialog({
       setColumnIndex("");
       setFormat("");
       setError("");
+      return;
     }
-  }, [open]);
+
+    if (!initialFile) return;
+    setFile(initialFile);
+    setPreview(null);
+    setColumnIndex("");
+    setFormat("");
+    setError("");
+    void loadPreview(initialFile);
+    // loadPreview is recreated each render; reopen is driven by open/initialFile.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialFile]);
 
   function close() {
     if (busy) return;
