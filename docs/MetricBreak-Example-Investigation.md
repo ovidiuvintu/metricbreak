@@ -45,9 +45,10 @@ This rule marks the first sample above 7,000 psi after an immediately preceding 
 
 1. From **Breakdown**, use **Step backward** once. Open **Values** and verify that you are at **10:37:59 UTC**, sequence **2279**. Treating pressure is **5,521.7 psi** and slurry rate is **44.884 bbl/min**.
 2. Open **Breakpoints** and use **Next occurrence** on the 7,000 psi rule. The cursor should return to **10:38:00 UTC**, sequence **2280**. In **Values**, confirm **7,490.4 psi** and **45.061 bbl/min**.
-3. In the sidebar, open **Investigations**. Under **Project**, select **No project**. Set **Investigation name** to **Treating pressure crossings at Breakdown and Pad**. Enter the investigation question in **Description / notes**, then select **Save as investigation**.
-4. With the cursor still on the hit, use **Add with note…** in **Bookmarks**. Enter the title **Breakdown crossing** and note **Pressure 7,490.4 psi; slurry rate 45.061 bbl/min**. Save the bookmark.
-5. Return to **Recordings**, step backward once, and return to **Investigations**. Add a bookmark titled **One sample before Breakdown** at sequence **2279**.
+3. In the sidebar, open **Projects** and select **New Project**. Set **Project Name** to **Hydraulic fracturing treatment**. Set **Root Directory** to a folder on the machine running the API, such as `C:\MetricBreak\Projects\HydraulicFracturing`. Select **Create Project**. MetricBreak creates that folder and stores the project under a `.metricbreak` directory inside it, including `project.mbproj.json`.
+4. Open **Investigations**. Under **Project**, select **Hydraulic fracturing treatment**. Set **Investigation name** to **Treating pressure crossings at Breakdown and Pad**. Enter the investigation question in **Description / notes**, then select **Save as investigation**. MetricBreak copies the recording into the project. The original CSV stays where you imported it from.
+5. With the cursor still on the hit, use **Add with note…** in **Bookmarks**. Enter the title **Breakdown crossing** and note **Pressure 7,490.4 psi; slurry rate 45.061 bbl/min**. Save the bookmark.
+6. Return to **Recordings**, step backward once, and return to **Investigations**. Add a bookmark titled **One sample before Breakdown** at sequence **2279**.
 
 For the preceding trend, inspect sequences **2277–2279**. Slurry rate reads **45.169 → 45.142 → 44.884 bbl/min**, then rises slightly at the crossing.
 
@@ -73,8 +74,9 @@ All timestamps below are UTC on November 8, 2026. Sample sequences start at zero
 
    > Slurry rate fell during the three samples immediately before Breakdown, then rose slightly as treating pressure crossed 7,000 psi. At the Pad crossing, slurry rate was already rising and continued to rise through the crossing. The preceding slurry-rate decline occurred at Breakdown only among the two crossings examined. The recording establishes the order of the measured changes. The cause of the pressure rise remains open.
 
-2. Select **Save investigation**. Close the browser tab. For a full restart check, stop and restart the local API and web app, then open MetricBreak again at the web address from step 1. Keep the original sample file available.
-3. Open **Investigations**. Under **Workspace investigations**, select **Open** for **Treating pressure crossings at Breakdown and Pad**.
-4. Check that the rule, notes, selected channels, and bookmarks are available. Select **Breakdown crossing** and verify that the replay cursor returns to sequence **2280**. Select **Pad crossing** and verify that it returns to **2704**.
+2. Select **Save investigation**. Close the browser tab. For a full restart check, stop and restart the local API and web app, then open MetricBreak again at the web address from step 1. The API restores the last open project, and reopening uses the recording copy stored in that project.
+3. Open **Projects**. **Hydraulic fracturing treatment** should be listed, with this investigation under **Investigations in Hydraulic fracturing treatment**. If the page says **No open projects**, select **Open**, enter the same root directory, and select **Open Project**.
+4. Select **Open** for **Treating pressure crossings at Breakdown and Pad**.
+5. Check that the rule, notes, selected channels, and bookmarks are available. Select **Breakdown crossing** and verify that the replay cursor returns to sequence **2280**. Select **Pad crossing** and verify that it returns to **2704**.
 
 The investigation is complete when you can reopen it and reproduce the finding from the saved evidence.
