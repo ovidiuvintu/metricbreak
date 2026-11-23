@@ -1927,7 +1927,9 @@ export function RecordingDashboard({
       sx={{
         flex: 1,
         minHeight: 0,
-        overflowY: "auto",
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       <AnalysisPanel

@@ -34,6 +34,13 @@ public sealed class WindowAnalysisEndpointTests
         Assert.Equal(9500, pressure.GetProperty("maximum").GetDouble());
         Assert.Equal(2, pressure.GetProperty("maximumSequence").GetInt64());
         Assert.Equal(8900, pressure.GetProperty("mean").GetDouble());
+        Assert.Equal(8700, pressure.GetProperty("median").GetDouble());
+
+        var sampling = fullJson.RootElement.GetProperty("sampling");
+        Assert.Equal(3, sampling.GetProperty("sampleCount").GetInt64());
+        Assert.Equal("confirmed", sampling.GetProperty("cadenceSource").GetString());
+        Assert.Equal(0, sampling.GetProperty("gapCount").GetInt64());
+        Assert.Equal(0, sampling.GetProperty("missingTimestampCount").GetInt64());
 
         var comparison = Assert.Single(
             fullJson.RootElement.GetProperty("comparisons").EnumerateArray().ToArray());
@@ -50,6 +57,43 @@ public sealed class WindowAnalysisEndpointTests
         using var outside = await client.GetAsync(
             $"/api/sessions/{sessionId}/analysis?start=0&end=9");
         Assert.Equal(HttpStatusCode.BadRequest, outside.StatusCode);
+    }
+
+    [Fact]
+    public async Task Analysis_PreservesDuplicateTimestampsAndCountsDeclaredGaps()
+    {
+        using var factory = new MetricBreakApiFactory();
+        using var client = factory.CreateClient();
+
+        using var created = await client.PostAsync(
+            "/api/sessions",
+            Csv("Timestamp,Pressure\n" +
+                "2026-11-08T10:00:00Z,1\n" +
+                "2026-11-08T10:00:00Z,2\n" +
+                "2026-11-08T10:00:01Z,3\n" +
+                "2026-11-08T10:00:05Z,4\n"));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdJson = await JsonDocument.ParseAsync(await created.Content.ReadAsStreamAsync());
+        var sessionId = createdJson.RootElement.GetProperty("sessionId").GetGuid();
+
+        using var declared = await client.GetAsync(
+            $"/api/sessions/{sessionId}/analysis?cadenceNanoseconds=1000000000");
+        Assert.Equal(HttpStatusCode.OK, declared.StatusCode);
+        using var json = await JsonDocument.ParseAsync(await declared.Content.ReadAsStreamAsync());
+        var sampling = json.RootElement.GetProperty("sampling");
+
+        Assert.Equal(4, sampling.GetProperty("sampleCount").GetInt64());
+        Assert.Equal("declared", sampling.GetProperty("cadenceSource").GetString());
+        Assert.Equal(1, sampling.GetProperty("duplicateGroupCount").GetInt64());
+        Assert.Equal(2, sampling.GetProperty("duplicateSampleCount").GetInt64());
+        var sequences = sampling.GetProperty("duplicates")[0].GetProperty("sequences");
+        Assert.Equal(0, sequences[0].GetInt64());
+        Assert.Equal(1, sequences[1].GetInt64());
+
+        var gap = Assert.Single(sampling.GetProperty("gaps").EnumerateArray().ToArray());
+        Assert.Equal(2, gap.GetProperty("beforeSequence").GetInt64());
+        Assert.Equal(3, gap.GetProperty("afterSequence").GetInt64());
+        Assert.Equal(3, gap.GetProperty("missingTimestamps").GetInt64());
     }
 
     private static JsonElement Channel(JsonElement analysis, string name)

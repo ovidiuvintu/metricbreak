@@ -141,6 +141,7 @@ public static class WindowAnalyzer
         private double _minimum;
         private double _maximum;
         private double _sum;
+        private readonly List<double> _numericValues = [];
         private long _minimumSequence;
         private long _maximumSequence;
         private long _trueCount;
@@ -176,6 +177,7 @@ public static class WindowAnalyzer
             if (Channel.ValueType == ChannelValueType.Numeric && numeric is double number)
             {
                 _sum += number;
+                _numericValues.Add(number);
                 if (PresentCount == 1 || number < _minimum)
                 {
                     _minimum = number;
@@ -229,6 +231,12 @@ public static class WindowAnalyzer
             double? maximum = null;
             long? maximumSequence = null;
             double? mean = null;
+            double? median = null;
+            double? standardDeviation = null;
+            double? percentile05 = null;
+            double? percentile25 = null;
+            double? percentile75 = null;
+            double? percentile95 = null;
             long? trueCount = null;
             long? falseCount = null;
             long? changeCount = null;
@@ -243,6 +251,13 @@ public static class WindowAnalyzer
                 maximum = _maximum;
                 maximumSequence = _maximumSequence;
                 mean = _sum / PresentCount;
+                _numericValues.Sort();
+                median = Percentile(_numericValues, 0.5);
+                percentile05 = Percentile(_numericValues, 0.05);
+                percentile25 = Percentile(_numericValues, 0.25);
+                percentile75 = Percentile(_numericValues, 0.75);
+                percentile95 = Percentile(_numericValues, 0.95);
+                standardDeviation = SampleStandardDeviation(_numericValues, mean.Value);
             }
             else if (Channel.ValueType == ChannelValueType.Boolean)
             {
@@ -282,7 +297,43 @@ public static class WindowAnalyzer
                 falseCount,
                 distinctCount,
                 mode,
-                modeCount);
+                modeCount,
+                median,
+                standardDeviation,
+                percentile05,
+                percentile25,
+                percentile75,
+                percentile95);
+        }
+
+        private static double Percentile(List<double> sorted, double percentile)
+        {
+            if (sorted.Count == 1)
+                return sorted[0];
+
+            var rank = (sorted.Count - 1) * percentile;
+            var lower = (int)Math.Floor(rank);
+            var upper = (int)Math.Ceiling(rank);
+            if (lower == upper)
+                return sorted[lower];
+
+            var weight = rank - lower;
+            return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+        }
+
+        private static double? SampleStandardDeviation(List<double> values, double mean)
+        {
+            if (values.Count < 2)
+                return null;
+
+            var squareSum = 0d;
+            foreach (var value in values)
+            {
+                var delta = value - mean;
+                squareSum += delta * delta;
+            }
+
+            return Math.Sqrt(squareSum / (values.Count - 1));
         }
 
         private static bool IsPresent(

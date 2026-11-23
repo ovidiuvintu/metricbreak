@@ -7,6 +7,7 @@ export const analysisApi = {
     start: number,
     end: number,
     channelIds?: string[],
+    cadenceNanoseconds?: string | null,
   ): Promise<WindowAnalysis> {
     const params = new URLSearchParams({
       start: String(start),
@@ -14,6 +15,9 @@ export const analysisApi = {
     });
     for (const channelId of channelIds ?? []) {
       params.append("channelId", channelId);
+    }
+    if (cadenceNanoseconds) {
+      params.set("cadenceNanoseconds", cadenceNanoseconds);
     }
 
     return apiRequest<WindowAnalysis>(
