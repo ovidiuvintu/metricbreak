@@ -384,9 +384,8 @@ function pageStartForSequence(sequence: number, sampleCount: number): number {
   return Math.max(0, Math.min(last, Math.floor(sequence / PAGE_SIZE) * PAGE_SIZE));
 }
 
-// During playback the loaded page slides so the cursor stays in view, instead of
-// waiting for a 5,000-sample boundary and jumping. Shift only near the edge.
-const PLAYBACK_SLIDE_EDGE = 0.9;
+// During playback the loaded page keeps the cursor near a fixed spot in the
+// window and advances with it, instead of jumping a chunk of the page at once.
 const PLAYBACK_SLIDE_ANCHOR = 0.75;
 
 function slidingWindowStart(
@@ -400,18 +399,18 @@ function slidingWindowStart(
   const maxStart = Math.max(0, sampleCount - windowSize);
   const start = Math.max(0, Math.min(maxStart, windowStart));
   const end = Math.min(sampleCount, start + windowSize);
-  const span = Math.max(1, end - start);
-  const outside = sequence < start || sequence >= end;
-  const fraction = (sequence - start) / span;
-  const nearEdge = forward
-    ? fraction >= PLAYBACK_SLIDE_EDGE
-    : fraction <= 1 - PLAYBACK_SLIDE_EDGE;
-  if (!outside && !nearEdge) return null;
-
   const anchor = forward ? PLAYBACK_SLIDE_ANCHOR : 1 - PLAYBACK_SLIDE_ANCHOR;
-  const next = Math.round(sequence - anchor * windowSize);
-  const clamped = Math.max(0, Math.min(maxStart, next));
-  return clamped === start ? null : clamped;
+  const desired = Math.round(sequence - anchor * windowSize);
+  const clamped = Math.max(0, Math.min(maxStart, desired));
+  if (clamped === start) return null;
+
+  const outside = sequence < start || sequence >= end;
+  if (outside) return clamped;
+  // Before the cursor reaches the anchor, keep the window still. After that,
+  // follow the cursor so the trace scrolls instead of snapping.
+  if (forward && clamped < start) return null;
+  if (!forward && clamped > start) return null;
+  return clamped;
 }
 
 type PlottedSeriesMeta = {
@@ -860,16 +859,23 @@ export function RecordingChart({
   const [cursorHovered, setCursorHovered] = useState(false);
   const [previewSequence, setPreviewSequence] = useState<number | null>(null);
   // Tag the label position with the page whose ECharts coordinate system
-  // produced it. A position from the previous page must never be rendered.
+  // produced it. A one-sample playback slide keeps the last position so the
+  // badge does not unmount while the axis catches up. A real page jump does not.
+  const CURSOR_LABEL_PAGE_HOLD = 128;
   const [cursorLabelPosition, setCursorLabelPosition] = useState<{
     pageStart: number;
     x: number;
   } | null>(null);
-  const cursorLabelX = cursorLabelPosition?.pageStart === pageStart
+  const cursorLabelX = cursorLabelPosition != null
+    && Math.abs(cursorLabelPosition.pageStart - pageStart) <= CURSOR_LABEL_PAGE_HOLD
     ? cursorLabelPosition.x
     : null;
   const setCursorLabelX = (x: number | null) => {
-    setCursorLabelPosition(x === null ? null : { pageStart, x });
+    setCursorLabelPosition((current) => {
+      if (x === null) return current === null ? current : null;
+      if (current?.pageStart === pageStart && current.x === x) return current;
+      return { pageStart, x };
+    });
   };
   const dragRef = useRef<{ sequence: number } | null>(null);
   // Drag visuals are updated imperatively, without a React/ECharts option rebuild
@@ -1376,7 +1382,11 @@ export function RecordingChart({
       const forward = previous?.sequence == null || sequence >= previous.sequence;
       const nextStart = slidingWindowStart(pageStart, sequence, sampleCount, forward);
       if (nextStart !== null) {
-        pendingChartViewportRef.current = { kind: "reset" };
+        // A one-sample follow should pan. Only a real jump opens the new range
+        // from scratch, so a zoom is not cleared on every playback tick.
+        if (Math.abs(nextStart - pageStart) > Math.max(1, Math.round(PAGE_SIZE * 0.02))) {
+          pendingChartViewportRef.current = { kind: "reset" };
+        }
         setPageStart(nextStart);
       }
       return;
@@ -1410,7 +1420,9 @@ export function RecordingChart({
   // Keep the current traces up until the overlapping window is ready.
   useLayoutEffect(() => {
     const loadId = ++pageLoadGenerationRef.current;
-    if (!dragRef.current) {
+    // Playback pans the window on each sample. Clearing the hover and cursor
+    // on that pan makes the chart flicker.
+    if (!dragRef.current && playbackState !== "playing") {
       setHover(null);
       setInspectedSample(null);
       setCursorLabelX(null);
@@ -1479,7 +1491,7 @@ export function RecordingChart({
         void requestPage(neighbor).catch(() => { /* Retry on actual navigation. */ });
       }
     }
-  }, [sessionId, pageStart, sampleCount, selectedChannelIds.length]);
+  }, [sessionId, pageStart, sampleCount, selectedChannelIds.length, playbackState]);
 
   useEffect(() => {
     if (selectedChannelIds.length === 0) {
@@ -2015,8 +2027,10 @@ export function RecordingChart({
   const lastChartReplayRef = useRef<{ sessionId: string; pageStart: number; sequence: number | null } | null>(null);
 
   // Keep the HTML handle aligned with the actual visible plot, not the canvas.
-  // ECharts can convert off-screen data coordinates into pixels outside the grid.
-  useEffect(() => {
+  // ECharts applies the new axis in its layout update, before paint. This has
+  // to run in that same pass: once zoomed, one sample is many pixels, and a
+  // badge that moves on the next frame no longer sits on the cursor line.
+  useLayoutEffect(() => {
     const chart = chartRef.current?.getEchartsInstance();
     if (!chart || chart.isDisposed()) return;
 
@@ -2127,17 +2141,26 @@ export function RecordingChart({
         return;
       }
       if (sequence === null || sequence < pageStart || sequence >= pageEnd ||
-          samples.length === 0 || samples[0].sequence < pageStart ||
-          samples[0].sequence >= pageEnd) {
+          samples.length === 0) {
+        setCursorLabelX(null);
+        return;
+      }
+      // A playback slide can render before the sample slice catches up. Keep
+      // positioning the badge from the axis that is actually on screen.
+      const samplesBehind = samples[0].sequence < pageStart;
+      if (
+        samples[0].sequence >= pageEnd ||
+        (samplesBehind && pageStart - samples[0].sequence > CURSOR_LABEL_PAGE_HOLD)
+      ) {
         setCursorLabelX(null);
         return;
       }
       try {
         // During page transitions, ECharts may still expose the previous axes.
+        // Keep the badge where it is until those axes match the new window.
         const axis = (chart.getOption().xAxis as Array<{ min?: number; max?: number }> | undefined)?.[0];
         if (Number(axis?.min) !== pageStart ||
             Number(axis?.max) !== Math.max(pageStart + 1, pageEnd - 1)) {
-          setCursorLabelX(null);
           return;
         }
 
@@ -2220,10 +2243,10 @@ export function RecordingChart({
           setCursorLabelX(null);
           return;
         }
-        // Keep the draggable label fully inside the chart at either edge.
-        const labelX = Math.max(30, Math.min(chart.getWidth() - 30, pixel));
-        if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${labelX}px`;
-        setCursorLabelX(labelX);
+        // The badge and the cursor line share this pixel. Clamping the badge
+        // toward the chart edge pulls it off the line once the view is zoomed.
+        if (cursorHandleRef.current) cursorHandleRef.current.style.left = `${pixel}px`;
+        setCursorLabelX(pixel);
       } catch {
         setCursorLabelX(null);
       }
@@ -2235,16 +2258,29 @@ export function RecordingChart({
         update();
       });
     };
-    scheduleUpdate();
     chart.on("finished", scheduleUpdate);
-    chart.on("datazoom", scheduleUpdate);
+    // Zoom and playback both move the cursor line in this layout pass.
+    // Positioning the badge on the next frame leaves it a sample behind
+    // once the view is zoomed in.
+    let updatingCursor = false;
+    const updateCursorNow = () => {
+      if (updatingCursor) return;
+      updatingCursor = true;
+      try {
+        update();
+      } finally {
+        updatingCursor = false;
+      }
+    };
+    chart.on("datazoom", updateCursorNow);
+    updateCursorNow();
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(chart.getDom());
     return () => {
       disposed = true;
       if (frame !== null) cancelAnimationFrame(frame);
       chart.off("finished", scheduleUpdate);
-      chart.off("datazoom", scheduleUpdate);
+      chart.off("datazoom", updateCursorNow);
       observer.disconnect();
     };
   }, [sessionId, currentSequence, showCursor, previewSequence, pageStart, pageEnd, samples, option]);
@@ -2617,6 +2653,12 @@ export function RecordingChart({
             },
             { lazyUpdate: true },
           );
+          const badge = cursorHandleRef.current;
+          const cursorSequence = ui.previewSequence ?? currentSequenceRef.current;
+          if (!badge || cursorSequence == null) return;
+          if (cursorSequence < vp.visibleMin || cursorSequence > vp.visibleMax) return;
+          const pixel = chart.convertToPixel({ xAxisIndex: 0 }, cursorSequence) as number;
+          if (Number.isFinite(pixel)) badge.style.left = `${pixel}px`;
         });
       };
 
