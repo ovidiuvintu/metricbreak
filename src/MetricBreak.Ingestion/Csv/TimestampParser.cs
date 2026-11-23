@@ -372,7 +372,12 @@ public static class TimestampParser
     {
         offset = default;
         if (index >= text.Length)
-            return false;
+        {
+            // Wall-clock values such as "2026-11-22 08:00:00" carry no zone.
+            // They are absolute UTC so every recording shares one timeline.
+            offset = TimeSpan.Zero;
+            return true;
+        }
 
         var signChar = text[index];
         if (signChar is 'Z' or 'z')
