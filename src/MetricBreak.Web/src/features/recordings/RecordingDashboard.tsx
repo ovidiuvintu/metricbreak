@@ -1529,6 +1529,7 @@ export function RecordingDashboard({
               session.currentSample?.sequence ?? null
             }
             showCursor={replayCursorVisible}
+            playbackState={playbackState}
             currentTimestampNanoseconds={session.currentSample?.timestampNanoseconds ?? null}
             timestampOrigin={session.timestampOrigin ?? "Unix"}
             onSeek={handleSeek}
