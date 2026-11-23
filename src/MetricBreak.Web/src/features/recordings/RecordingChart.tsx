@@ -279,6 +279,8 @@ interface RecordingChartProps {
   compositeBreakpoints?: CompositeBreakpoint[];
   breakpointHitsRefreshKey?: number;
   onBreakpointTimelineHit?: (sampleSequence: number, breakpointId: string) => void;
+  /** While playing, the loaded window slides with the cursor. Zoom stays available. */
+  playbackState?: "stopped" | "playing" | "paused";
 }
 
 type HoverDetails = {
@@ -378,6 +380,36 @@ function pageStartForSequence(sequence: number, sampleCount: number): number {
   if (sampleCount <= 0) return 0;
   const last = Math.floor((sampleCount - 1) / PAGE_SIZE) * PAGE_SIZE;
   return Math.max(0, Math.min(last, Math.floor(sequence / PAGE_SIZE) * PAGE_SIZE));
+}
+
+// During playback the loaded page slides so the cursor stays in view, instead of
+// waiting for a 5,000-sample boundary and jumping. Shift only near the edge.
+const PLAYBACK_SLIDE_EDGE = 0.9;
+const PLAYBACK_SLIDE_ANCHOR = 0.75;
+
+function slidingWindowStart(
+  windowStart: number,
+  sequence: number,
+  sampleCount: number,
+  forward: boolean,
+): number | null {
+  if (sampleCount <= 0) return null;
+  const windowSize = Math.min(PAGE_SIZE, sampleCount);
+  const maxStart = Math.max(0, sampleCount - windowSize);
+  const start = Math.max(0, Math.min(maxStart, windowStart));
+  const end = Math.min(sampleCount, start + windowSize);
+  const span = Math.max(1, end - start);
+  const outside = sequence < start || sequence >= end;
+  const fraction = (sequence - start) / span;
+  const nearEdge = forward
+    ? fraction >= PLAYBACK_SLIDE_EDGE
+    : fraction <= 1 - PLAYBACK_SLIDE_EDGE;
+  if (!outside && !nearEdge) return null;
+
+  const anchor = forward ? PLAYBACK_SLIDE_ANCHOR : 1 - PLAYBACK_SLIDE_ANCHOR;
+  const next = Math.round(sequence - anchor * windowSize);
+  const clamped = Math.max(0, Math.min(maxStart, next));
+  return clamped === start ? null : clamped;
 }
 
 type PlottedSeriesMeta = {
@@ -576,6 +608,7 @@ export function RecordingChart({
   compositeBreakpoints = [],
   breakpointHitsRefreshKey = 0,
   onBreakpointTimelineHit,
+  playbackState = "stopped",
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -1120,13 +1153,17 @@ export function RecordingChart({
   // A page change must never be interpreted as a replay cursor movement.
   // Manual page browsing is independent of the replay cursor.
   const manualPageRef = useRef(false);
-  // A window left between page boundaries follows the cursor onto the real page.
+  // A window left between page boundaries follows the cursor onto the real page
+  // once the cursor leaves it. Playback may leave the window unaligned while
+  // the cursor is still inside, and pausing keeps that view.
   if (
+    playbackState !== "playing" &&
     sampleCount > 0 &&
     currentSequence !== null &&
     !manualPageRef.current &&
     dragRef.current === null &&
-    pageStart % PAGE_SIZE !== 0
+    pageStart % PAGE_SIZE !== 0 &&
+    (currentSequence < pageStart || currentSequence >= pageEnd)
   ) {
     const aligned = pageStartForSequence(
       Math.max(0, Math.min(currentSequence, sampleCount - 1)),
@@ -1188,6 +1225,22 @@ export function RecordingChart({
     // Manual Next/Previous page navigation does not change either value.
     if (!sessionChanged && !sequenceChanged) return;
 
+    if (
+      playbackState === "playing" &&
+      !sessionChanged &&
+      currentSequence !== null &&
+      sampleCount > 0
+    ) {
+      const sequence = Math.max(0, Math.min(currentSequence, sampleCount - 1));
+      const forward = previous?.sequence == null || sequence >= previous.sequence;
+      const nextStart = slidingWindowStart(pageStart, sequence, sampleCount, forward);
+      if (nextStart !== null) {
+        pendingChartViewportRef.current = { kind: "reset" };
+        setPageStart(nextStart);
+      }
+      return;
+    }
+
     if (currentSequence === null || sampleCount <= 0) {
       pendingChartViewportRef.current = { kind: "reset" };
       setPageStart(0);
@@ -1202,18 +1255,15 @@ export function RecordingChart({
       return;
     }
 
-    // Stay on an aligned page while the cursor is still inside it. A window
-    // that starts between page boundaries (for example 1,001) snaps to the
-    // page that actually contains the cursor, which begins at 5,000.
+    // Stay on the loaded window while the cursor is still inside it, including a
+    // window that playback slid off a page boundary. Leaving that window opens
+    // the fixed page that contains the cursor.
     const windowEnd = Math.min(sampleCount, pageStart + PAGE_SIZE);
-    const insideAlignedPage = pageStart % PAGE_SIZE === 0
-      && sequence >= pageStart
-      && sequence < windowEnd;
-    if (insideAlignedPage || aligned === pageStart) return;
+    if (sequence >= pageStart && sequence < windowEnd) return;
 
     pendingChartViewportRef.current = { kind: "reset" };
     setPageStart(aligned);
-  }, [sessionId, currentSequence, sampleCount, previewSequence]);
+  }, [sessionId, currentSequence, sampleCount, previewSequence, playbackState, pageStart, pageEnd]);
 
   // Layout effect applies prefetched data before the browser paints a new page.
   // Keep the current traces up until the overlapping window is ready.
@@ -1335,6 +1385,7 @@ export function RecordingChart({
   // Browsing another chart page must not seek or invalidate playback.
   // Keep the selected page visible until the user explicitly scrubs/seeks.
   const navigateToPage = (direction: -1 | 1) => {
+    if (playbackState === "playing") return;
     const aligned = Math.floor(pageStart / PAGE_SIZE) * PAGE_SIZE;
     const next = Math.max(0, Math.min(maxPageStart, aligned + direction * PAGE_SIZE));
     if (next === pageStart) return;
@@ -1822,7 +1873,9 @@ export function RecordingChart({
     const replayMoved = previous?.sessionId === sessionId &&
       previous.pageStart === pageStart && previous.sequence !== currentSequence;
     lastChartReplayRef.current = { sessionId, pageStart, sequence: currentSequence };
-    let followPending = replayMoved && previewSequence === null;
+    // Playback leaves a manual zoom where the user put it. The sliding window
+    // is what recenters the chart when the cursor reaches the edge.
+    let followPending = replayMoved && previewSequence === null && playbackState !== "playing";
 
     const publishPlotFrame = () => {
       try {
@@ -3273,11 +3326,11 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
-              <Button disabled={pageStart <= 0} onClick={() => navigateToPage(-1)}>
+              <Button disabled={playbackState === "playing" || pageStart <= 0} onClick={() => navigateToPage(-1)}>
                 Previous
               </Button>
               <Button
-                disabled={pageStart >= maxPageStart}
+                disabled={playbackState === "playing" || pageStart >= maxPageStart}
                 onClick={() => navigateToPage(1)}
               >
                 Next
