@@ -99,7 +99,42 @@ public sealed class TimestampMappingTests
     }
 
     [Theory]
-    [InlineData("2026-11-08T10:00:00")]
+    [InlineData("2026-11-22 08:00:00")]
+    [InlineData("2026-11-22T08:00:00")]
+    public void Iso8601_MissingOffset_IsUtc(string text)
+    {
+        var timestamp = TimestampParser.Parse(text, TimestampFormat.Iso8601, 2);
+        var expected = TelemetryTimestamp.FromDateTimeOffset(
+            new DateTimeOffset(2026, 11, 22, 8, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(expected, timestamp);
+        Assert.Equal(
+            "2026-11-22T08:00:00Z",
+            TimestampFormatter.Format(timestamp, TimestampFormat.Iso8601));
+    }
+
+    [Fact]
+    public void SpaceSeparatedDateTime_ImportsAsUtc()
+    {
+        const string csv = """
+            Timestamp,Treating_Pressure_psi
+            2026-11-22 08:00:00,153.97
+            2026-11-22 08:00:01,148.89
+            """;
+
+        var parsed = new IndexedCsvTelemetryParser().Parse(new StringReader(csv));
+
+        Assert.Equal(TimestampOrigin.Unix, parsed.TimestampOrigin);
+        Assert.Equal(
+            TelemetryTimestamp.FromDateTimeOffset(
+                new DateTimeOffset(2026, 11, 22, 8, 0, 0, TimeSpan.Zero)),
+            parsed.Samples[0].Timestamp);
+        Assert.Equal(
+            parsed.Samples[0].Timestamp.UnixNanoseconds + 1_000_000_000L,
+            parsed.Samples[1].Timestamp.UnixNanoseconds);
+    }
+
+    [Theory]
     [InlineData("2026-11-08")]
     [InlineData("not-a-time")]
     public void Iso8601_MalformedValues_AreRejected(string text)

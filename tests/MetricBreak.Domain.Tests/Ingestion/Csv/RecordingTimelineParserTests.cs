@@ -1,3 +1,4 @@
+using MetricBreak.Domain.Recordings;
 using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Domain.Tests.Ingestion.Csv;
@@ -76,6 +77,26 @@ public sealed class RecordingTimelineParserTests
         var acid = parsed.Timeline.Stages.Single(
             item => item.Name == "Stage 1: Acid Spearhead");
         Assert.Contains("hydrochloric acid", acid.Description, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Parse_StageDataFile_AcceptsWallClockTimestamps()
+    {
+        var path = SamplePath("hydraulic_fracturing_stage_data_4hr_1hz.csv");
+        Assert.True(File.Exists(path), $"Missing sample: {path}");
+
+        using var reader = OpenReader(path);
+        var parsed = new IndexedCsvTelemetryParser().Parse(reader);
+
+        Assert.Equal(14_400, parsed.Samples.Count);
+        Assert.Equal(TimestampOrigin.Unix, parsed.TimestampOrigin);
+        Assert.Equal(
+            TelemetryTimestamp.FromDateTimeOffset(
+                new DateTimeOffset(2026, 11, 22, 8, 0, 0, TimeSpan.Zero)),
+            parsed.Samples[0].Timestamp);
+        Assert.Equal(
+            parsed.Samples[0].Timestamp.UnixNanoseconds + 14_399L * 1_000_000_000L,
+            parsed.Samples[^1].Timestamp.UnixNanoseconds);
     }
 
     [Fact]
