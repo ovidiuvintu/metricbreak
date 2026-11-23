@@ -23,6 +23,7 @@ interface ChannelListProps {
   previousSample?: CurrentSample | SampleRangeItem | null;
   channels: ChannelMetadata[];
   selectedChannelIds?: string[];
+  seriesColors?: Record<string, string>;
   navigationBusy?: boolean;
   onNextChange?: (channelId: string) => void;
   onPreviousChange?: (channelId: string) => void;
@@ -82,6 +83,7 @@ export function ChannelList({
   previousSample,
   channels,
   selectedChannelIds,
+  seriesColors,
   navigationBusy = false,
   onNextChange,
   onPreviousChange,
@@ -206,17 +208,30 @@ export function ChannelList({
                   verticalAlign: "top",
                 }}
               >
-                <Tooltip title={channel.name} arrow placement="left">
-                  <Typography
-                    component="span"
-                    variant="caption"
-                    color="text.secondary"
-                    noWrap
-                    sx={{ display: "block" }}
-                  >
-                    {channel.name}
-                  </Typography>
-                </Tooltip>
+                <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.75, minWidth: 0 }}>
+                  <Box
+                    aria-hidden
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      mt: "0.28rem",
+                      borderRadius: "50%",
+                      bgcolor: seriesColors?.[channel.channelId] ?? "text.disabled",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <Tooltip title={channel.name} arrow placement="left">
+                    <Typography
+                      component="span"
+                      variant="caption"
+                      color="text.secondary"
+                      noWrap
+                      sx={{ display: "block", minWidth: 0 }}
+                    >
+                      {channel.name}
+                    </Typography>
+                  </Tooltip>
+                </Box>
               </Box>
 
               <Box
