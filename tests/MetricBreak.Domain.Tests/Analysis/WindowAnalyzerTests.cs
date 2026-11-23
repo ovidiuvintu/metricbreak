@@ -29,6 +29,8 @@ public sealed class WindowAnalyzerTests
         Assert.Equal(30, channel.Maximum);
         Assert.Equal(2, channel.MaximumSequence);
         Assert.Equal(20, channel.Mean);
+        Assert.Equal(20, channel.Median);
+        Assert.Equal(Math.Sqrt(200), channel.StandardDeviation!.Value, precision: 9);
         Assert.Empty(analysis.Correlations);
     }
 

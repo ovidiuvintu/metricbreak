@@ -54,7 +54,13 @@ public sealed class ChannelWindowSummary
         long? falseCount,
         int? distinctCount,
         string? mode,
-        long? modeCount)
+        long? modeCount,
+        double? median,
+        double? standardDeviation,
+        double? percentile05,
+        double? percentile25,
+        double? percentile75,
+        double? percentile95)
     {
         ChannelId = channelId;
         Name = name;
@@ -73,6 +79,12 @@ public sealed class ChannelWindowSummary
         DistinctCount = distinctCount;
         Mode = mode;
         ModeCount = modeCount;
+        Median = median;
+        StandardDeviation = standardDeviation;
+        Percentile05 = percentile05;
+        Percentile25 = percentile25;
+        Percentile75 = percentile75;
+        Percentile95 = percentile95;
     }
 
     public Guid ChannelId { get; }
@@ -108,6 +120,19 @@ public sealed class ChannelWindowSummary
     public string? Mode { get; }
 
     public long? ModeCount { get; }
+
+    public double? Median { get; }
+
+    /// <summary>Sample standard deviation of the present numeric values. Null when fewer than two values exist.</summary>
+    public double? StandardDeviation { get; }
+
+    public double? Percentile05 { get; }
+
+    public double? Percentile25 { get; }
+
+    public double? Percentile75 { get; }
+
+    public double? Percentile95 { get; }
 }
 
 public sealed class ChannelCorrelation

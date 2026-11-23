@@ -242,6 +242,7 @@ internal static class SessionEndpoints
                 [FromQuery] long? start,
                 [FromQuery] long? end,
                 [FromQuery] Guid[]? channelId,
+                [FromQuery] long? cadenceNanoseconds,
                 ReplaySessionManager manager) =>
             {
                 if (!manager.TryAnalyzeWindow(
@@ -249,6 +250,7 @@ internal static class SessionEndpoints
                         start,
                         end,
                         channelId,
+                        cadenceNanoseconds,
                         out var analysis,
                         out var error))
                 {

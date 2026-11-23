@@ -1257,6 +1257,7 @@ public sealed class ReplaySessionManager
         long? start,
         long? end,
         IReadOnlyList<Guid>? channelIds,
+        long? cadenceNanoseconds,
         out WindowAnalysisResponse? response,
         out string? error)
     {
@@ -1301,6 +1302,12 @@ public sealed class ReplaySessionManager
                 return false;
             }
 
+            if (cadenceNanoseconds is <= 0)
+            {
+                error = "Expected interval must be positive.";
+                return false;
+            }
+
             var sampleCount = entry.Imported.Reader.SampleCount;
             if (sampleCount == 0)
             {
@@ -1321,8 +1328,12 @@ public sealed class ReplaySessionManager
                 channels,
                 startSequence,
                 endSequence);
+            var sampling = SamplingHealthAnalyzer.Analyze(
+                entry.Imported.Reader,
+                available,
+                cadenceNanoseconds);
 
-            response = WindowAnalysisResponse.From(analysis);
+            response = WindowAnalysisResponse.From(analysis, sampling);
             return true;
         }
     }
