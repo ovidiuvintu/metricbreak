@@ -717,6 +717,33 @@ function getLineWidth(sampleCount: number): number {
   return 1.5;
 }
 
+// Chrome on Windows hides the mouse pointer about two seconds after it
+// stops on a canvas, then shows it again on the next move. Hit-testing
+// stays on the viewport div under the canvas, and that div's cursor is
+// written only when the shape under the pointer actually changes.
+function keepPointerVisible(chart: EChartsType) {
+  const zr = chart.getZr() as {
+    painter?: { getViewportRoot?: () => HTMLElement };
+    handler?: { proxy?: { setCursor?: (cursorStyle?: string) => void } };
+  };
+  const viewport = zr.painter?.getViewportRoot?.();
+  const proxy = zr.handler?.proxy;
+  const setCursor = proxy?.setCursor;
+  if (!viewport || !proxy || !setCursor || viewport.dataset.cursorGuard === "true") {
+    return;
+  }
+
+  viewport.dataset.cursorGuard = "true";
+  if (!viewport.style.cursor) viewport.style.cursor = "default";
+  let applied = viewport.style.cursor || "default";
+  proxy.setCursor = (cursorStyle?: string) => {
+    const next = cursorStyle || "default";
+    if (next === applied) return;
+    applied = next;
+    setCursor.call(proxy, next);
+  };
+}
+
 export function RecordingChart({
   sessionId,
   sampleCount,
@@ -1000,13 +1027,6 @@ export function RecordingChart({
   const displayedSample =
     inspectedSample ?? (tooltipsEnabled && !eventTip ? hover : null);
 
-  const clearEventTip = () => {
-    if (eventTipKeyRef.current === null && eventTipPosRef.current === null) return;
-    eventTipKeyRef.current = null;
-    eventTipPosRef.current = null;
-    setEventTip(null);
-  };
-
   useEffect(() => {
     eventTipKeyRef.current = null;
     eventTipPosRef.current = null;
@@ -1017,10 +1037,7 @@ export function RecordingChart({
     const next = !tooltipsEnabledRef.current;
     tooltipsEnabledRef.current = next;
     setTooltipsEnabled(next);
-    if (!next) {
-      setHover(null);
-      clearEventTip();
-    }
+    if (!next) setHover(null);
   };
   const withChart = (action: (chart: EChartsType) => void) => {
     const chart = chartRef.current?.getEchartsInstance();
@@ -2591,6 +2608,7 @@ export function RecordingChart({
   // This also handles clicks on empty areas of the plot.
   const handleChartReady = useCallback(
     (chart: EChartsType) => {
+      keepPointerVisible(chart);
       const chartDom = chart.getDom();
 
       const handleWheel = (event: WheelEvent) => {
@@ -2742,7 +2760,6 @@ const publishEventTip = (next: TimelineEventHit | null) => {
       };
 
 const handleMove = (event: { offsetX: number; offsetY: number }) => {
-        if (!tooltipsEnabledRef.current) return;
         const pixel: [number, number] = [event.offsetX, event.offsetY];
         if (!chart.containPixel({ gridIndex: 0 }, pixel)) {
           setHover(null);
@@ -2750,6 +2767,10 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           return;
         }
         updateEventTip(event.offsetX, event.offsetY);
+        if (!tooltipsEnabledRef.current) {
+          setHover(null);
+          return;
+        }
         const coordinates = chart.convertFromPixel(
           { gridIndex: 0 }, pixel,
         ) as number[];
@@ -3046,7 +3067,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
               width: "100%",
               position: "relative",
               "& canvas": {
-                cursor: "default",
+                pointerEvents: "none",
               },
             }}
             onContextMenu={handlePlotContextMenu}
@@ -3172,7 +3193,7 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
             </Box>
           )}
           </Box>
-          {eventTip && tooltipsEnabled && !inspectedSample && (
+          {eventTip && !inspectedSample && (
             <Box
               sx={{
                 position: "absolute",
