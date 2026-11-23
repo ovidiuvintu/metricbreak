@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -18,12 +18,14 @@ import {
   Tabs,
   Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import AddIcon from "@mui/icons-material/Add";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 
+import { assignChartSeriesColors } from "../../theme/chartTheme";
 import { ChannelSelectionPanel } from "./ChannelSelectionPanel";
 import { ChannelList } from "./ChannelList";
 import { RecordingWorkspace } from "./RecordingWorkspace";
@@ -137,6 +139,24 @@ export function RecordingDashboard({
 
   const [axisPins, setAxisPins] = useState<AxisPins>({});
   const [effectiveRightAxisIds, setEffectiveRightAxisIds] = useState<string[]>([]);
+  const [seriesColors, setSeriesColors] = useState<Record<string, string>>({});
+  const theme = useTheme();
+  const plottedSeriesColors = useMemo(() => {
+    const right = new Set(effectiveRightAxisIds);
+    const inputs = channels
+      .map((channel, channelIndex) => ({ channel, channelIndex }))
+      .filter(({ channel }) => selectedChannelIds.includes(channel.channelId))
+      .map(({ channel, channelIndex }) => ({
+        channelId: channel.channelId,
+        channelName: channel.name,
+        channelIndex,
+        yAxisIndex: (right.has(channel.channelId) ? 1 : 0) as 0 | 1,
+      }));
+    return Object.fromEntries(
+      assignChartSeriesColors(theme.palette.mode, inputs, right.size > 0),
+    );
+  }, [channels, selectedChannelIds, effectiveRightAxisIds, theme.palette.mode]);
+  const valueSeriesColors = { ...plottedSeriesColors, ...seriesColors };
 
   const setAxisPin = (channelId: string, pin: AxisPin) => {
     setAxisPins((previous) => ({
@@ -1525,6 +1545,7 @@ export function RecordingDashboard({
             onAxisPinChange={handleAxisPinChange}
             onClearAxisPins={clearAllAxisPins}
             onEffectiveRightAxisChange={setEffectiveRightAxisIds}
+            onSeriesColorsChange={setSeriesColors}
             currentSequence={
               session.currentSample?.sequence ?? null
             }
@@ -1715,6 +1736,7 @@ export function RecordingDashboard({
             previousSample={previousWatchSample}
             channels={channels}
             selectedChannelIds={selectedChannelIds}
+            seriesColors={valueSeriesColors}
             navigationBusy={loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy}
             onNextChange={(channelId) => void handleChangeNavigation(channelId, "next")}
             onPreviousChange={(channelId) => void handleChangeNavigation(channelId, "previous")}

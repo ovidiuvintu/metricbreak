@@ -67,7 +67,6 @@ export function ChannelSelectionPanel({
     [effectiveRightAxisChannelIds],
   );
 
-  const dualAxisActive = selectedChannelIds.some((id) => rightAxisSet.has(id));
   const hasPins = Object.keys(axisPins).length > 0;
 
   return (
@@ -133,42 +132,59 @@ export function ChannelSelectionPanel({
           </Tooltip>
         </Box>
 
-        {(dualAxisActive || hasPins) && (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
-            <Typography
-              variant="caption"
-              component="div"
+        <Box
+          sx={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 1,
+            bgcolor: "action.hover",
+            borderRadius: 0.75,
+            px: 1,
+            py: 0.5,
+          }}
+        >
+          <Typography
+            variant="caption"
+            component="div"
+            sx={{
+              fontSize: "0.72rem",
+              lineHeight: 1.45,
+              color: "text.secondary",
+            }}
+          >
+            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+              A
+            </Box>
+            {" = auto axis from scale"}
+            <br />
+            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+              L
+            </Box>
+            {" / "}
+            <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
+              R
+            </Box>
+            {" = pin left (solid) or right (dashed)"}
+          </Typography>
+          {onClearAllAxisPins && (
+            <Button
+              size="small"
+              variant="text"
+              disabled={!hasPins}
+              onClick={onClearAllAxisPins}
               sx={{
-                fontSize: "0.72rem",
-                lineHeight: 1.45,
-                color: "text.secondary",
-                bgcolor: "action.hover",
-                borderRadius: 0.75,
-                px: 1,
-                py: 0.5,
+                flexShrink: 0,
+                p: 0,
+                minWidth: 0,
+                whiteSpace: "nowrap",
+                visibility: hasPins ? "visible" : "hidden",
               }}
             >
-              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
-                A
-              </Box>
-              {" = auto axis from scale"}
-              <br />
-              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
-                L
-              </Box>
-              {" / "}
-              <Box component="span" sx={{ fontWeight: 700, color: "text.primary" }}>
-                R
-              </Box>
-              {" = pin left (solid) or right (dashed)"}
-            </Typography>
-            {hasPins && onClearAllAxisPins && (
-              <Button size="small" variant="text" onClick={onClearAllAxisPins} sx={{ alignSelf: "flex-start", p: 0, minWidth: 0 }}>
-                Reset all to auto
-              </Button>
-            )}
-          </Box>
-        )}
+              Reset all to auto
+            </Button>
+          )}
+        </Box>
       </Box>
 
       <Box
@@ -176,6 +192,8 @@ export function ChannelSelectionPanel({
           flex: 1,
           minHeight: 0,
           overflowY: "auto",
+          scrollbarGutter: "stable",
+          overflowAnchor: "none",
         }}
       >
         {filteredChannels.map((channel) => {

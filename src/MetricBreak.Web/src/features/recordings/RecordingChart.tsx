@@ -251,6 +251,8 @@ interface RecordingChartProps {
   onAxisPinChange: (channelId: string, pin: "left" | "right" | "auto") => void;
   onClearAxisPins?: () => void;
   onEffectiveRightAxisChange?: (rightAxisChannelIds: string[]) => void;
+  /** Plotted series colors, including overlap adjustments, for the Values list. */
+  onSeriesColorsChange?: (colors: Record<string, string>) => void;
   currentSequence: number | null;
   /** Replay marker. Hidden until the user starts playback on this file. */
   showCursor?: boolean;
@@ -435,6 +437,144 @@ function seriesLineStyleForAxis(
   };
 }
 
+const OVERLAP_MIN_POINTS = 12;
+const OVERLAP_SHARE = 0.45;
+const OVERLAP_CONTRAST_COLORS = {
+  dark: ["#4EA8FF", "#FF2D55", "#3DDC5A", "#FF9F0A", "#C792EA", "#22D3EE", "#E5C95C", "#F472B6", "#818CF8", "#FB7185"],
+  light: ["#1D4ED8", "#BE123C", "#047857", "#B45309", "#6D28D9", "#0E7490", "#A16207", "#BE185D", "#4F46E5", "#B91C1C"],
+} as const;
+
+function colorHueDegrees(color: string): number | null {
+  const raw = color.trim().replace("#", "");
+  const expanded = raw.length === 3 ? raw.split("").map((part) => part + part).join("") : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
+  const value = Number.parseInt(expanded, 16);
+  const red = ((value >> 16) & 255) / 255;
+  const green = ((value >> 8) & 255) / 255;
+  const blue = (value & 255) / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const delta = max - min;
+  if (delta === 0) return 0;
+  let hue = 0;
+  if (max === red) hue = ((green - blue) / delta) % 6;
+  else if (max === green) hue = (blue - red) / delta + 2;
+  else hue = (red - green) / delta + 4;
+  return (hue * 60 + 360) % 360;
+}
+
+function colorsLackContrast(first: string, second: string): boolean {
+  if (first.trim().toLowerCase() === second.trim().toLowerCase()) return true;
+  const firstHue = colorHueDegrees(first);
+  const secondHue = colorHueDegrees(second);
+  if (firstHue === null || secondHue === null) return false;
+  const delta = Math.min(Math.abs(firstHue - secondHue), 360 - Math.abs(firstHue - secondHue));
+  return delta < 42;
+}
+
+function seriesMostlyOverlap(
+  left: [number, number | null][],
+  right: [number, number | null][],
+): boolean {
+  const length = Math.min(left.length, right.length);
+  if (length === 0) return false;
+  const stride = Math.max(1, Math.floor(length / 400));
+  const pairs: [number, number][] = [];
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < length; index += stride) {
+    const a = left[index]?.[1];
+    const b = right[index]?.[1];
+    if (typeof a !== "number" || typeof b !== "number") continue;
+    pairs.push([a, b]);
+    min = Math.min(min, a, b);
+    max = Math.max(max, a, b);
+  }
+  if (pairs.length < OVERLAP_MIN_POINTS) return false;
+  const tolerance = Math.max((max - min) * 0.02, Math.abs(max) * 1e-6, 1e-9);
+  let close = 0;
+  for (const [a, b] of pairs) {
+    if (Math.abs(a - b) <= tolerance) close += 1;
+  }
+  return close / pairs.length >= OVERLAP_SHARE;
+}
+
+function revealOverlappingSeries(
+  built: Array<{
+    config: {
+      id: string;
+      yAxisIndex: number;
+      data: [number, number | null][];
+      itemStyle: { color: string };
+      lineStyle: { color: string; opacity: number };
+      emphasis: {
+        lineStyle: { color: string; opacity: number };
+        itemStyle: { color: string };
+      };
+    };
+    meta: PlottedSeriesMeta;
+  }>,
+  mode: "light" | "dark",
+  colorsByChannelId: Map<string, string>,
+): void {
+  const parent = built.map((_, index) => index);
+  const find = (index: number): number => {
+    let cursor = index;
+    while (parent[cursor] !== cursor) {
+      parent[cursor] = parent[parent[cursor]];
+      cursor = parent[cursor];
+    }
+    return cursor;
+  };
+  const unite = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+
+  for (let left = 0; left < built.length; left += 1) {
+    for (let right = left + 1; right < built.length; right += 1) {
+      if (built[left].config.yAxisIndex !== built[right].config.yAxisIndex) continue;
+      if (seriesMostlyOverlap(built[left].config.data, built[right].config.data)) {
+        unite(left, right);
+      }
+    }
+  }
+
+  const clusters = new Map<number, number[]>();
+  for (let index = 0; index < built.length; index += 1) {
+    const root = find(index);
+    const cluster = clusters.get(root) ?? [];
+    cluster.push(index);
+    clusters.set(root, cluster);
+  }
+
+  const palette = OVERLAP_CONTRAST_COLORS[mode];
+  for (const cluster of clusters.values()) {
+    if (cluster.length < 2) continue;
+    const taken = cluster.map((index) => built[index].config.lineStyle.color);
+    cluster.forEach((seriesIndex, slot) => {
+      const item = built[seriesIndex];
+      let color = item.config.lineStyle.color;
+      if (taken.some((existing, index) => index !== slot && colorsLackContrast(color, existing))) {
+        color = palette.find((candidate) =>
+          taken.every((existing, index) => index === slot || !colorsLackContrast(candidate, existing)),
+        ) ?? palette[slot % palette.length];
+        taken[slot] = color;
+      }
+      const opacity = 0.88 - (slot / (cluster.length - 1)) * 0.4;
+      item.config.lineStyle.color = color;
+      item.config.lineStyle.opacity = opacity;
+      item.config.itemStyle.color = color;
+      item.config.emphasis.lineStyle.color = color;
+      item.config.emphasis.lineStyle.opacity = Math.min(0.92, opacity + 0.08);
+      item.config.emphasis.itemStyle.color = color;
+      item.meta.color = color;
+      colorsByChannelId.set(item.config.id, color);
+    });
+  }
+}
+
 function formatNumericTick(value: number): string {
   const absolute = Math.abs(value);
 
@@ -587,6 +727,7 @@ export function RecordingChart({
   onAxisPinChange,
   onClearAxisPins,
   onEffectiveRightAxisChange,
+  onSeriesColorsChange,
   currentSequence,
   showCursor = false,
   currentTimestampNanoseconds,
@@ -1552,6 +1693,8 @@ export function RecordingChart({
         return { config, meta };
       });
 
+    revealOverlappingSeries(builtSeries, theme.palette.mode, seriesColorByChannelId);
+
     const series = builtSeries.map((item) => item.config);
     const seriesMetaByYAxis = (axisIndex: number) =>
       builtSeries
@@ -1855,6 +1998,16 @@ export function RecordingChart({
       investigationBookmarks,
       timelineEvents,
   ]);
+
+  const publishedSeriesColorKeyRef = useRef("");
+  useEffect(() => {
+    const entries = [...seriesColorByChannelIdRef.current.entries()]
+      .sort((left, right) => left[0].localeCompare(right[0]));
+    const key = entries.map(([id, color]) => `${id}:${color}`).join("|");
+    if (key === publishedSeriesColorKeyRef.current) return;
+    publishedSeriesColorKeyRef.current = key;
+    onSeriesColorsChange?.(Object.fromEntries(entries));
+  }, [option, onSeriesColorsChange]);
 
   // Follow replay within a zoomed viewport without changing the zoom width.
   // Only a replay-position change can move the viewport: manual zoom/pan stays
