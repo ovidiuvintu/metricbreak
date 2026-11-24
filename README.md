@@ -25,16 +25,16 @@ MetricBreak's core remains **industry-neutral**. Industrial telemetry, vehicle d
 
 The following capabilities are implemented; full end-to-end validation and release hardening remain ongoing:
 
-- **Typed CSV ingestion:** Import recordings with numeric, Boolean, and categorical values; preserve missing-value semantics and source sample order, including duplicate timestamps.
+- **Typed CSV ingestion:** Import recordings with numeric, Boolean, and categorical values; preserve missing-value semantics and source sample order, including duplicate timestamps. Dropping or choosing a CSV opens a setup wizard before replay starts. The wizard asks which channels to display, then offers optional breakpoints, then debug or run. An unambiguous timestamp is used as-is. An ambiguous timestamp, or Import CSV, asks for the timestamp column and format first. Closing the wizard after the file is imported still opens the recording with the channels and breakpoints already chosen. Opening a CSV does not create a project.
 - **Recording and session management:** Create and inspect recording sessions through the ASP.NET Core API.
 - **Deterministic replay:** Seek, step forward/backward, and navigate conditional breakpoint hits in either direction.
 - **Simulation-style playback:** Play/pause, forward/reverse traversal, adjustable speed, and time-based or sample-based pacing. Breakpoint evaluation remains authoritative even when UI rendering is batched.
 - **Breakpoints:** Conditional rules on numeric, Boolean, and categorical values, missing-data rules (a recording time gap or a channel that stays empty longer than a duration), and composite `AND`/`OR` rules. Each breakpoint shows how often it matches and how long the signal stays on that side, including the longest run, without moving the replay cursor.
-- **Recording chart:** Numeric-only plotted series and legend, channel selection, paginated sample windows (up to 5,000 samples per page), zoom, and a replay-position indicator and scrub control. Missing values appear as gaps rather than invented zero readings.
+- **Recording chart:** Numeric-only plotted series and legend, channel selection, paginated sample windows (up to 5,000 samples per page), zoom, and a replay-position indicator and scrub control. Missing values appear as gaps rather than invented zero readings. Each channel row and each breakpoint condition channel shows a small circle in that series color.
 - **Sample inspection:** Inspector tabs for Channels, Breakpoints, Values, and Timeline. Categorical and Boolean values remain inspectable even though they are not plotted as numeric chart series. In Values, the reading sits next to the channel name. When the value changed from the previous sample, that earlier reading is shown underneath. Stepping one sample does not blank the comparison.
 - **Chart context menu:** Right-click the plot, the current-sample label, or the replay-cursor chip to move the cursor, inspect values without seeking, bookmark the sample, add a breakpoint, or copy the sequence or timestamp. The label and the chip use the replay sequence itself, so the breakpoint lands on that sample rather than the nearest chart pixel. The chart uses a standard arrow cursor.
 - **Recording duration:** The dashboard duration counts every sample interval, including the last sample. A recording of 10,800 one-second samples lasts 3 hours. The clock from the first timestamp to the last is one interval shorter.
-- **Local project workspace foundation:** Project create/open workflows and local persistence infrastructure.
+- **Local project workspace:** Create and open a project when the work is worth keeping. Save as Project asks for a name and a folder on the machine running the API, then writes a `.metricbreak/project.mbproj.json` manifest and stores the current session there. Quick CSV analysis stays project-free until the user chooses that save.
 - **Automated tests:** Core domain and API tests; comprehensive browser and end-to-end validation remains a release task.
 
 ## CSV-first MVP
@@ -111,11 +111,17 @@ MetricBreak is designed to work **with or without a project**, like a developmen
 
 ### Quick analysis — no project required
 
-The intended quick-analysis workflow opens a CSV recording and immediately allows replay, inspection, and temporary breakpoints. **Project-free opening and its full UI workflow still require validation/completion**; project creation must not become a domain-engine dependency.
+Dropping a CSV, choosing a file, or using Import CSV opens the recording without creating a project. Setup walks through three steps before replay:
+
+1. **Channels.** Nothing starts selected. Click a row to choose the channels to display. Continue stays disabled until at least one channel is selected.
+2. **Breakpoints.** Optional. Add conditional, missing-data, or composite rules, or skip and add them later.
+3. **Debug or run.** Debug opens the recording paused so the cursor can be stepped. Run plays from the start and pauses when a breakpoint hits.
+
+The same channel list shows a series-color circle beside each checkbox. The breakpoint condition Channel menu uses that same color.
 
 ### Project workspace — organize ongoing work
 
-A project can group related recordings and debugging work. Its persisted content may include:
+A project is a folder for work you intend to resume. Create one with Save as Project after the session exists. Its persisted content may include:
 
 - **Recordings:** Source references, identities, and integrity metadata.
 - **Investigations:** Saved debugging state, notes, and findings.
@@ -125,7 +131,7 @@ A project can group related recordings and debugging work. Its persisted content
 - **External issues:** References to Jira or other trackers *(future integration)*.
 - **Reports and settings:** Exported evidence, channel mappings, and workspace configuration *(planned)*.
 
-A portable `.mbproj` manifest is a **proposed format**, not a promise that it is already implemented. A future **Save as Project** action should allow quick-analysis work to become a persistent workspace.
+Save as Project writes `project.mbproj.json` under `.metricbreak` in the chosen folder. The recording reader, replay engine, and breakpoint evaluation do not require that folder. A one-off CSV stays a session until the user saves it as a project.
 
 ### Architectural boundary
 
@@ -166,7 +172,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 2. **Immutable source telemetry.** Preserve original recordings and their provenance; debugging operations do not alter source data.
 3. **Industry-neutral core.** Domain-specific units, mappings, and terminology belong in configuration/profiles rather than core replay logic.
 4. **Offline-first.** Core workflows run without required cloud services or external inference APIs.
-5. **Projects are optional.** Debugging a recording should not require a project; workspaces add persistence and organization.
+5. **Projects are optional.** Opening or dropping a CSV debugs that recording without creating a project. A project is an explicit save for work that should be resumed.
 6. **Typed data remains typed.** Numeric, Boolean, and categorical values retain their semantics throughout ingestion, inspection, and rule evaluation.
 7. **Breakpoint correctness over rendering speed.** High-speed playback may throttle UI updates but must not skip breakpoint evaluation.
 8. **No LLM in the product.** Replay, breakpoints, and investigations are deterministic; the app does not call language models or expose assistant chat. See [docs/PRODUCT.md](docs/PRODUCT.md).
@@ -207,7 +213,7 @@ The diagram shows the **target separation of responsibilities**, not a claim tha
 - [x] Investigation persistence, restoration, bookmarks, chart layout in workspace (notes/description supported; project-scoped delete pending).
 - [ ] Add initial Analysis functionality: statistics, time-window inspection, and multi-channel comparison.
 - [ ] Add categorical state timelines derived from channel values.
-- [ ] Validate and complete project-free quick analysis and Save as Project.
+- [x] Open a CSV without creating a project, through a setup wizard for channels, breakpoints, and debug or run. Save as Project remains an explicit later step.
 - [ ] Test the full CSV workflow end to end, including large files, malformed data, recovery, and performance.
 
 ### After the CSV MVP
