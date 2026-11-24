@@ -12,13 +12,18 @@ import type {
   BreakpointCondition, ComparisonOperator, CreateCompositeBreakpointRequest,
   LogicalOperator,
 } from "./breakpointApi";
-import type { ChannelMetadata } from "./channelMetadata";
+import {
+  formatChannelExtent,
+  type ChannelExtent,
+  type ChannelMetadata,
+} from "./channelMetadata";
 
 type DraftCondition = { key: number; channelId: string; operator: ComparisonOperator; threshold: string; value: string };
 
 interface CompositeBreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
+  channelExtents?: Record<string, ChannelExtent>;
   seriesColors?: Record<string, string>;
   busy: boolean;
   error: string | null;
@@ -26,7 +31,15 @@ interface CompositeBreakpointDialogProps {
   onCreate: (request: CreateCompositeBreakpointRequest) => Promise<void> | void;
 }
 
-function ChannelOptionLabel({ name, color }: { name: string; color: string }) {
+function ChannelOptionLabel({
+  name,
+  color,
+  range,
+}: {
+  name: string;
+  color: string;
+  range?: string | null;
+}) {
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, width: "100%" }}>
       <Box
@@ -39,9 +52,22 @@ function ChannelOptionLabel({ name, color }: { name: string; color: string }) {
           bgcolor: color,
         }}
       />
-      <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+      <Box component="span" sx={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
         {name}
       </Box>
+      {range && (
+        <Box
+          component="span"
+          sx={{
+            flexShrink: 0,
+            color: "text.secondary",
+            fontSize: "0.75rem",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {range}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -59,7 +85,7 @@ const operators: { value: ComparisonOperator; label: string }[] = [
 ];
 
 export function CompositeBreakpointDialog({
-  open, channels, seriesColors = {}, busy, error, onClose, onCreate,
+  open, channels, channelExtents = {}, seriesColors = {}, busy, error, onClose, onCreate,
 }: CompositeBreakpointDialogProps) {
   const theme = useTheme();
   const seriesColorById = useMemo(() => {
@@ -140,14 +166,16 @@ export function CompositeBreakpointDialog({
                         <ChannelOptionLabel
                           name={channel.name}
                           color={seriesColorById[channel.channelId]}
+                          range={formatChannelExtent(channelExtents[channel.channelId])}
                         />
                       );
                     }}>
                     {channels.map(channel => (
-                      <MenuItem key={channel.channelId} value={channel.channelId}>
+                      <MenuItem key={channel.channelId} value={channel.channelId} sx={{ width: "100%" }}>
                         <ChannelOptionLabel
                           name={channel.name}
                           color={seriesColorById[channel.channelId]}
+                          range={formatChannelExtent(channelExtents[channel.channelId])}
                         />
                       </MenuItem>
                     ))}
