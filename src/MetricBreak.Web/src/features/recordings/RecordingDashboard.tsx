@@ -71,6 +71,7 @@ import type { AppSection } from "../../app/AppSidebar";
 
 import { isCsvFile, recordingApi } from "./recordingApi";
 import { investigationApi } from "../investigations/investigationApi";
+import { analysisApi } from "../analysis/analysisApi";
 import { replayApi, type BreakpointStopDetails } from "./replayApi";
 import {
   breakpointApi,
@@ -84,8 +85,8 @@ import {
 } from "./breakpointApi";
 
 import type { CreateSessionResponse } from "./recordingTypes";
-import type { SessionState } from "./sessionTypes";
-import type { ChannelMetadata } from "./channelMetadata";
+import type { CurrentSample, SessionState } from "./sessionTypes";
+import type { ChannelExtent, ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
 
 interface PinnedBreakpointHit {
@@ -254,16 +255,11 @@ export function RecordingDashboard({
     currentSequence: number;
     sample: SampleRangeItem;
   } | null>(null);
-  // The sample that was current before this cursor position. Kept in state so
-  // a later render of the same sequence still has it. Playback that slides the
-  // chart window re-renders this dashboard after the cursor moves, and a ref
-  // updated in an effect was already overwritten by then.
-  const [watchComparison, setWatchComparison] = useState<{
-    sessionId: string;
-    sequence: number;
-    current: SessionState["currentSample"];
-    previous: SessionState["currentSample"] | null;
-  } | null>(null);
+  // Samples already shown, keyed by session and sequence. Stepping reuses the
+  // sample that was just on screen, so the Values list does not drop its
+  // comparison and redraw a frame later.
+  const seenSamplesRef = useRef(new Map<string, CurrentSample | SampleRangeItem>());
+  const seenSessionRef = useRef<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -344,6 +340,8 @@ export function RecordingDashboard({
   const [breakpointHit, setBreakpointHit] = useState<PinnedBreakpointHit | null>(null);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
+  const [channelExtents, setChannelExtents] = useState<Record<string, ChannelExtent>>({});
+  const channelExtentsSessionRef = useRef<string | null>(null);
 
   const channelsRef = useRef<ChannelMetadata[]>([]);
   channelsRef.current = channels;
@@ -415,35 +413,40 @@ export function RecordingDashboard({
   const watchSequence = session?.currentSample?.sequence;
   const watchSample = session?.currentSample ?? null;
 
-  if (
-    watchSessionId &&
-    watchSample &&
-    (watchComparison?.sessionId !== watchSessionId ||
-      watchComparison.sequence !== watchSample.sequence)
-  ) {
-    const stepped =
-      watchComparison?.sessionId === watchSessionId &&
-      watchComparison.current.sequence + 1 === watchSample.sequence
-        ? watchComparison.current
-        : null;
-    setWatchComparison({
-      sessionId: watchSessionId,
-      sequence: watchSample.sequence,
-      current: watchSample,
-      previous: stepped,
-    });
+  if (seenSessionRef.current !== (watchSessionId ?? null)) {
+    seenSamplesRef.current.clear();
+    seenSessionRef.current = watchSessionId ?? null;
   }
+
+  const rememberSample = (sample: CurrentSample | SampleRangeItem | null | undefined) => {
+    if (!watchSessionId || !sample) return;
+    const cache = seenSamplesRef.current;
+    const key = `${watchSessionId}:${sample.sequence}`;
+    cache.delete(key);
+    cache.set(key, sample);
+    while (cache.size > 64) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  };
+
+  rememberSample(watchSample);
+  if (previousSampleResult && previousSampleResult.sessionId === watchSessionId) {
+    rememberSample(previousSampleResult.sample);
+  }
+
+  const cachedPrevious =
+    watchSessionId && watchSequence != null && watchSequence > 0
+      ? seenSamplesRef.current.get(`${watchSessionId}:${watchSequence - 1}`) ?? null
+      : null;
 
   useEffect(() => {
     if (inspectorTab !== 2 || !watchSessionId || watchSequence == null || watchSequence <= 0) {
       return;
     }
 
-    if (
-      watchComparison?.sessionId === watchSessionId &&
-      watchComparison.sequence === watchSequence &&
-      watchComparison.previous?.sequence === watchSequence - 1
-    ) {
+    if (seenSamplesRef.current.has(`${watchSessionId}:${watchSequence - 1}`)) {
       return;
     }
 
@@ -466,7 +469,7 @@ export function RecordingDashboard({
       });
 
     return () => { cancelled = true; };
-  }, [inspectorTab, watchSessionId, watchSequence, watchComparison]);
+  }, [inspectorTab, watchSessionId, watchSequence]);
 
   useEffect(() => {
     if (!session?.recordingId || session.currentSample == null) return;
@@ -502,19 +505,11 @@ export function RecordingDashboard({
   const fetchedPreviousSample =
     previousSampleResult != null &&
     previousSampleResult.sessionId === watchSessionId &&
-    previousSampleResult.currentSequence === watchSequence
+    previousSampleResult.currentSequence === watchSequence &&
+    previousSampleResult.sample.sequence + 1 === watchSequence
       ? previousSampleResult.sample
       : null;
-  const steppedPreviousSample =
-    watchComparison != null &&
-    watchComparison.sessionId === watchSessionId &&
-    watchComparison.sequence === watchSequence &&
-    watchComparison.previous != null &&
-    session?.currentSample != null &&
-    watchComparison.previous.sequence + 1 === session.currentSample.sequence
-      ? watchComparison.previous
-      : null;
-  const previousWatchSample = fetchedPreviousSample ?? steppedPreviousSample;
+  const previousWatchSample = cachedPrevious ?? fetchedPreviousSample;
 
   useEffect(() => {
     const sessionId = session?.sessionId;
@@ -548,6 +543,55 @@ export function RecordingDashboard({
       cancelled = true;
     };
   }, [session?.sessionId]);
+
+  useEffect(() => {
+    channelExtentsSessionRef.current = null;
+    setChannelExtents({});
+  }, [session?.sessionId]);
+
+  useEffect(() => {
+    if (!breakpointDialogOpen && !compositeDialogOpen) return;
+    const sessionId = session?.sessionId;
+    const sampleCount = session?.sampleCount ?? 0;
+    if (!sessionId || sampleCount < 1) return;
+    if (channelExtentsSessionRef.current === sessionId) return;
+
+    channelExtentsSessionRef.current = sessionId;
+    let cancelled = false;
+    let settled = false;
+    void analysisApi.getWindow(sessionId, 0, sampleCount - 1)
+      .then((analysis) => {
+        if (cancelled) return;
+        settled = true;
+        const extents: Record<string, ChannelExtent> = {};
+        for (const channel of analysis.channels) {
+          if (channel.minimum == null || channel.maximum == null) continue;
+          if (!Number.isFinite(channel.minimum) || !Number.isFinite(channel.maximum)) continue;
+          extents[channel.channelId] = {
+            minimum: channel.minimum,
+            maximum: channel.maximum,
+          };
+        }
+        setChannelExtents(extents);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        settled = true;
+        setChannelExtents({});
+      });
+
+    return () => {
+      cancelled = true;
+      if (!settled && channelExtentsSessionRef.current === sessionId) {
+        channelExtentsSessionRef.current = null;
+      }
+    };
+  }, [
+    breakpointDialogOpen,
+    compositeDialogOpen,
+    session?.sessionId,
+    session?.sampleCount,
+  ]);
 
   // --------------------------------------------------
   // Recording loading
@@ -1440,7 +1484,6 @@ export function RecordingDashboard({
             noWrap
           >
             {session.sampleCount.toLocaleString()} samples
-            {seeking ? " · Seeking..." : ""}
           </Typography>
         )}
 
@@ -1469,7 +1512,7 @@ export function RecordingDashboard({
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
             disabled={
-              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
+              loading || breakpointBusy || playbackRunningRef.current || playbackBusy
             }
           >
             Refresh
@@ -1484,7 +1527,7 @@ export function RecordingDashboard({
               setInspectorTab(1);
             }}
             disabled={
-              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
+              loading || breakpointBusy || playbackRunningRef.current || playbackBusy
               || channels.length === 0
             }
           >
@@ -1498,7 +1541,7 @@ export function RecordingDashboard({
               setSaveAsProjectOpen(true);
             }}
             disabled={
-              loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy || saveAsProjectBusy
+              loading || breakpointBusy || playbackRunningRef.current || playbackBusy || saveAsProjectBusy
             }
           >
             Save as Project
@@ -1512,7 +1555,7 @@ export function RecordingDashboard({
           startIcon={<UploadFileIcon />}
           onClick={() => requestCsvWizardRef.current(null, true)}
           disabled={
-            loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
+            loading || breakpointBusy || playbackRunningRef.current || playbackBusy
           }
         >
           Import CSV
@@ -2022,7 +2065,7 @@ export function RecordingDashboard({
             channels={channels}
             selectedChannelIds={selectedChannelIds}
             seriesColors={valueSeriesColors}
-            navigationBusy={loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy}
+            navigationBusy={loading || breakpointBusy || playbackRunningRef.current || playbackBusy}
             onNextChange={(channelId) => void handleChangeNavigation(channelId, "next")}
             onPreviousChange={(channelId) => void handleChangeNavigation(channelId, "previous")}
           />
@@ -2540,6 +2583,7 @@ export function RecordingDashboard({
       <BreakpointDialog
         open={breakpointDialogOpen}
         channels={channels}
+        channelExtents={channelExtents}
         seriesColors={valueSeriesColors}
         busy={breakpointBusy}
         draft={breakpointDraft}
@@ -2558,6 +2602,7 @@ export function RecordingDashboard({
       <CompositeBreakpointDialog
         open={compositeDialogOpen}
         channels={channels}
+        channelExtents={channelExtents}
         seriesColors={valueSeriesColors}
         busy={breakpointBusy}
         error={breakpointError}

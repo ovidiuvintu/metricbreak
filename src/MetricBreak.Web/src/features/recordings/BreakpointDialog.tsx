@@ -18,7 +18,11 @@ import {
 import { useTheme } from "@mui/material/styles";
 
 import { getSeriesColor } from "../../theme/chartTheme";
-import type { ChannelMetadata } from "./channelMetadata";
+import {
+  formatChannelExtent,
+  type ChannelExtent,
+  type ChannelMetadata,
+} from "./channelMetadata";
 import type {
   ComparisonOperator,
   CreateBreakpointRequest,
@@ -41,6 +45,8 @@ export interface BreakpointDialogDraft {
 interface BreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
+  /** Recording minimum and maximum for each numeric channel. */
+  channelExtents?: Record<string, ChannelExtent>;
   /** Chart series colors keyed by channel id. Missing channels use the palette by index. */
   seriesColors?: Record<string, string>;
   busy: boolean;
@@ -69,9 +75,11 @@ function uniqueMarkerNames(entries: readonly TimelineEntry[]): string[] {
 function ChannelOptionLabel({
   name,
   color,
+  range,
 }: {
   name: string;
   color: string;
+  range?: string | null;
 }) {
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, width: "100%" }}>
@@ -85,9 +93,22 @@ function ChannelOptionLabel({
           bgcolor: color,
         }}
       />
-      <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+      <Box component="span" sx={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
         {name}
       </Box>
+      {range && (
+        <Box
+          component="span"
+          sx={{
+            flexShrink: 0,
+            color: "text.secondary",
+            fontSize: "0.75rem",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {range}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -110,6 +131,7 @@ const operators: {
 export function BreakpointDialog({
   open,
   channels,
+  channelExtents = {},
   seriesColors = {},
   busy,
   draft,
@@ -298,6 +320,7 @@ export function BreakpointDialog({
                       <ChannelOptionLabel
                         name={`${channel.name} empty`}
                         color={seriesColorById[channel.channelId]}
+                        range={formatChannelExtent(channelExtents[channel.channelId])}
                       />
                     </MenuItem>
                   ))}
@@ -333,6 +356,7 @@ export function BreakpointDialog({
                   <ChannelOptionLabel
                     name={channel.name}
                     color={seriesColorById[channel.channelId]}
+                    range={formatChannelExtent(channelExtents[channel.channelId])}
                   />
                 );
               }}
@@ -341,10 +365,12 @@ export function BreakpointDialog({
                 <MenuItem
                   key={channel.channelId}
                   value={channel.channelId}
+                  sx={{ width: "100%" }}
                 >
                   <ChannelOptionLabel
                     name={channel.name}
                     color={seriesColorById[channel.channelId]}
+                    range={formatChannelExtent(channelExtents[channel.channelId])}
                   />
                 </MenuItem>
               ))}

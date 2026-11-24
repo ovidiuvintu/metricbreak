@@ -150,7 +150,7 @@ export function ChannelList({
           {visibleChannels.length}/{channels.length}
         </Typography>
       </Box>
-      {sample && previousSample && previousSample.sequence + 1 === sample.sequence && (
+      {sample && (
         <Typography
           variant="caption"
           color="text.secondary"
@@ -249,7 +249,7 @@ export function ChannelList({
                   title={comparison === "N/A" ? "No value available" : comparison}
                   arrow
                 >
-                  <Box sx={{ lineHeight: 1.2 }}>
+                  <Box sx={{ lineHeight: 1.2, minHeight: "2.15rem" }}>
                     <Typography
                       component="span"
                       variant="caption"
@@ -258,22 +258,24 @@ export function ChannelList({
                         display: "block",
                         fontVariantNumeric: "tabular-nums",
                         color: changed ? "warning.main" : "text.primary",
-                        fontWeight: changed ? 700 : 400,
                       }}
                     >
                       {displayValue}
                     </Typography>
-                    {previousValue != null && (
-                      <Typography
-                        component="span"
-                        variant="caption"
-                        color="text.secondary"
-                        noWrap
-                        sx={{ display: "block", fontSize: "0.65rem", fontVariantNumeric: "tabular-nums" }}
-                      >
-                        was {previousValue}
-                      </Typography>
-                    )}
+                    <Typography
+                      component="span"
+                      variant="caption"
+                      color="text.secondary"
+                      noWrap
+                      sx={{
+                        display: "block",
+                        fontSize: "0.65rem",
+                        fontVariantNumeric: "tabular-nums",
+                        visibility: previousValue != null ? "visible" : "hidden",
+                      }}
+                    >
+                      {previousValue != null ? `was ${previousValue}` : "\u00a0"}
+                    </Typography>
                   </Box>
                 </Tooltip>
               </Box>
