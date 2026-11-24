@@ -1,5 +1,10 @@
 export type WorkspaceMode = "recording" | "investigation";
 
+export interface InvestigationOpenRequest {
+  investigationId: string;
+  nonce: number;
+}
+
 export interface WorkspaceContextState {
   mode: WorkspaceMode;
   sessionId: string | null;
@@ -8,6 +13,8 @@ export interface WorkspaceContextState {
   investigationId: string | null;
   investigationName: string | null;
   projectId: string | null;
+  projectName: string | null;
+  projectRootPath: string | null;
 }
 
 export const emptyWorkspaceContext = (): WorkspaceContextState => ({
@@ -18,4 +25,6 @@ export const emptyWorkspaceContext = (): WorkspaceContextState => ({
   investigationId: null,
   investigationName: null,
   projectId: null,
+  projectName: null,
+  projectRootPath: null,
 });

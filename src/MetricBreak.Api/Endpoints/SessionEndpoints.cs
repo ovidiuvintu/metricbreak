@@ -1,7 +1,9 @@
 
 using Microsoft.AspNetCore.Mvc;
 using MetricBreak.Api.Analysis;
+using MetricBreak.Api.Recordings;
 using MetricBreak.Api.Sessions;
+using MetricBreak.Ingestion.Csv;
 
 namespace MetricBreak.Api.Endpoints;
 
@@ -265,6 +267,115 @@ internal static class SessionEndpoints
             .Produces<WindowAnalysisResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound);
+
+        group.MapGet(
+            "/{sessionId:guid}/analysis/event",
+            (
+                Guid sessionId,
+                [FromQuery] long? sequence,
+                [FromQuery] int? lookback,
+                ReplaySessionManager manager) =>
+            {
+                if (!manager.TryAnalyzeEvent(
+                        sessionId,
+                        sequence,
+                        lookback ?? 10,
+                        out var analysis,
+                        out var error))
+                {
+                    return error is null
+                        ? Results.NotFound(new { Error = "Replay session not found." })
+                        : Results.BadRequest(new { Error = error });
+                }
+
+                return Results.Ok(analysis);
+            })
+            .WithName("AnalyzeSessionEvent")
+            .Produces<EventAnalysisResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
+        group.MapGet(
+            "/{sessionId:guid}/analysis/compare",
+            (
+                Guid sessionId,
+                [FromQuery] Guid recordingId,
+                ReplaySessionManager manager,
+                RecordingCatalogStore catalog,
+                CsvRecordingImporter importer) =>
+            {
+                if (recordingId == Guid.Empty)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = "A known-good recording is required."
+                    });
+                }
+
+                if (!catalog.TryGet(recordingId, out var entry) || entry is null)
+                {
+                    return Results.NotFound(new
+                    {
+                        Error = "Known-good recording was not found."
+                    });
+                }
+
+                var archivePath = catalog.GetArchiveFilePath(entry);
+                if (!File.Exists(archivePath))
+                {
+                    return Results.Conflict(new
+                    {
+                        Error = "Known-good recording archive file is missing."
+                    });
+                }
+
+                ImportedCsvRecording imported;
+                try
+                {
+                    imported = importer.Import(
+                        archivePath,
+                        entry.ReadTimestampMapping(),
+                        recordingId: entry.RecordingId);
+                }
+                catch (Exception exception) when (
+                    exception is ArgumentException or FormatException or InvalidDataException)
+                {
+                    return Results.BadRequest(new { Error = exception.Message });
+                }
+
+                if (!string.Equals(
+                        imported.Recording.Source.ContentHash,
+                        entry.SourceContentHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.Conflict(new
+                    {
+                        Error = "Archived recording content does not match catalog metadata."
+                    });
+                }
+
+                if (!manager.TryCompareRecording(
+                        sessionId,
+                        imported.Reader,
+                        imported.Channels,
+                        out var comparison,
+                        out var error))
+                {
+                    return error is null
+                        ? Results.NotFound(new { Error = "Replay session not found." })
+                        : Results.BadRequest(new { Error = error });
+                }
+
+                return Results.Ok(RecordingComparisonResponse.From(
+                    entry.RecordingId,
+                    entry.Name,
+                    comparison!));
+            })
+            .WithName("CompareSessionRecording")
+            .Produces<RecordingComparisonResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status409Conflict);
 
         // NAVIGATE TO THE NEXT / PREVIOUS CHANGE OF A SELECTED CHANNEL
         group.MapPost("/{sessionId:guid}/next-change", (

@@ -1337,4 +1337,109 @@ public sealed class ReplaySessionManager
             return true;
         }
     }
+
+    public const int MaxEventLookbackSamples = 10_000;
+
+    public bool TryAnalyzeEvent(
+        Guid sessionId,
+        long? sequence,
+        int lookbackSamples,
+        out EventAnalysisResponse? response,
+        out string? error)
+    {
+        response = null;
+        error = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (entry.Imported.Channels.Count == 0)
+            {
+                error = "Recording has no channels to analyze.";
+                return false;
+            }
+
+            if (lookbackSamples < 0 || lookbackSamples > MaxEventLookbackSamples)
+            {
+                error = $"Lookback must be between 0 and {MaxEventLookbackSamples} samples.";
+                return false;
+            }
+
+            var sampleCount = entry.Imported.Reader.SampleCount;
+            if (sampleCount == 0)
+            {
+                error = "Recording contains no samples.";
+                return false;
+            }
+
+            var eventSequence = sequence ?? entry.Controller.Position.SequenceNumber;
+            if (eventSequence < 0 || eventSequence >= sampleCount)
+            {
+                error = "Event sample is outside the recording.";
+                return false;
+            }
+
+            var registered = entry.Breakpoints.GetAllRegistered();
+            var analysis = EventAnalyzer.Analyze(
+                entry.Imported.Reader,
+                entry.Imported.Channels,
+                eventSequence,
+                lookbackSamples,
+                registered);
+            var channels = entry.Imported.Channels.ToDictionary(channel => channel.Id);
+            var labels = registered.ToDictionary(
+                item => item.Breakpoint.Id,
+                item => BreakpointDescription.Describe(item.Breakpoint, channels));
+
+            response = EventAnalysisResponse.From(analysis, labels);
+            return true;
+        }
+    }
+
+    public bool TryCompareRecording(
+        Guid sessionId,
+        ITelemetryReader referenceReader,
+        IReadOnlyList<ChannelDefinition> referenceChannels,
+        out RecordingComparison? comparison,
+        out string? error)
+    {
+        comparison = null;
+        error = null;
+
+        ArgumentNullException.ThrowIfNull(referenceReader);
+        ArgumentNullException.ThrowIfNull(referenceChannels);
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            if (entry.Imported.Reader.SampleCount == 0)
+            {
+                error = "Recording contains no samples.";
+                return false;
+            }
+
+            if (referenceReader.SampleCount == 0)
+            {
+                error = "Known-good recording contains no samples.";
+                return false;
+            }
+
+            comparison = RecordingComparer.Compare(
+                entry.Imported.Reader,
+                entry.Imported.Channels,
+                referenceReader,
+                referenceChannels);
+            return true;
+        }
+    }
 }

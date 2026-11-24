@@ -143,7 +143,16 @@ export function RecordingDashboard({
       // Keep the choice for this session when storage is unavailable.
     }
   };
-  const { context, setRecordingSession, setActiveInvestigation, clearInvestigation } = useWorkspace();
+  const {
+    context,
+    activeProject,
+    investigationRequest,
+    setRecordingSession,
+    setActiveInvestigation,
+    setActiveProject,
+    clearInvestigation,
+    refreshProjectInvestigations,
+  } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
     null,
   );
@@ -354,6 +363,38 @@ export function RecordingDashboard({
       clearTimeout(playbackTimerRef.current);
     }
   }, []);
+
+  const seenInvestigationRequestRef = useRef(0);
+  const [trackedProjectId, setTrackedProjectId] = useState(context.projectId ?? null);
+  const [sessionDropTick, setSessionDropTick] = useState(0);
+  const activeProjectId = context.projectId ?? null;
+  if (trackedProjectId !== activeProjectId) {
+    setTrackedProjectId(activeProjectId);
+    const localSessionId = session?.sessionId;
+    if (localSessionId && context.sessionId !== localSessionId) {
+      setSessionDropTick((tick) => tick + 1);
+      setPlaybackState("stopped");
+      setSession(null);
+      setChannels([]);
+      setSelectedChannelIds([]);
+      setBreakpoints([]);
+      setCompositeBreakpoints([]);
+      setAxisPins({});
+      setEffectiveRightAxisIds([]);
+      setWizardOpen(false);
+      setLoadError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (sessionDropTick === 0) return;
+    cancelLocalPlayback();
+    playbackSessionRef.current = null;
+    playbackStateRef.current = "stopped";
+    loadVersionRef.current += 1;
+    loadedSessionIdRef.current = null;
+    activeSessionIdRef.current = null;
+  }, [sessionDropTick]);
 
   // Fetch the immediately preceding *recorded* sample only when inspecting Values.
   // A cancellation flag prevents older seeks from publishing stale comparisons.
@@ -1453,11 +1494,13 @@ export function RecordingDashboard({
         projectId: project.projectId,
         uiState: resolveExportUiState(),
       });
+      setActiveProject(project, { keepSession: true });
       setActiveInvestigation({
         investigationId: exported.investigationId,
         investigationName: projectName,
         projectId: project.projectId,
       });
+      await refreshProjectInvestigations();
       saveInvestigationSelection({
         recordingName: session.recordingName,
         projectId: project.projectId,
@@ -1518,16 +1561,42 @@ export function RecordingDashboard({
     return loaded;
   };
 
+  const registerSessionInActiveProject = async () => {
+    if (!activeProject || !session) return;
+    const exported = await investigationApi.exportSession(session.sessionId, {
+      investigationId: context.investigationId,
+      name: session.recordingName,
+      projectId: activeProject.projectId,
+      uiState: resolveExportUiState(),
+    });
+    setActiveInvestigation({
+      investigationId: exported.investigationId,
+      investigationName: context.investigationName ?? session.recordingName,
+      projectId: activeProject.projectId,
+    });
+    await refreshProjectInvestigations();
+  };
+
   const closeCsvWizard = (imported: boolean) => {
     setWizardOpen(false);
     setWizardFile(null);
     setBreakpointDialogOpen(false);
     setBreakpointDraft(null);
     setCompositeDialogOpen(false);
-    if (imported) onSelectSection("recordings");
+    if (imported) {
+      void registerSessionInActiveProject().catch((error) => {
+        setLoadError(error instanceof Error ? error.message : "Unable to save this recording in the active project.");
+      });
+      onSelectSection("recordings");
+    }
   };
 
   const completeCsvWizard = async (mode: CsvWizardFinish) => {
+    try {
+      await registerSessionInActiveProject();
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to save this recording in the active project.");
+    }
     const breakpointCount = breakpoints.length + compositeBreakpoints.length;
     setWizardOpen(false);
     setWizardFile(null);
@@ -1939,6 +2008,20 @@ export function RecordingDashboard({
     }
   };
 
+  const openInvestigationRef = useRef(executeOpenInvestigation);
+  useEffect(() => {
+    openInvestigationRef.current = executeOpenInvestigation;
+  });
+
+  useEffect(() => {
+    if (!investigationRequest) return;
+    if (investigationRequest.nonce === seenInvestigationRequestRef.current) return;
+    seenInvestigationRequestRef.current = investigationRequest.nonce;
+    const projectId = activeProject?.projectId;
+    if (!projectId) return;
+    void openInvestigationRef.current(investigationRequest.investigationId, projectId);
+  }, [investigationRequest, activeProject?.projectId]);
+
   const handleOpenInvestigation = async (
     investigationId: string,
     projectId: string,
@@ -1993,6 +2076,10 @@ export function RecordingDashboard({
         session={session}
         channels={channels}
         selectedChannelIds={selectedChannelIds}
+        breakpointKey={[
+          ...breakpoints.map((item) => `${item.breakpointId}:${item.isEnabled}`),
+          ...compositeBreakpoints.map((item) => `${item.breakpointId}:${item.isEnabled}`),
+        ].join("|")}
         onInspectSample={(sequence) => {
           void handleSeek(sequence).then(() => onSelectSection("recordings"));
         }}

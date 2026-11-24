@@ -12,10 +12,24 @@ import { AppShell } from "./app/AppShell";
 import type { AppSection } from "./app/AppSidebar";
 import { readAppUrlState, writeAppUrlState } from "./app/appNavigationUrl";
 import { RecordingDashboard } from "./features/recordings/RecordingDashboard";
-import { WorkspaceProvider } from "./workspace/WorkspaceProvider";
+import { useWorkspace, WorkspaceProvider } from "./workspace/WorkspaceProvider";
 
 const THEME_STORAGE_KEY = "metricbreak-theme";
 const CHART_PLOT_CONTEXT_ATTR = "data-chart-plot";
+
+function WorkspaceUrlSync({ section }: { section: AppSection }) {
+  const { context } = useWorkspace();
+
+  useEffect(() => {
+    writeAppUrlState({
+      section,
+      projectId: context.projectId,
+      investigationId: context.investigationId,
+    });
+  }, [section, context.projectId, context.investigationId]);
+
+  return null;
+}
 
 function isChartPlotContextMenu(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest(`[${CHART_PLOT_CONTEXT_ATTR}]`));
@@ -58,7 +72,6 @@ export default function App() {
 
   const selectSection = (next: AppSection) => {
     setSection(next);
-    writeAppUrlState({ section: next });
   };
 
   const theme = useMemo(
@@ -100,6 +113,7 @@ export default function App() {
         }}
       >
         <WorkspaceProvider>
+          <WorkspaceUrlSync section={section} />
           <AppShell
             onToggleTheme={toggleTheme}
             selected={section}
@@ -114,11 +128,6 @@ export default function App() {
               onDeepLinkHandled={() => setDeepLinkInvestigation(null)}
               onInvestigationOpened={(investigationId, projectId) => {
                 setDeepLinkInvestigation({ investigationId, projectId });
-                writeAppUrlState({
-                  section: "recordings",
-                  investigationId,
-                  projectId,
-                });
               }}
             />
           </AppShell>

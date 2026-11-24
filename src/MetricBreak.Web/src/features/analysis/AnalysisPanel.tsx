@@ -21,6 +21,7 @@ import {
 import type { ChannelMetadata } from "../recordings/channelMetadata";
 import type { SessionState } from "../recordings/sessionTypes";
 import { analysisApi } from "./analysisApi";
+import { EventAnalysisSection, RecordingComparisonSection } from "./HitAnalysis";
 import type {
   ChannelCoverage,
   ChannelWindowSummary,
@@ -33,6 +34,7 @@ interface AnalysisPanelProps {
   session: SessionState | null;
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
+  breakpointKey?: string;
   onInspectSample: (sequence: number) => void;
 }
 
@@ -43,6 +45,7 @@ export function AnalysisPanel({
   session,
   channels,
   selectedChannelIds,
+  breakpointKey = "",
   onInspectSample,
 }: AnalysisPanelProps) {
   const [startInput, setStartInput] = useState("0");
@@ -180,7 +183,7 @@ export function AnalysisPanel({
       <Box sx={{ flexShrink: 0, px: { xs: 1, md: 2 }, pt: { xs: 1, md: 2 }, pb: 1 }}>
         <Typography variant="h6">Analysis</Typography>
         <Typography variant="body2" color="text.secondary">
-          Check the recording timeline first, then summarize numeric channels over a sample window.
+          Inspect the replay cursor, compare another recording, then summarize a sample window.
         </Typography>
         {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
         {loading && <CircularProgress size={24} sx={{ mt: 1 }} />}
@@ -196,6 +199,20 @@ export function AnalysisPanel({
           pb: { xs: 1, md: 2 },
         }}
       >
+      {session.sampleCount > 0 && (
+        <>
+          <EventAnalysisSection
+            session={session}
+            breakpointKey={breakpointKey}
+            onInspectSample={onInspectSample}
+          />
+          <RecordingComparisonSection
+            session={session}
+            onInspectSample={onInspectSample}
+          />
+        </>
+      )}
+
       {analysis && (
         <SamplingSection
           sampling={analysis.sampling}

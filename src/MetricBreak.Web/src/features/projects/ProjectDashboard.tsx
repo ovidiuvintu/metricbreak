@@ -19,6 +19,7 @@ import type { ProjectSummary } from "./projectTypes";
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { OpenProjectDialog } from "./OpenProjectDialog";
 import { InvestigationsHomePanel } from "../investigations/InvestigationsHomePanel";
+import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
 interface ProjectDashboardProps {
   onOpenInvestigation?: (
@@ -32,6 +33,7 @@ export function ProjectDashboard({
   onOpenInvestigation,
   openInvestigationBusy = false,
 }: ProjectDashboardProps) {
+  const { activeProject, setActiveProject } = useWorkspace();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -65,6 +67,7 @@ export function ProjectDashboard({
 
     try {
       await projectApi.closeProject(projectId);
+      if (activeProject?.projectId === projectId) setActiveProject(null);
       await refresh();
     } catch (err) {
       setError(
@@ -189,13 +192,19 @@ export function ProjectDashboard({
       <CreateProjectDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={refresh}
+        onCreated={async (project) => {
+          setActiveProject(project);
+          await refresh();
+        }}
       />
 
       <OpenProjectDialog
         open={openOpen}
         onClose={() => setOpenOpen(false)}
-        onOpened={refresh}
+        onOpened={async (project) => {
+          setActiveProject(project);
+          await refresh();
+        }}
       />
     </Stack>
   );
