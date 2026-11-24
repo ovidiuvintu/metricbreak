@@ -23,13 +23,19 @@ import type {
   ComparisonOperator,
   CreateBreakpointRequest,
   CreateMissingDataBreakpointRequest,
+  CreateTimelineBreakpointRequest,
 } from "./breakpointApi";
+import type { RecordingTimeline, TimelineEntry } from "./recordingTimelineTypes";
 
 export interface BreakpointDialogDraft {
   channelId?: string;
   operator?: ComparisonOperator;
   threshold?: number;
   caption?: string;
+  timeline?: {
+    kind: "Event" | "Stage";
+    name?: string;
+  };
 }
 
 interface BreakpointDialogProps {
@@ -39,9 +45,25 @@ interface BreakpointDialogProps {
   seriesColors?: Record<string, string>;
   busy: boolean;
   draft?: BreakpointDialogDraft | null;
+  timeline?: RecordingTimeline | null;
   onClose: () => void;
   onCreate: (request: CreateBreakpointRequest) => Promise<void>;
   onCreateMissingData: (request: CreateMissingDataBreakpointRequest) => Promise<void>;
+  onCreateTimeline: (request: CreateTimelineBreakpointRequest) => Promise<void>;
+}
+
+type BreakpointKind = "comparison" | "missing" | "timeline";
+
+function uniqueMarkerNames(entries: readonly TimelineEntry[]): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const entry of entries) {
+    const key = entry.name.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    names.push(entry.name.trim());
+  }
+  return names;
 }
 
 function ChannelOptionLabel({
@@ -91,12 +113,14 @@ export function BreakpointDialog({
   seriesColors = {},
   busy,
   draft,
+  timeline = null,
   onClose,
   onCreate,
   onCreateMissingData,
+  onCreateTimeline,
 }: BreakpointDialogProps) {
   const theme = useTheme();
-  const [kind, setKind] = useState<"comparison" | "missing">("comparison");
+  const [kind, setKind] = useState<BreakpointKind>("comparison");
   const [channelId, setChannelId] = useState("");
   const [operator, setOperator] =
     useState<ComparisonOperator>("GreaterThan");
@@ -104,10 +128,12 @@ export function BreakpointDialog({
   const [typedValue, setTypedValue] = useState("");
   const [missingSeconds, setMissingSeconds] = useState("5");
   const [missingChannelId, setMissingChannelId] = useState("recording");
+  const [markerKind, setMarkerKind] = useState<"Event" | "Stage">("Event");
+  const [markerName, setMarkerName] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setKind("comparison");
+    setKind(draft?.timeline ? "timeline" : "comparison");
     setChannelId(draft?.channelId ?? "");
     setOperator(draft?.operator ?? "GreaterThan");
     setThreshold(
@@ -118,6 +144,12 @@ export function BreakpointDialog({
     setTypedValue("");
     setMissingSeconds("5");
     setMissingChannelId("recording");
+    const events = timeline?.events ?? [];
+    const stages = timeline?.stages ?? [];
+    const preferredKind = draft?.timeline?.kind
+      ?? (events.length > 0 || stages.length === 0 ? "Event" : "Stage");
+    setMarkerKind(preferredKind);
+    setMarkerName(draft?.timeline?.name?.trim() ?? "");
   }, [open, draft]);
 
   const seriesColorById = useMemo(() => {
@@ -148,6 +180,16 @@ export function BreakpointDialog({
     (!needsThreshold || threshold.trim() !== "") &&
     Number.isFinite(numericThreshold) &&
     (!needsTypedValue || (selectedType === "Boolean" ? ["true", "false"].includes(typedValue) : typedValue.length > 0));
+  const markerEntries = markerKind === "Stage"
+    ? (timeline?.stages ?? [])
+    : (timeline?.events ?? []);
+  const markerNames = uniqueMarkerNames(markerEntries);
+  const markerNameOptions = markerName &&
+    !markerNames.some((name) => name.toLowerCase() === markerName.toLowerCase())
+    ? [markerName, ...markerNames]
+    : markerNames;
+  const validTimeline = markerEntries.length > 0;
+  const markerNoun = markerKind === "Stage" ? "stage" : "event";
 
   const handleCreate = async () => {
     if (busy) return;
@@ -157,6 +199,15 @@ export function BreakpointDialog({
       await onCreateMissingData({
         minimumSeconds: missingDuration,
         ...(missingChannelId !== "recording" ? { channelId: missingChannelId } : {}),
+      });
+      return;
+    }
+
+    if (kind === "timeline") {
+      if (!validTimeline) return;
+      await onCreateTimeline({
+        kind: markerKind,
+        ...(markerName.trim() ? { name: markerName.trim() } : {}),
       });
       return;
     }
@@ -188,13 +239,51 @@ export function BreakpointDialog({
             <Select
               label="Type"
               value={kind}
-              onChange={(event) => setKind(event.target.value as "comparison" | "missing")}
+              onChange={(event) => setKind(event.target.value as BreakpointKind)}
             >
               <MenuItem value="comparison">Value comparison</MenuItem>
               <MenuItem value="missing">Missing data</MenuItem>
+              <MenuItem value="timeline">Event or stage</MenuItem>
             </Select>
           </FormControl>
-          {kind === "missing" ? (
+          {kind === "timeline" ? (
+            <>
+              <FormControl fullWidth size="small">
+                <InputLabel>Marker</InputLabel>
+                <Select
+                  label="Marker"
+                  value={markerKind}
+                  onChange={(event) => {
+                    setMarkerKind(event.target.value as "Event" | "Stage");
+                    setMarkerName("");
+                  }}
+                >
+                  <MenuItem value="Event">Event</MenuItem>
+                  <MenuItem value="Stage">Stage</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small" disabled={!validTimeline}>
+                <InputLabel>Name</InputLabel>
+                <Select
+                  label="Name"
+                  value={markerName}
+                  onChange={(event) => setMarkerName(event.target.value)}
+                >
+                  <MenuItem value="">Any</MenuItem>
+                  {markerNameOptions.map((name) => (
+                    <MenuItem key={name} value={name}>{name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary">
+                {timeline == null
+                  ? "Events and stages load with the recording."
+                  : validTimeline
+                    ? `Stops on the sample where this ${markerNoun} is recorded. Any stops on every ${markerNoun}. A stage stops at its start, not on the samples that follow.`
+                    : `This recording has no ${markerNoun}s.`}
+              </Typography>
+            </>
+          ) : kind === "missing" ? (
             <>
               <FormControl fullWidth size="small">
                 <InputLabel>Scope</InputLabel>
@@ -306,7 +395,7 @@ export function BreakpointDialog({
         <Button
           variant="contained"
           onClick={handleCreate}
-          disabled={(kind === "missing" ? !validMissing : !valid) || busy}
+          disabled={(kind === "missing" ? !validMissing : kind === "timeline" ? !validTimeline : !valid) || busy}
         >
           Create Breakpoint
         </Button>

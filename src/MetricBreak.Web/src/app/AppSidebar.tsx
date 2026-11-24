@@ -75,6 +75,7 @@ export function AppSidebar({
   const [openOpen, setOpenOpen] = useState(false);
   const { activeProject, setActiveProject } = useWorkspace();
   const showLabels = !collapsed || mobile;
+  const workspaceLabel = activeProject?.projectName ?? "Quick session";
 
   const width = collapsed ? 72 : 240;
 
@@ -112,12 +113,12 @@ export function AppSidebar({
             disableSticky
             sx={{ bgcolor: "transparent", lineHeight: "32px", px: 1.5 }}
           >
-            {activeProject?.projectName ?? "No project"}
+            {workspaceLabel}
           </ListSubheader>
         ) : undefined}
       >
         {!activeProject && (
-          <Tooltip title={showLabels ? "" : "Select a project"} placement="right">
+          <Tooltip title={showLabels ? "" : "Open a project or use quick CSV analysis"} placement="right">
             <ListItemButton
               onClick={() => setPromptOpen(true)}
               sx={{ minHeight: 44, borderRadius: 1, justifyContent: showLabels ? "flex-start" : "center", px: 1.5, mb: 0.5 }}
@@ -128,7 +129,7 @@ export function AppSidebar({
               {showLabels && (
                 <ListItemText
                   primary="Select a project"
-                  secondary="Required for recordings"
+                  secondary="Optional for quick CSV analysis"
                   slotProps={{ primary: { sx: { fontSize: 14 } }, secondary: { sx: { fontSize: 12 } } }}
                 />
               )}
@@ -138,42 +139,39 @@ export function AppSidebar({
         {projectNavigation.map(({ id, label, icon: Icon }) => (
           <Tooltip
             key={id}
-            title={!activeProject ? `Open a project to use ${label}` : showLabels ? "" : label}
+            title={showLabels ? "" : label}
             placement="right"
           >
-            <Box component="span" sx={{ display: "block" }}>
-              <ListItemButton
-                selected={selected === id}
-                disabled={!activeProject}
-                onClick={() => {
-                  onSelect(id);
-                  if (mobile) onMobileClose();
-                }}
-                sx={{
-                  minHeight: 44,
-                  borderRadius: 1,
-                  justifyContent: showLabels ? "flex-start" : "center",
-                  px: 1.5,
-                  mb: 0.5,
-                  "&.Mui-selected": {
-                    bgcolor: "primary.main",
-                    color: "primary.contrastText",
-                    "&:hover": { bgcolor: "primary.main" },
-                    "& .MuiListItemIcon-root": { color: "inherit" },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: showLabels ? 38 : 0, color: "inherit" }}>
-                  <Icon fontSize="small" />
-                </ListItemIcon>
-                {showLabels && (
-                  <ListItemText
-                    primary={label}
-                    slotProps={{ primary: { sx: { fontSize: 14, fontWeight: selected === id ? 600 : 400 } } }}
-                  />
-                )}
-              </ListItemButton>
-            </Box>
+            <ListItemButton
+              selected={selected === id}
+              onClick={() => {
+                onSelect(id);
+                if (mobile) onMobileClose();
+              }}
+              sx={{
+                minHeight: 44,
+                borderRadius: 1,
+                justifyContent: showLabels ? "flex-start" : "center",
+                px: 1.5,
+                mb: 0.5,
+                "&.Mui-selected": {
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                  "&:hover": { bgcolor: "primary.main" },
+                  "& .MuiListItemIcon-root": { color: "inherit" },
+                },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: showLabels ? 38 : 0, color: "inherit" }}>
+                <Icon fontSize="small" />
+              </ListItemIcon>
+              {showLabels && (
+                <ListItemText
+                  primary={label}
+                  slotProps={{ primary: { sx: { fontSize: 14, fontWeight: selected === id ? 600 : 400 } } }}
+                />
+              )}
+            </ListItemButton>
           </Tooltip>
         ))}
       </List>
@@ -221,7 +219,7 @@ export function AppSidebar({
         <DialogTitle>Select a project</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            Recordings, investigations, and analysis stay inside the active project.
+            Quick CSV analysis works without a project. Create or open a project when you want to save and organize ongoing work.
           </Typography>
         </DialogContent>
         <DialogActions>

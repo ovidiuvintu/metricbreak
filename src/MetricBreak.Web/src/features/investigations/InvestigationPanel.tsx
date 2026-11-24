@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     Alert,
     Box,
@@ -37,7 +37,7 @@ import {
     saveInvestigationSelection,
 } from "./investigationSelectionStorage";
 import { tryQuickBookmark } from "./quickBookmark";
-import type { InvestigationUiState } from "./investigationTypes";
+import type { InvestigationHit, InvestigationUiState } from "./investigationTypes";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 
 interface InvestigationPanelProps {
@@ -62,6 +62,11 @@ interface InvestigationPanelProps {
         investigationId: string,
         projectId: string,
     ) => Promise<void>;
+    breakpointHit?: InvestigationHit | null;
+    ensureInvestigation?: () => Promise<{
+        investigationId: string;
+        projectId: string | null;
+    } | null>;
 }
 
 export function InvestigationPanel({
@@ -80,8 +85,11 @@ export function InvestigationPanel({
     isUiStateDirty,
     onUiStateBaselineSaved,
     onOpenInvestigation,
+    breakpointHit = null,
+    ensureInvestigation,
 }: InvestigationPanelProps) {
-    const { setActiveInvestigation } = useWorkspace();
+    const { context, setActiveInvestigation } = useWorkspace();
+    const appliedContextInvestigation = useRef<string | null>(null);
     const [projects, setProjects] = useState<ProjectSummary[]>([]);
     const [projectId, setProjectId] = useState("");
     const [investigationName, setInvestigationName] = useState("");
@@ -242,6 +250,15 @@ export function InvestigationPanel({
     }, [loadProjects]);
 
     useEffect(() => {
+        if (!context.investigationId) return;
+        if (appliedContextInvestigation.current === context.investigationId) return;
+        appliedContextInvestigation.current = context.investigationId;
+        setInvestigationId(context.investigationId);
+        if (context.investigationName) setInvestigationName(context.investigationName);
+        if (context.projectId) setProjectId(context.projectId);
+    }, [context.investigationId, context.investigationName, context.projectId]);
+
+    useEffect(() => {
         if (!recordingName) return;
         const saved = loadInvestigationSelection(recordingName);
         if (saved) {
@@ -289,6 +306,7 @@ export function InvestigationPanel({
                 description: investigationDescription.trim() || null,
                 projectId: projectId || null,
                 uiState,
+                breakpointHit,
             });
             setInvestigationId(response.investigationId);
             setInvestigationName(name);
@@ -331,6 +349,7 @@ export function InvestigationPanel({
                 projectId,
                 sampleSequence: currentSequence,
                 timestampNanoseconds: currentTimestampNanoseconds,
+                ensureInvestigation,
             });
 
             if (!result.ok) {

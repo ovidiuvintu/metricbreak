@@ -154,6 +154,11 @@ export function BreakpointHitTimeline({
   const breakpointLabels = useMemo(() => {
     const map = new Map<string, string>();
     for (const bp of breakpoints) {
+      if (bp.operator === "TimelineEvent" || bp.operator === "TimelineStage") {
+        const kind = bp.operator === "TimelineStage" ? "Stage" : "Event";
+        map.set(bp.breakpointId, `${kind} · ${bp.value?.trim() || "Any"}`);
+        continue;
+      }
       if (bp.operator === "MissingLongerThan") {
         const scope = isRecordingGap(bp.channelId)
           ? "Recording"

@@ -20,4 +20,6 @@ public sealed record InvestigationChartViewportSnapshot(
 public sealed record InvestigationUiStateSnapshot(
     IReadOnlyList<string> SelectedChannelIds,
     IReadOnlyList<string> RightAxisChannelIds,
-    InvestigationChartViewportSnapshot? ChartViewport);
+    InvestigationChartViewportSnapshot? ChartViewport,
+    IReadOnlyList<string>? SelectedChannelNames = null,
+    IReadOnlyList<string>? RightAxisChannelNames = null);

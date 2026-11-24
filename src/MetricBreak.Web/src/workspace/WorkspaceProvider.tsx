@@ -20,6 +20,7 @@ import {
   type WorkspaceContextState,
   type WorkspaceMode,
 } from "./workspaceTypes";
+import { loadLastInvestigation, saveLastInvestigation } from "../features/investigations/investigationResumeStorage";
 import { loadWorkspaceContext, saveWorkspaceContext } from "./workspaceStorage";
 
 interface SetActiveProjectOptions {
@@ -109,13 +110,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       investigationName: string | null;
       projectId: string | null;
     }) => {
-      commit((previous) => ({
-        ...previous,
-        mode: "investigation",
-        investigationId: params.investigationId,
-        investigationName: params.investigationName,
-        projectId: params.projectId ?? previous.projectId,
-      }));
+      commit((previous) => {
+        const projectId = params.projectId ?? previous.projectId;
+        saveLastInvestigation({
+          investigationId: params.investigationId,
+          projectId: projectId ?? "",
+          projectRootPath: previous.projectRootPath,
+        });
+        return {
+          ...previous,
+          mode: "investigation",
+          investigationId: params.investigationId,
+          investigationName: params.investigationName,
+          projectId,
+        };
+      });
     },
     [commit],
   );
@@ -171,10 +180,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const requestOpenInvestigation = useCallback((investigationId: string) => {
+  const requestOpenInvestigation = useCallback((
+    investigationId: string,
+    projectId?: string | null,
+  ) => {
     requestNonce.current += 1;
     setInvestigationRequest({
       investigationId,
+      projectId: projectId ?? activeProjectRef.current?.projectId ?? "",
       nonce: requestNonce.current,
     });
   }, []);
@@ -214,51 +227,65 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const restore = async () => {
       const url = readAppUrlState();
       const stored = loadWorkspaceContext();
-      const targetId = url.projectId?.trim() || stored?.projectId || "";
-      if (!targetId) return;
+      const last = loadLastInvestigation();
+      const targetId = url.projectId?.trim()
+        || stored?.projectId
+        || last?.projectId
+        || "";
+      const urlInvestigationId = url.investigationId?.trim() || "";
 
-      let projects: ProjectSummary[];
-      try {
-        projects = await projectApi.getOpenProjects();
-      } catch {
-        return;
-      }
-      if (cancelled) return;
-
-      let project = projects.find((item) => item.projectId === targetId) ?? null;
-      const rootPath = stored?.projectRootPath?.trim();
-      if (!project && rootPath && stored?.projectId === targetId) {
+      if (targetId) {
+        let projects: ProjectSummary[];
         try {
-          project = await projectApi.openProject({ rootPath });
+          projects = await projectApi.getOpenProjects();
         } catch {
-          project = null;
+          return;
+        }
+        if (cancelled) return;
+
+        let project = projects.find((item) => item.projectId === targetId) ?? null;
+        const rootPath = (stored?.projectId === targetId
+          ? stored.projectRootPath?.trim()
+          : "")
+          || (last?.projectId === targetId ? last.projectRootPath?.trim() : "")
+          || "";
+        if (!project && rootPath) {
+          try {
+            project = await projectApi.openProject({ rootPath });
+          } catch {
+            project = null;
+          }
+        }
+        if (cancelled || !project) return;
+
+        const urlProjectId = url.projectId?.trim() || "";
+        const keepSession = Boolean(urlInvestigationId)
+          || (Boolean(urlProjectId)
+            && urlProjectId === stored?.projectId
+            && stored?.projectId === project.projectId);
+        setActiveProject(project, { keepSession });
+
+        if (urlInvestigationId && (!urlProjectId || urlProjectId === project.projectId)) {
+          setActiveInvestigation({
+            investigationId: urlInvestigationId,
+            investigationName: stored?.investigationId === urlInvestigationId
+              ? (stored.investigationName ?? null)
+              : null,
+            projectId: project.projectId,
+          });
+          return;
         }
       }
-      if (cancelled || !project) return;
 
-      const urlProjectId = url.projectId?.trim() || "";
-      const keepSession = Boolean(urlProjectId)
-        && urlProjectId === stored?.projectId
-        && stored?.projectId === project.projectId;
-      setActiveProject(project, { keepSession });
-
-      const urlInvestigationId = url.investigationId?.trim();
-      if (urlInvestigationId && (!urlProjectId || urlProjectId === project.projectId)) {
-        setActiveInvestigation({
-          investigationId: urlInvestigationId,
-          investigationName: stored?.investigationId === urlInvestigationId
-            ? (stored.investigationName ?? null)
-            : null,
-          projectId: project.projectId,
-        });
-      }
+      if (cancelled || urlInvestigationId || !last?.investigationId) return;
+      requestOpenInvestigation(last.investigationId, last.projectId || "");
     };
 
     void restore();
     return () => {
       cancelled = true;
     };
-  }, [setActiveProject, setActiveInvestigation]);
+  }, [setActiveProject, setActiveInvestigation, requestOpenInvestigation]);
 
   const value = useMemo(
     () => ({

@@ -2,6 +2,7 @@ export type WorkspaceMode = "recording" | "investigation";
 
 export interface InvestigationOpenRequest {
   investigationId: string;
+  projectId: string;
   nonce: number;
 }
 

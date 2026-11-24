@@ -35,7 +35,13 @@ interface AnalysisPanelProps {
   channels: ChannelMetadata[];
   selectedChannelIds: string[];
   breakpointKey?: string;
+  breakpointHit?: { sequence: number; label: string | null } | null;
   onInspectSample: (sequence: number) => void;
+  onBookmarkChange?: (request: {
+    sequence: number;
+    title: string;
+    annotation: string;
+  }) => void;
 }
 
 const visibleComparisons = 8;
@@ -46,7 +52,9 @@ export function AnalysisPanel({
   channels,
   selectedChannelIds,
   breakpointKey = "",
+  breakpointHit = null,
   onInspectSample,
+  onBookmarkChange,
 }: AnalysisPanelProps) {
   const [startInput, setStartInput] = useState("0");
   const [endInput, setEndInput] = useState("0");
@@ -201,10 +209,30 @@ export function AnalysisPanel({
       >
       {session.sampleCount > 0 && (
         <>
+          {breakpointHit && breakpointHit.sequence !== (session.currentSample?.sequence ?? 0) && (
+            <EventAnalysisSection
+              session={session}
+              breakpointKey={breakpointKey}
+              sequence={breakpointHit.sequence}
+              title={
+                breakpointHit.label
+                  ? `What changed before the breakpoint (${breakpointHit.label})`
+                  : "What changed before the breakpoint"
+              }
+              onInspectSample={onInspectSample}
+              onBookmarkChange={onBookmarkChange}
+            />
+          )}
           <EventAnalysisSection
             session={session}
             breakpointKey={breakpointKey}
+            title={
+              breakpointHit && breakpointHit.sequence === (session.currentSample?.sequence ?? 0)
+                ? "What changed before this breakpoint"
+                : undefined
+            }
             onInspectSample={onInspectSample}
+            onBookmarkChange={onBookmarkChange}
           />
           <RecordingComparisonSection
             session={session}

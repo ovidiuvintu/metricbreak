@@ -151,6 +151,58 @@ internal static class BreakpointEndpoints
             .Produces(StatusCodes.Status404NotFound);
 
         app.MapPost(
+            "/api/sessions/{sessionId:guid}/breakpoints/timeline",
+            (
+                Guid sessionId,
+                CreateTimelineBreakpointRequest request,
+                ReplaySessionManager manager) =>
+            {
+                try
+                {
+                    var found = manager.TryAddTimelineBreakpoint(
+                        sessionId,
+                        request.Kind,
+                        request.Name,
+                        out var breakpoint);
+
+                    if (!found)
+                        return Results.NotFound();
+
+                    if (breakpoint is null)
+                        return Results.Problem(
+                            "Breakpoint was not created.");
+
+                    var response = BreakpointResponseMapper.Map(
+                        breakpoint,
+                        isEnabled: true);
+
+                    return Results.Created(
+                        $"/api/sessions/{sessionId}/breakpoints/{response.BreakpointId}",
+                        response);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.BadRequest(new
+                    {
+                        Error = exception.Message
+                    });
+                }
+            })
+            .WithName("CreateSessionTimelineBreakpoint")
+            .WithTags(_breakpointTag)
+            .Produces<BreakpointResponse>(
+                StatusCodes.Status201Created)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound);
+
+        app.MapPost(
             "/api/sessions/{sessionId:guid}/breakpoints/composite",
             (
                 Guid sessionId,

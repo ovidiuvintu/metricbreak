@@ -14,6 +14,9 @@ internal static class BreakpointDescription
         {
             ConditionalBreakpoint conditional => DescribeConditional(conditional, channels),
             MissingDataBreakpoint missing => DescribeMissing(missing, channels),
+            TimelineBreakpoint timeline => timeline.Kind == TimelineMarkerKind.Stage
+                ? $"Stage · {timeline.Name ?? "Any"}"
+                : $"Event · {timeline.Name ?? "Any"}",
             CompositeBreakpoint composite => string.Join(
                 composite.LogicalOperator == LogicalOperator.And ? " AND " : " OR ",
                 composite.Conditions.Select(condition => DescribeCondition(condition, channels))),

@@ -5,4 +5,5 @@ public sealed record ExportInvestigationRequest(
     string? Name = null,
     string? Description = null,
     Guid? ProjectId = null,
-    InvestigationUiStateSnapshot? UiState = null);
+    InvestigationUiStateSnapshot? UiState = null,
+    InvestigationHitSnapshot? BreakpointHit = null);

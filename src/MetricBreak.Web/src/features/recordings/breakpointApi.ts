@@ -1,4 +1,5 @@
 import { apiRequest } from "../../shared/api/httpClient";
+import type { BreakpointStopDetails } from "./replayApi";
 
 export type ComparisonOperator =
   | "GreaterThan"
@@ -11,7 +12,11 @@ export type ComparisonOperator =
   | "RisingEdge"
   | "FallingEdge";
 
-export type BreakpointOperator = ComparisonOperator | "MissingLongerThan";
+export type BreakpointOperator =
+  | ComparisonOperator
+  | "MissingLongerThan"
+  | "TimelineEvent"
+  | "TimelineStage";
 
 export const recordingGapChannelId = "00000000-0000-0000-0000-000000000000";
 
@@ -31,6 +36,11 @@ export interface CreateBreakpointRequest {
 export interface CreateMissingDataBreakpointRequest {
   minimumSeconds: number;
   channelId?: string;
+}
+
+export interface CreateTimelineBreakpointRequest {
+  kind: "Event" | "Stage";
+  name?: string;
 }
 
 export interface Breakpoint {
@@ -116,6 +126,24 @@ export const breakpointApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
+    });
+  },
+
+  createTimeline(
+    sessionId: string,
+    request: CreateTimelineBreakpointRequest,
+  ): Promise<Breakpoint> {
+    if (request.kind !== "Event" && request.kind !== "Stage") {
+      throw new Error("Timeline breakpoint kind must be Event or Stage.");
+    }
+    const name = request.name?.trim();
+    return apiRequest<Breakpoint>(`${sessionPath(sessionId)}/timeline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: request.kind,
+        ...(name ? { name } : {}),
+      }),
     });
   },
 
@@ -205,6 +233,6 @@ export interface BreakpointRunResponse {
   hitBreakpoint: boolean;
   reachedEndOfRecording: boolean;
   reachedStartOfRecording?: boolean;
-  stop: unknown | null;
+  stop: BreakpointStopDetails | null;
   session: import("./sessionTypes").SessionState;
 }

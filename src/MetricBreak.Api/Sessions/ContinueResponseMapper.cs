@@ -21,6 +21,21 @@ public static class ContinueResponseMapper
     private static BreakpointHitResponse MapHit(
         BreakpointHit hit)
     {
+        if (hit.IsTimeline)
+        {
+            return new BreakpointHitResponse(
+                BreakpointId: hit.BreakpointId,
+                ChannelId: Guid.Empty,
+                ObservedValue: 0,
+                Operator: hit.MarkerKind == TimelineMarkerKind.Stage
+                    ? TimelineBreakpoint.StageOperatorName
+                    : TimelineBreakpoint.EventOperatorName,
+                Threshold: 0)
+            {
+                ObservedText = hit.MarkerName,
+            };
+        }
+
         if (hit.IsMissingData)
         {
             return new BreakpointHitResponse(
