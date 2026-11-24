@@ -102,6 +102,46 @@ The initial analysis surface currently includes:
 
 Analysis remains an area for expansion. The most valuable next steps are event-centered before/after analysis, state-transition timelines, and comparison of a failing recording with a known-good recording.
 
+### Multi-file triage
+
+The next required MVP capability is triaging a collection of CSV recordings before opening one for detailed replay. The intended workflow is:
+
+```text
+Select files or a folder
+    ↓
+Scan recording metadata
+    ↓
+Apply deterministic triage rules
+    ↓
+Filter and prioritize recordings
+    ↓
+Open one recording at the first relevant match
+    ↓
+Investigate and save evidence
+```
+
+MetricBreak should not attempt to replay every file simultaneously in the first version. Instead, it should catalog and scan multiple files, then create a detailed replay session only for the selected recording.
+
+The triage catalog should provide:
+
+- File name, path, size, timestamp range, and sample count.
+- Channel names and inferred types.
+- Missing-data and timestamp-quality information.
+- Breakpoint or rule match counts and first-match timestamps.
+- Status such as `Unreviewed`, `Interesting`, `Needs investigation`, `Reviewed`, or `Excluded`.
+- Priority, reason, and user notes.
+- Direct navigation from a match to the selected recording and sample.
+
+Initial rules should reuse the existing deterministic breakpoint semantics:
+
+- Numeric thresholds and edge conditions.
+- Boolean and categorical states or changes.
+- Missing-data duration and timestamp gaps.
+- Required or missing channels.
+- Recording duration, sample count, and basic data-quality checks.
+
+Catalog results should retain file identity, last-write information, rule-set version, scan time, and parser version. If a source file changes, its previous triage result should become stale rather than being silently reused.
+
 ## MVP assessment
 
 MetricBreak is closest to a **CSV-based technical MVP**, not a finished production product.
@@ -112,11 +152,12 @@ MetricBreak is closest to a **CSV-based technical MVP**, not a finished producti
 | CSV investigation workflow | Mostly implemented |
 | Investigation persistence | Implemented foundation; further hardening needed |
 | Analysis | Initial functionality implemented; event-centered analysis remains |
+| Multi-file CSV triage | Required MVP capability; not yet implemented |
 | Browser and end-to-end validation | Incomplete |
 | Large-file and performance validation | Incomplete |
 | Packaging and installation | Not yet a polished release experience |
 
-Before calling the CSV MVP complete, the project needs to prove the full workflow with browser tests, malformed-input recovery, large-file behavior, and investigation save/reopen scenarios.
+Before calling the CSV MVP complete, the project needs to prove the full workflow with browser tests, multi-file triage, malformed-input recovery, large-file behavior, and investigation save/reopen scenarios.
 
 ## Intended first users
 
@@ -160,6 +201,11 @@ These products validate that the problem exists. MetricBreak needs to win on inv
 - [x] Quick CSV workflow without requiring a project.
 - [x] Investigation persistence foundation, bookmarks, notes, and layout restoration.
 - [x] Initial statistics, sampling-health, and channel comparison analysis.
+- [ ] Catalog multiple CSV files or a folder and scan their metadata.
+- [ ] Apply deterministic triage rules across the catalog.
+- [ ] Filter and prioritize triage results by status, priority, rule, and data quality.
+- [ ] Open a selected recording directly at its first relevant match.
+- [ ] Persist catalog identity, scan metadata, rule-set version, and stale-file state.
 - [ ] Browser end-to-end coverage for the complete CSV workflow.
 - [ ] Malformed CSV, encoding, mixed-type, recovery, and cancellation handling.
 - [ ] Large-file performance and memory validation with explicit targets.
