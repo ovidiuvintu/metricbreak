@@ -283,6 +283,8 @@ interface RecordingChartProps {
   onBreakpointTimelineHit?: (sampleSequence: number, breakpointId: string) => void;
   /** While playing, the loaded window slides with the cursor. Zoom stays available. */
   playbackState?: "stopped" | "playing" | "paused";
+  /** When false, playback stays on fixed pages and Previous/Next stay available. */
+  slidingWindow?: boolean;
 }
 
 type HoverDetails = {
@@ -776,6 +778,7 @@ export function RecordingChart({
   breakpointHitsRefreshKey = 0,
   onBreakpointTimelineHit,
   playbackState = "stopped",
+  slidingWindow = true,
 }: RecordingChartProps) {
   const theme = useTheme();
 
@@ -820,7 +823,11 @@ export function RecordingChart({
   );
   const hasRightAxis = selectedChannelIds.some((id) => rightAxisSet.has(id));
 
+  const publishedRightAxisKeyRef = useRef("");
   useEffect(() => {
+    const key = `${sessionId}\0${effectiveRightIds.join("\0")}`;
+    if (key === publishedRightAxisKeyRef.current) return;
+    publishedRightAxisKeyRef.current = key;
     onEffectiveRightAxisChange?.(effectiveRightIds);
   }, [effectiveRightIds, onEffectiveRightAxisChange]);
 
@@ -1390,6 +1397,7 @@ export function RecordingChart({
     if (!sessionChanged && !sequenceChanged) return;
 
     if (
+      slidingWindow &&
       playbackState === "playing" &&
       !sessionChanged &&
       currentSequence !== null &&
@@ -1431,7 +1439,22 @@ export function RecordingChart({
 
     pendingChartViewportRef.current = { kind: "reset" };
     setPageStart(aligned);
-  }, [sessionId, currentSequence, sampleCount, previewSequence, playbackState, pageStart, pageEnd]);
+  }, [sessionId, currentSequence, sampleCount, previewSequence, playbackState, pageStart, pageEnd, slidingWindow]);
+
+  const slidingWindowRef = useRef(slidingWindow);
+  useEffect(() => {
+    const turnedOff = slidingWindowRef.current && !slidingWindow;
+    slidingWindowRef.current = slidingWindow;
+    if (!turnedOff || currentSequence === null || sampleCount <= 0) return;
+    const aligned = pageStartForSequence(
+      Math.max(0, Math.min(currentSequence, sampleCount - 1)),
+      sampleCount,
+    );
+    if (aligned === pageStart) return;
+    manualPageRef.current = false;
+    pendingChartViewportRef.current = { kind: "reset" };
+    setPageStart(aligned);
+  }, [slidingWindow, currentSequence, sampleCount, pageStart]);
 
   // Layout effect applies prefetched data before the browser paints a new page.
   // Keep the current traces up until the overlapping window is ready.
@@ -1555,7 +1578,7 @@ export function RecordingChart({
   // Browsing another chart page must not seek or invalidate playback.
   // Keep the selected page visible until the user explicitly scrubs/seeks.
   const navigateToPage = (direction: -1 | 1) => {
-    if (playbackState === "playing") return;
+    if (playbackState === "playing" && slidingWindow) return;
     const aligned = Math.floor(pageStart / PAGE_SIZE) * PAGE_SIZE;
     const next = Math.max(0, Math.min(maxPageStart, aligned + direction * PAGE_SIZE));
     if (next === pageStart) return;
@@ -3542,11 +3565,16 @@ const handleMove = (event: { offsetX: number; offsetY: number }) => {
           </Typography>
           {pageCount > 1 && (
             <ButtonGroup size="small" variant="outlined" aria-label="Chart page navigation" sx={{ flexShrink: 0 }}>
-              <Button disabled={playbackState === "playing" || pageStart <= 0} onClick={() => navigateToPage(-1)}>
+              <Button
+                disabled={(slidingWindow && playbackState === "playing") || pageStart <= 0}
+                title={slidingWindow && playbackState === "playing" ? "Page buttons are available when the sliding window is off" : "Previous page"}
+                onClick={() => navigateToPage(-1)}
+              >
                 Previous
               </Button>
               <Button
-                disabled={playbackState === "playing" || pageStart >= maxPageStart}
+                disabled={(slidingWindow && playbackState === "playing") || pageStart >= maxPageStart}
+                title={slidingWindow && playbackState === "playing" ? "Page buttons are available when the sliding window is off" : "Next page"}
                 onClick={() => navigateToPage(1)}
               >
                 Next

@@ -18,6 +18,12 @@ export interface TimestampPreview {
   note: string | null;
 }
 
+export function isCsvFile(file: File): boolean {
+  const csvName = file.name.toLowerCase().endsWith(".csv");
+  const csvType = file.type === "text/csv" || file.type === "application/vnd.ms-excel";
+  return csvName || csvType;
+}
+
 export const TIMESTAMP_FORMATS = [
   { value: "Iso8601", label: "ISO-8601" },
   { value: "UnixEpochSeconds", label: "Unix epoch seconds" },

@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Dialog, DialogActions, DialogContent,
   DialogTitle, FormControl, IconButton, InputLabel, MenuItem,
   Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
+import { getSeriesColor } from "../../theme/chartTheme";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import type {
@@ -17,10 +19,31 @@ type DraftCondition = { key: number; channelId: string; operator: ComparisonOper
 interface CompositeBreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
+  seriesColors?: Record<string, string>;
   busy: boolean;
   error: string | null;
   onClose: () => void;
   onCreate: (request: CreateCompositeBreakpointRequest) => Promise<void> | void;
+}
+
+function ChannelOptionLabel({ name, color }: { name: string; color: string }) {
+  return (
+    <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, width: "100%" }}>
+      <Box
+        aria-hidden
+        sx={{
+          width: 8,
+          height: 8,
+          borderRadius: "50%",
+          flexShrink: 0,
+          bgcolor: color,
+        }}
+      />
+      <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {name}
+      </Box>
+    </Box>
+  );
 }
 
 const operators: { value: ComparisonOperator; label: string }[] = [
@@ -36,8 +59,17 @@ const operators: { value: ComparisonOperator; label: string }[] = [
 ];
 
 export function CompositeBreakpointDialog({
-  open, channels, busy, error, onClose, onCreate,
+  open, channels, seriesColors = {}, busy, error, onClose, onCreate,
 }: CompositeBreakpointDialogProps) {
+  const theme = useTheme();
+  const seriesColorById = useMemo(() => {
+    const colors: Record<string, string> = {};
+    channels.forEach((channel, index) => {
+      colors[channel.channelId] =
+        seriesColors[channel.channelId] ?? getSeriesColor(theme.palette.mode, index);
+    });
+    return colors;
+  }, [channels, seriesColors, theme.palette.mode]);
   const [logicalOperator, setLogicalOperator] = useState<LogicalOperator>("And");
   const [conditions, setConditions] = useState<DraftCondition[]>([]);
   const [nextKey, setNextKey] = useState(2);
@@ -100,9 +132,24 @@ export function CompositeBreakpointDialog({
                 <FormControl fullWidth size="small">
                   <InputLabel id={`channel-${c.key}`}>Channel</InputLabel>
                   <Select labelId={`channel-${c.key}`} label="Channel" value={c.channelId}
-                    onChange={event => update(c.key, { channelId: event.target.value, operator: (channels.find(ch => ch.channelId === event.target.value)?.valueType ?? "Numeric") === "Numeric" ? c.operator : "Changed" })} disabled={busy}>
+                    onChange={event => update(c.key, { channelId: event.target.value, operator: (channels.find(ch => ch.channelId === event.target.value)?.valueType ?? "Numeric") === "Numeric" ? c.operator : "Changed" })} disabled={busy}
+                    renderValue={(selected) => {
+                      const channel = channels.find((item) => item.channelId === selected);
+                      if (!channel) return "";
+                      return (
+                        <ChannelOptionLabel
+                          name={channel.name}
+                          color={seriesColorById[channel.channelId]}
+                        />
+                      );
+                    }}>
                     {channels.map(channel => (
-                      <MenuItem key={channel.channelId} value={channel.channelId}>{channel.name}</MenuItem>
+                      <MenuItem key={channel.channelId} value={channel.channelId}>
+                        <ChannelOptionLabel
+                          name={channel.name}
+                          color={seriesColorById[channel.channelId]}
+                        />
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>

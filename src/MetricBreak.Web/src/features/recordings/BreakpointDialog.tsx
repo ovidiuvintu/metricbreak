@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -15,7 +15,9 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 
+import { getSeriesColor } from "../../theme/chartTheme";
 import type { ChannelMetadata } from "./channelMetadata";
 import type {
   ComparisonOperator,
@@ -33,8 +35,8 @@ export interface BreakpointDialogDraft {
 interface BreakpointDialogProps {
   open: boolean;
   channels: ChannelMetadata[];
-  /** Channels currently plotted on the chart. */
-  displayedChannelIds?: string[];
+  /** Chart series colors keyed by channel id. Missing channels use the palette by index. */
+  seriesColors?: Record<string, string>;
   busy: boolean;
   draft?: BreakpointDialogDraft | null;
   onClose: () => void;
@@ -44,22 +46,21 @@ interface BreakpointDialogProps {
 
 function ChannelOptionLabel({
   name,
-  displayed,
+  color,
 }: {
   name: string;
-  displayed: boolean;
+  color: string;
 }) {
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, width: "100%" }}>
       <Box
         aria-hidden
-        title={displayed ? "On chart" : undefined}
         sx={{
           width: 8,
           height: 8,
           borderRadius: "50%",
           flexShrink: 0,
-          bgcolor: displayed ? "primary.main" : "transparent",
+          bgcolor: color,
         }}
       />
       <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -87,13 +88,14 @@ const operators: {
 export function BreakpointDialog({
   open,
   channels,
-  displayedChannelIds = [],
+  seriesColors = {},
   busy,
   draft,
   onClose,
   onCreate,
   onCreateMissingData,
 }: BreakpointDialogProps) {
+  const theme = useTheme();
   const [kind, setKind] = useState<"comparison" | "missing">("comparison");
   const [channelId, setChannelId] = useState("");
   const [operator, setOperator] =
@@ -118,7 +120,14 @@ export function BreakpointDialog({
     setMissingChannelId("recording");
   }, [open, draft]);
 
-  const displayedIds = new Set(displayedChannelIds);
+  const seriesColorById = useMemo(() => {
+    const colors: Record<string, string> = {};
+    channels.forEach((channel, index) => {
+      colors[channel.channelId] =
+        seriesColors[channel.channelId] ?? getSeriesColor(theme.palette.mode, index);
+    });
+    return colors;
+  }, [channels, seriesColors, theme.palette.mode]);
   const selectedType = channels.find(c => c.channelId === channelId)?.valueType ?? "Numeric";
   const allowedOperators = operators.filter(o => selectedType === "Numeric" ||
     (selectedType === "Boolean" && ["Equal", "NotEqual", "Changed", "RisingEdge", "FallingEdge"].includes(o.value)) ||
@@ -197,7 +206,10 @@ export function BreakpointDialog({
                   <MenuItem value="recording">Recording time gap</MenuItem>
                   {channels.map((channel) => (
                     <MenuItem key={channel.channelId} value={channel.channelId}>
-                      {channel.name} empty
+                      <ChannelOptionLabel
+                        name={`${channel.name} empty`}
+                        color={seriesColorById[channel.channelId]}
+                      />
                     </MenuItem>
                   ))}
                 </Select>
@@ -225,6 +237,16 @@ export function BreakpointDialog({
                 if (nextType !== "Numeric") setOperator("Changed");
                 setTypedValue("");
               }}
+              renderValue={(selected) => {
+                const channel = channels.find((item) => item.channelId === selected);
+                if (!channel) return "";
+                return (
+                  <ChannelOptionLabel
+                    name={channel.name}
+                    color={seriesColorById[channel.channelId]}
+                  />
+                );
+              }}
             >
               {channels.map((channel) => (
                 <MenuItem
@@ -233,7 +255,7 @@ export function BreakpointDialog({
                 >
                   <ChannelOptionLabel
                     name={channel.name}
-                    displayed={displayedIds.has(channel.channelId)}
+                    color={seriesColorById[channel.channelId]}
                   />
                 </MenuItem>
               ))}

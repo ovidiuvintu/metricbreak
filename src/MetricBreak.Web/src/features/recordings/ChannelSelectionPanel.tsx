@@ -13,6 +13,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { useTheme } from "@mui/material/styles";
 
 import SearchIcon from "@mui/icons-material/Search";
 import VisibilityIcon from "@mui/icons-material/Visibility";
@@ -20,6 +21,7 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 
 import type { ChannelMetadata } from "./channelMetadata";
 import type { AxisPins } from "./chartAxisAssignment";
+import { assignChartSeriesColors, getSeriesColor } from "../../theme/chartTheme";
 
 interface ChannelSelectionPanelProps {
   channels: ChannelMetadata[];
@@ -29,6 +31,8 @@ interface ChannelSelectionPanelProps {
   onSelectionChange: (ids: string[]) => void;
   onAxisPinChange?: (channelId: string, pin: "left" | "right" | "auto") => void;
   onClearAllAxisPins?: () => void;
+  /** Axis pin controls. Hidden in the CSV setup wizard. */
+  showAxisControls?: boolean;
 }
 
 export function ChannelSelectionPanel({
@@ -39,8 +43,35 @@ export function ChannelSelectionPanel({
   onSelectionChange,
   onAxisPinChange,
   onClearAllAxisPins,
+  showAxisControls = true,
 }: ChannelSelectionPanelProps) {
+  const theme = useTheme();
   const [search, setSearch] = useState("");
+
+  const seriesColorById = useMemo(() => {
+    const right = new Set(effectiveRightAxisChannelIds);
+    const selected = new Set(selectedChannelIds);
+    const inputs = channels
+      .map((channel, channelIndex) => ({ channel, channelIndex }))
+      .filter(({ channel }) => selected.has(channel.channelId))
+      .map(({ channel, channelIndex }) => ({
+        channelId: channel.channelId,
+        channelName: channel.name,
+        channelIndex,
+        yAxisIndex: (right.has(channel.channelId) ? 1 : 0) as 0 | 1,
+      }));
+    const assigned = assignChartSeriesColors(
+      theme.palette.mode,
+      inputs,
+      right.size > 0,
+    );
+    const colors: Record<string, string> = {};
+    channels.forEach((channel, index) => {
+      colors[channel.channelId] =
+        assigned.get(channel.channelId) ?? getSeriesColor(theme.palette.mode, index);
+    });
+    return colors;
+  }, [channels, selectedChannelIds, effectiveRightAxisChannelIds, theme.palette.mode]);
 
   const filteredChannels = useMemo(
     () =>
@@ -109,9 +140,12 @@ export function ChannelSelectionPanel({
             variant="caption"
             sx={{ color: "text.primary", fontWeight: 600, fontSize: "0.75rem" }}
           >
-            {selectedChannelIds.length} of {channels.length} on chart
+            {showAxisControls
+              ? `${selectedChannelIds.length} of ${channels.length} on chart`
+              : `${selectedChannelIds.length} of ${channels.length} selected`}
           </Typography>
 
+          {showAxisControls ? (
           <Tooltip title={allSelected ? "Hide all" : "Show all"}>
             <IconButton
               size="small"
@@ -130,8 +164,29 @@ export function ChannelSelectionPanel({
               )}
             </IconButton>
           </Tooltip>
+          ) : (
+            <Box sx={{ display: "flex", gap: 0.5 }}>
+              <Button
+                size="small"
+                disabled={allSelected || channels.length === 0}
+                onClick={() =>
+                  onSelectionChange(channels.map((channel) => channel.channelId))
+                }
+              >
+                Select all
+              </Button>
+              <Button
+                size="small"
+                disabled={selectedChannelIds.length === 0}
+                onClick={() => onSelectionChange([])}
+              >
+                Clear
+              </Button>
+            </Box>
+          )}
         </Box>
 
+        {showAxisControls && (
         <Box
           sx={{
             display: "flex",
@@ -185,6 +240,7 @@ export function ChannelSelectionPanel({
             </Button>
           )}
         </Box>
+        )}
       </Box>
 
       <Box
@@ -204,11 +260,13 @@ export function ChannelSelectionPanel({
           return (
             <Box
               key={channel.channelId}
+              onClick={() => toggleChannel(channel.channelId)}
               sx={{
                 display: "flex",
                 alignItems: "center",
                 minHeight: 36,
                 borderRadius: 1,
+                cursor: "pointer",
                 "&:hover": {
                   bgcolor: "action.hover",
                 },
@@ -217,7 +275,24 @@ export function ChannelSelectionPanel({
               <Checkbox
                 size="small"
                 checked={checked}
+                tabIndex={-1}
+                onClick={(event) => event.stopPropagation()}
                 onChange={() => toggleChannel(channel.channelId)}
+                slotProps={{
+                  input: { "aria-label": channel.name },
+                }}
+              />
+
+              <Box
+                aria-hidden
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  bgcolor: seriesColorById[channel.channelId],
+                  flexShrink: 0,
+                  mr: 1,
+                }}
               />
 
               <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -240,8 +315,9 @@ export function ChannelSelectionPanel({
                 )}
               </Box>
 
-              {checked && onAxisPinChange && (
+              {showAxisControls && checked && onAxisPinChange && (
                 <ToggleButtonGroup
+                  onClick={(event) => event.stopPropagation()}
                   size="small"
                   exclusive
                   value={axisPins[channel.channelId] ?? "auto"}
