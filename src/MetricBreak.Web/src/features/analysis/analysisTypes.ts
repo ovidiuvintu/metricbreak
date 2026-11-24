@@ -85,3 +85,83 @@ export interface WindowAnalysis {
   comparisons: ChannelComparison[];
   sampling: SamplingHealth;
 }
+
+export interface AnalysisReading {
+  valueType: string;
+  numericValue: number | null;
+  booleanValue: boolean | null;
+  text: string | null;
+}
+
+export interface ChannelSnapshot {
+  channelId: string;
+  name: string;
+  unit: string | null;
+  sequence: number;
+  value: AnalysisReading;
+}
+
+export interface PrecedingChange {
+  channelId: string;
+  name: string;
+  unit: string | null;
+  previousSequence: number;
+  eventSequence: number;
+  previous: AnalysisReading;
+  current: AnalysisReading;
+}
+
+export interface ChannelFirstMove {
+  channelId: string;
+  name: string;
+  unit: string | null;
+  baselineSequence: number;
+  firstChangeSequence: number;
+  baseline: AnalysisReading;
+  value: AnalysisReading;
+}
+
+export interface ConditionRun {
+  breakpointId: string;
+  label: string;
+  isEnabled: boolean;
+  matchesAtEvent: boolean;
+  startSequence: number | null;
+  endSequence: number | null;
+  sampleCount: number | null;
+  durationNanoseconds: string | null;
+}
+
+export interface EventAnalysis {
+  eventSequence: number;
+  eventTimestampNanoseconds: string;
+  lookbackStartSequence: number;
+  precedingSequence: number | null;
+  states: ChannelSnapshot[];
+  immediateChanges: PrecedingChange[];
+  firstMoves: ChannelFirstMove[];
+  conditionRuns: ConditionRun[];
+}
+
+export interface ChannelDivergence {
+  channelId: string;
+  name: string;
+  unit: string | null;
+  valueType: string;
+  comparedCount: number;
+  mismatchCount: number;
+  firstMismatchSequence: number | null;
+  maxAbsoluteDelta: number | null;
+  maxAbsoluteDeltaSequence: number | null;
+}
+
+export interface RecordingComparison {
+  referenceRecordingId: string;
+  referenceName: string;
+  subjectSampleCount: number;
+  referenceSampleCount: number;
+  comparedSampleCount: number;
+  onlyInSubject: string[];
+  onlyInReference: string[];
+  channels: ChannelDivergence[];
+}

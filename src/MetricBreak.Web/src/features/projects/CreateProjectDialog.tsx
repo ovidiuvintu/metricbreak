@@ -11,11 +11,12 @@ import {
     TextField,
 } from "@mui/material";
 import { projectApi } from "./projectApi";
+import type { ProjectSummary } from "./projectTypes";
 
 interface Props {
     open: boolean;
     onClose: () => void;
-    onCreated: () => Promise<void>;
+    onCreated: (project: ProjectSummary) => void | Promise<void>;
 }
 
 export function CreateProjectDialog({
@@ -44,14 +45,14 @@ export function CreateProjectDialog({
         setError("");
 
         try {
-            await projectApi.createProject({
+            const project = await projectApi.createProject({
                 projectName: name.trim(),
                 rootPath: rootPath.trim(),
             });
 
             setName("");
             setRootPath("");
-            await onCreated();
+            await onCreated(project);
             onClose();
         } catch (err) {
             setError(

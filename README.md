@@ -1,233 +1,285 @@
 # MetricBreak
 
-**The Time-Series Debugger**  
-*Replay. Break. Inspect.*
+**A debugger for recorded time-series telemetry**  
+*Find the event. Replay the evidence. Understand what changed before it.*
 
-MetricBreak is an offline-first, industry-independent debugger for recorded time-series telemetry. It helps engineers investigate what happened, find when conditions occurred, inspect the exact samples around an event, and preserve reproducible debugging context.
+MetricBreak helps engineers investigate long, multichannel recordings. Instead of only viewing a chart, you can define conditions, jump to matching samples, replay forward or backward, inspect related channels, and preserve the investigation.
 
-> **Project status (November 2026):** Active development. CSV ingestion with typed channel values, recording/session management, deterministic forward/reverse replay, simulation-style playback, conditional, missing-data, and composite breakpoints, a .NET API, and a React debugging interface are implemented. Investigation persistence, expanded analysis, and release hardening remain ongoing or planned. This README is not a release-readiness claim.
+> **Status:** Active development. MetricBreak is a strong technical-alpha / near-MVP foundation for CSV-based telemetry investigation. The core replay and breakpoint workflow exists, but end-to-end validation, large-file testing, packaging, and release hardening remain in progress. This is not yet a production-readiness claim.
+
+## The problem
+
+When a failure appears in recorded telemetry, engineers often need to answer questions such as:
+
+- When did pressure first cross its limit?
+- What changed immediately before the failure?
+- Was a valve `ON` when pressure spiked?
+- Did the abnormal condition persist, or was it a single sample?
+- Was a missing-data period part of the incident?
+- Can the exact evidence be saved and shared with another engineer?
+
+Traditional charts are useful for seeing trends, but they make these questions slow to answer when recordings are long and many channels interact.
+
+## The core workflow
+
+1. Import a CSV recording.
+2. Select the channels to inspect.
+3. Define a conditional, missing-data, or composite breakpoint.
+4. Run or debug the recording.
+5. Stop at a matching event.
+6. Traverse forward or backward through the recorded samples.
+7. Inspect values before and after the event.
+8. Bookmark the finding and save the investigation.
+
+Reverse traversal is not just reverse playback. Its purpose is to help answer **“when did this condition begin?”** and **“what changed before this event?”**
 
 ## Why MetricBreak?
 
-Charts show measurements over time. MetricBreak is designed to let you **debug** those measurements: navigate backward and forward, stop on meaningful conditions, inspect exact values, and investigate relationships between signals.
+MetricBreak is designed for **post-event investigation**, not live monitoring or dashboard construction.
 
-Example questions:
+Its differentiating idea is breakpoint-driven replay:
 
-- When did pressure first fall below 4,000 psi?
-- At which sample were pressure above 9,000 psi **and** flow rate below 50 bpm?
-- What happened immediately before and after a breakpoint triggered?
-- Was a valve `ON` when pressure spiked?
-- How did an abnormal recording differ from a known-good run? *(Planned comparison capability.)*
+- Find a meaningful event instead of manually searching a chart.
+- Move backward to locate the beginning of a condition.
+- Evaluate breakpoints deterministically in either direction.
+- Inspect typed values without converting states into misleading numbers.
+- Preserve the recording context and evidence for later review.
 
-MetricBreak's core remains **industry-neutral**. Industrial telemetry, vehicle diagnostics, infrastructure/SRE recordings, and scientific measurements are use cases—not hardcoded assumptions.
+The initial product is deliberately offline-first and does not require cloud services, telemetry streaming, or AI inference.
 
-## Current implementation
+## Current capabilities
 
-The following capabilities are implemented; full end-to-end validation and release hardening remain ongoing:
+### Recording and ingestion
 
-- **Typed CSV ingestion:** Import recordings with numeric, Boolean, and categorical values; preserve missing-value semantics and source sample order, including duplicate timestamps. Dropping or choosing a CSV opens a setup wizard before replay starts. The wizard asks which channels to display, then offers optional breakpoints, then debug or run. An unambiguous timestamp is used as-is. An ambiguous timestamp, or Import CSV, asks for the timestamp column and format first. Closing the wizard after the file is imported still opens the recording with the channels and breakpoints already chosen. Opening a CSV does not create a project.
-- **Recording and session management:** Create and inspect recording sessions through the ASP.NET Core API.
-- **Deterministic replay:** Seek, step forward/backward, and navigate conditional breakpoint hits in either direction.
-- **Simulation-style playback:** Play/pause, forward/reverse traversal, adjustable speed, and time-based or sample-based pacing. Breakpoint evaluation remains authoritative even when UI rendering is batched.
-- **Breakpoints:** Conditional rules on numeric, Boolean, and categorical values, missing-data rules (a recording time gap or a channel that stays empty longer than a duration), and composite `AND`/`OR` rules. Each breakpoint shows how often it matches and how long the signal stays on that side, including the longest run, without moving the replay cursor.
-- **Recording chart:** Numeric-only plotted series and legend, channel selection, paginated sample windows (up to 5,000 samples per page), zoom, and a replay-position indicator and scrub control. Missing values appear as gaps rather than invented zero readings. Each channel row and each breakpoint condition channel shows a small circle in that series color.
-- **Sample inspection:** Inspector tabs for Channels, Breakpoints, Values, and Timeline. Categorical and Boolean values remain inspectable even though they are not plotted as numeric chart series. In Values, the reading sits next to the channel name. When the value changed from the previous sample, that earlier reading is shown underneath. Stepping one sample does not blank the comparison.
-- **Chart context menu:** Right-click the plot, the current-sample label, or the replay-cursor chip to move the cursor, inspect values without seeking, bookmark the sample, add a breakpoint, or copy the sequence or timestamp. The label and the chip use the replay sequence itself, so the breakpoint lands on that sample rather than the nearest chart pixel. The chart uses a standard arrow cursor.
-- **Recording duration:** The dashboard duration counts every sample interval, including the last sample. A recording of 10,800 one-second samples lasts 3 hours. The clock from the first timestamp to the last is one interval shorter.
-- **Local project workspace:** Create and open a project when the work is worth keeping. Save as Project asks for a name and a folder on the machine running the API, then writes a `.metricbreak/project.mbproj.json` manifest and stores the current session there. Quick CSV analysis stays project-free until the user chooses that save.
-- **Automated tests:** Core domain and API tests; comprehensive browser and end-to-end validation remains a release task.
+- Typed CSV ingestion for numeric, Boolean, categorical, and missing values.
+- Timestamp selection and format handling for ambiguous CSV files.
+- Preservation of source sample order, including duplicate timestamps.
+- Explicit missing-value semantics; missing readings are not fabricated as zeroes.
+- Recording/session management through an ASP.NET Core API.
+- Sample recordings covering industrial, scientific, infrastructure, health, finance, and other telemetry-shaped data.
 
-## CSV-first MVP
+### Replay and breakpoints
 
-**CSV is the initial and reference data source.** Complete the CSV debugging workflow, investigation persistence, and reliability work before evaluating MQTT, Kafka, databases, or live streams.
+- Deterministic seek, step, and replay operations.
+- Forward and reverse traversal.
+- Play/pause with adjustable speed.
+- Timestamp-based and sample-based playback pacing.
+- Numeric threshold and edge conditions.
+- Boolean and categorical equality, inequality, and change conditions.
+- Missing-data conditions for recording gaps and prolonged empty channels.
+- Composite `AND` and `OR` breakpoints.
+- Breakpoint hit navigation and coverage information.
+- Breakpoint evaluation remains authoritative even when chart rendering is throttled.
 
-### Typed CSV channels — implemented foundation
+### Inspection and visualization
 
-| Type | Examples | Current behavior |
-| --- | --- | --- |
-| Numeric | `1200`, `45.2` | Numeric plotting, inspection, and numeric breakpoint conditions |
-| Boolean | `true`, `false` | Typed inspection and equality, inequality, and edge breakpoints; excluded from numeric plots |
-| Categorical | `ON`, `OFF`, `RUNNING` | Typed inspection and equality, inequality, and change breakpoints; excluded from numeric plots |
-| Missing | Empty CSV cell | Explicit missing value; chart gaps instead of fabricated zeros |
+- Numeric channel plotting with channel selection and series colors.
+- Paginated sample windows and chart zooming.
+- Replay cursor and scrubber.
+- Values, channels, breakpoint, and timeline inspection tabs.
+- Before/after value inspection around the current sample.
+- Imported events and stages on the recording timeline.
+- Context-menu actions for inspecting, bookmarking, copying, and adding breakpoints.
+- Boolean and categorical values remain inspectable even when they are not plotted as numeric series.
 
-Channel typing preserves the distinction between measurements and states. `ON`/`OFF` are categorical rather than silently converted to numeric values. Equality, inequality, and change breakpoints apply to Boolean and categorical channels. Numeric channels also support threshold and edge comparisons.
+### Investigations and projects
 
-### Simulation-style playback — implemented foundation
+- Quick CSV analysis without creating a project.
+- Explicit Save as Project workflow for work that should be resumed.
+- Local project manifests under `.metricbreak`.
+- Named investigations with bookmarks, notes, findings, replay position, selected channels, and chart layout.
+- Investigation restoration and URL deep links for the CSV workspace flow.
+- Local filesystem persistence with no required cloud account.
 
-- Play, pause, seek, step, and continue through recorded samples.
-- Play forward or backward with adjustable speed.
-- Use timestamp-based or sample-based playback.
-- Stop at matching conditional, missing-data, or composite breakpoints in either direction.
-- Keep breakpoint evaluation independent of throttled or batched chart updates.
+### Analysis
 
-**Playback never generates or predicts telemetry.** It traverses immutable recorded samples. The replay engine owns sample ordering and breakpoint results; playback controls handle direction, timing, and speed.
+The initial analysis surface currently includes:
 
-### Typed breakpoints
+- Window-based channel statistics.
+- Sampling-health and cadence checks.
+- Numeric channel comparisons and correlations.
+- Navigation from the analysis surface back to a sample.
 
-Boolean and categorical conditions use operators that fit the type. A composite rule can mix them with a numeric threshold:
+Analysis remains an area for expansion. The most valuable next steps are event-centered before/after analysis, state-transition timelines, and comparison of a failing recording with a known-good recording.
 
-```text
-ValveState == ON
-    AND
-Pressure > 1400
-```
+## MVP assessment
 
-The debugger does not impose numeric ordering on text values.
+MetricBreak is closest to a **CSV-based technical MVP**, not a finished production product.
 
-## Product areas
+| Area | Current assessment |
+| --- | --- |
+| Replay and breakpoint engine | Strong technical foundation |
+| CSV investigation workflow | Mostly implemented |
+| Investigation persistence | Implemented foundation; further hardening needed |
+| Analysis | Initial functionality implemented; event-centered analysis remains |
+| Browser and end-to-end validation | Incomplete |
+| Large-file and performance validation | Incomplete |
+| Packaging and installation | Not yet a polished release experience |
 
-### Recording Dashboard — execute and inspect
+Before calling the CSV MVP complete, the project needs to prove the full workflow with browser tests, malformed-input recovery, large-file behavior, and investigation save/reopen scenarios.
 
-The Recording Dashboard is the primary debugging surface. It provides recording/channel inspection, replay navigation, and breakpoint management. The interface includes playback controls, paginated numeric charts, a replay scrubber, sample-value inspection, and right-click actions on the plot and on the current-sample label. Imported CSV events and stages appear on the Timeline tab and can move the replay cursor. Breakpoint hits are marked on the chart sequence axis. A categorical state timeline derived from channel values is still planned.
+## Intended first users
 
-### Investigations — preserve debugging context
+MetricBreak is intentionally domain-neutral in its architecture, but the first product audience should be narrower:
 
-An **investigation** is a named, resumable debugging effort associated with one or more recordings. The intended workflow is to save and reopen:
+- Test and validation engineers.
+- Industrial automation and controls engineers.
+- Instrumentation and laboratory engineers.
+- Robotics and vehicle telemetry teams.
+- SRE and observability engineers investigating recorded incidents.
 
-- Recording references and source provenance.
-- Replay position and selected time window.
-- Simple and composite breakpoint definitions and enabled state.
-- Bookmarks, notes, observations, and findings.
-- Selected channels, chart layout, and other relevant inspection context.
+The strongest initial use case is a long, multichannel recording where the failure is known but the beginning and preceding cause are not.
 
-Investigation persistence and restoration are **implemented for the CSV workspace flow** (save, reopen, bookmarks, layout); project-scoped lifecycle and analysis integration remain incremental work.
+## Positioning
 
-### Analysis — examine relationships and evidence
+Recommended product description:
 
-**Analysis** examines the data rather than controlling playback. Initial planned features include:
+> **MetricBreak helps engineers find what happened immediately before a failure in recorded telemetry. Set a breakpoint, replay forward or backward, inspect related channels, and save the evidence.**
 
-- Per-channel statistics (minimum, maximum, average, and related measures).
-- Selected time-window analysis.
-- Multi-channel comparison within a recording.
-- Inspection of values before and after breakpoint hits.
-- Boolean/categorical state transitions.
-- Navigation from an analysis finding back to the recording and timestamp.
+MetricBreak should not initially position itself as a replacement for Grafana, Datadog, MATLAB, or full measurement-analysis suites. Those products solve broader or different problems. MetricBreak should focus on the investigation workflow those tools do not make central: breakpoint-driven replay of recorded data.
 
-Derived channels, automated anomaly detection, and cross-recording alignment/divergence are later capabilities. Analysis should use deterministic calculations and the same underlying recording services as the debugger, not a separate telemetry engine.
+## Similar and complementary products
 
-## Quick analysis and project workspaces
+MetricBreak overlaps with several categories, but is not a direct clone of any one product:
 
-MetricBreak is designed to work **with or without a project**, like a development environment that can open an individual source file without creating a solution.
+- **Grafana, Datadog, and Splunk:** strong observability, dashboards, search, and incident workflows; generally not centered on deterministic sample-level forward/backward replay.
+- **MATLAB/Simulink Data Inspector:** strong signal inspection and run comparison; typically more powerful but heavier for a simple CSV investigation workflow.
+- **NI DIAdem and measurement-analysis tools:** strong engineering test-data capabilities; MetricBreak aims to be lighter-weight and debugger-oriented.
+- **Jupyter, pandas, Polars, and DuckDB:** flexible and powerful analytical alternatives; MetricBreak provides a visual, no-code starting point with replay and breakpoint semantics.
 
-### Quick analysis — no project required
+These products validate that the problem exists. MetricBreak needs to win on investigation speed, simplicity, and reproducible evidence for a focused audience.
 
-Dropping a CSV, choosing a file, or using Import CSV opens the recording without creating a project. Setup walks through three steps before replay:
+## Roadmap
 
-1. **Channels.** Nothing starts selected. Click a row to choose the channels to display. Continue stays disabled until at least one channel is selected.
-2. **Breakpoints.** Optional. Add conditional, missing-data, or composite rules, or skip and add them later.
-3. **Debug or run.** Debug opens the recording paused so the cursor can be stepped. Run plays from the start and pauses when a breakpoint hits.
+### Complete the CSV MVP
 
-The same channel list shows a series-color circle beside each checkbox. The breakpoint condition Channel menu uses that same color.
+- [x] Typed CSV ingestion and recording sessions.
+- [x] Deterministic forward and reverse replay.
+- [x] Numeric, Boolean, categorical, composite, and missing-data breakpoints.
+- [x] Recording dashboard with chart and sample inspection.
+- [x] Quick CSV workflow without requiring a project.
+- [x] Investigation persistence foundation, bookmarks, notes, and layout restoration.
+- [x] Initial statistics, sampling-health, and channel comparison analysis.
+- [ ] Browser end-to-end coverage for the complete CSV workflow.
+- [ ] Malformed CSV, encoding, mixed-type, recovery, and cancellation handling.
+- [ ] Large-file performance and memory validation with explicit targets.
+- [ ] Versioned investigation schema and migration handling.
+- [ ] Polished local packaging and one-step startup.
 
-### Project workspace — organize ongoing work
+### Make investigations shareable
 
-A project is a folder for work you intend to resume. Create one with Save as Project after the session exists. Its persisted content may include:
+- [ ] Export a human-readable Markdown or HTML investigation report.
+- [ ] Include breakpoint definitions, hit timestamps, surrounding samples, notes, and source integrity metadata.
+- [ ] Add event-centered “what changed before this?” analysis.
+- [ ] Add categorical and Boolean state-transition timelines.
+- [ ] Improve portability of projects between machines.
 
-- **Recordings:** Source references, identities, and integrity metadata.
-- **Investigations:** Saved debugging state, notes, and findings.
-- **Breakpoints:** Reusable conditional and composite definitions.
-- **Bookmarks and events:** Points and intervals of interest.
-- **Comparisons:** Recording selections and alignment settings *(planned)*.
-- **External issues:** References to Jira or other trackers *(future integration)*.
-- **Reports and settings:** Exported evidence, channel mappings, and workspace configuration *(planned)*.
+### After the CSV MVP
 
-Save as Project writes `project.mbproj.json` under `.metricbreak` in the chosen folder. The recording reader, replay engine, and breakpoint evaluation do not require that folder. A one-off CSV stays a session until the user saves it as a project.
+- [ ] Compare two recordings and align their timelines.
+- [ ] Detect divergence from a known-good recording.
+- [ ] Expand data-quality diagnostics and telemetry search.
+- [ ] Evaluate Parquet, database, and other recording formats.
+- [ ] Evaluate streaming sources only after the recorded-data workflow is validated.
+- [ ] Add optional issue-tracker references and integrations.
 
-### Architectural boundary
+## Validation and launch plan
 
-The recording reader, replay engine, breakpoint evaluation, and analysis logic **must not depend on projects**. A debug session can exist independently; a project organizes references and saved investigation state. Removing a recording reference from a project must not silently delete the original source file.
+The next validation goal is not broad advertising. It is to work with 5–10 engineers from one initial segment and measure whether MetricBreak is faster than their current workflow.
+
+A useful evaluation asks whether a new user can:
+
+1. Import a recording without assistance.
+2. Define a useful condition.
+3. Find an event and traverse backward.
+4. Identify a plausible preceding change.
+5. Save and explain the evidence.
+
+Potential launch channels after this workflow is stable:
+
+- GitHub with sample recordings and a short demo.
+- Hacker News through a technical Show HN post.
+- Targeted LinkedIn outreach to test, controls, instrumentation, robotics, and observability engineers.
+- Relevant engineering communities and meetups.
+- Technical articles about recorded-telemetry investigation and deterministic replay.
+- Product Hunt after packaging and onboarding are ready.
+
+Avoid broad paid advertising until a specific audience repeatedly finds value in the product.
 
 ## Architecture
 
 ```text
-CSV Source (initially)
-        |
-        v
+CSV Source
+    |
+    v
 CSV Ingestion & Type Inference
-        |
-        v
+    |
+    v
 Recording + Typed Channel Metadata
-        |
-        v
+    |
+    v
 Telemetry Reader / Replay Engine <---- Playback Controller
-        |                                     |
-        v                                     v
-Breakpoint Evaluation                 Direction / Clock / Speed
-        |
-        v
+    |                                      |
+    v                                      v
+Breakpoint Evaluation                Direction / Clock / Speed
+    |
+    v
 ASP.NET Core API
-        |
-        v
+    |
+    v
 React / TypeScript UI
-   |           |           |
-Recording      Investigations    Analysis
-Dashboard                        (planned)
+    |              |              |
+Recording     Investigations   Analysis
+Dashboard
 ```
 
-The diagram shows the **target separation of responsibilities**, not a claim that every component is already implemented. Future data sources should adapt to the same recording and telemetry abstractions without changing the replay and breakpoint engines.
+The replay engine, recording model, breakpoint evaluation, and analysis logic are independent of projects. Projects organize references and saved investigation state; they do not own or silently delete the original recording source.
 
 ## Design principles
 
 1. **Deterministic by default.** Identical recordings, rules, and sample positions produce identical evaluations regardless of navigation direction.
-2. **Immutable source telemetry.** Preserve original recordings and their provenance; debugging operations do not alter source data.
-3. **Industry-neutral core.** Domain-specific units, mappings, and terminology belong in configuration/profiles rather than core replay logic.
-4. **Offline-first.** Core workflows run without required cloud services or external inference APIs.
-5. **Projects are optional.** Opening or dropping a CSV debugs that recording without creating a project. A project is an explicit save for work that should be resumed.
-6. **Typed data remains typed.** Numeric, Boolean, and categorical values retain their semantics throughout ingestion, inspection, and rule evaluation.
-7. **Breakpoint correctness over rendering speed.** High-speed playback may throttle UI updates but must not skip breakpoint evaluation.
-8. **No LLM in the product.** Replay, breakpoints, and investigations are deterministic; the app does not call language models or expose assistant chat. See [docs/PRODUCT.md](docs/PRODUCT.md).
-9. **Independent implementation.** MetricBreak code is designed and written independently, not copied or adapted from external codebases.
+2. **Immutable source telemetry.** Debugging operations do not alter the original recording.
+3. **Typed data remains typed.** Numeric, Boolean, categorical, and missing values retain their semantics.
+4. **Breakpoint correctness over rendering speed.** UI batching must not skip breakpoint evaluation.
+5. **Offline-first.** Core workflows do not require cloud services or external inference APIs.
+6. **Projects are optional.** A one-off CSV can be opened without creating a project.
+7. **Industry-neutral core, focused initial market.** The architecture is general, but the first user segment must be specific.
+8. **No LLM in the product.** Replay, breakpoints, and investigations are deterministic; shipped artifacts do not call language models or expose assistant chat.
 
 ## Technology
 
 - C# / .NET 10
 - ASP.NET Core API
 - React / TypeScript with Material UI and ECharts
-- Local filesystem persistence; SQLite remains a possible local metadata option, not a confirmed requirement
+- Local filesystem persistence
 - CSV as the initial import format
-- Modular, testable domain, ingestion, replay, breakpoint, API, and UI components
+- Modular domain, ingestion, replay, API, and UI components
 
-## Roadmap
+## Development setup
 
-### Implemented foundation
+### API
 
-- [x] Establish recording, channel, sample, and replay domain foundations.
-- [x] Implement typed CSV ingestion and recording sessions, including missing values.
-- [x] Implement replay seek and step operations.
-- [x] Implement forward and backward breakpoint traversal in the replay engine.
-- [x] Implement numeric conditional breakpoints.
-- [x] Implement composite `AND`/`OR` breakpoints and API integration.
-- [x] Add composite breakpoint management to the React UI.
-- [x] Establish project workspace creation/opening and local persistence foundations.
-- [x] Build the initial browser-based recording/debugging interface.
-- [x] Implement forward/reverse playback with adjustable speed and time/sample pacing.
-- [x] Expose typed channel metadata and sample values for inspection.
-- [x] Add paginated numeric-only chart plotting, missing-data gaps, replay scrubbing, and context-menu sample actions.
-- [x] Add missing-data breakpoints, breakpoint coverage, and right-click breakpoint actions on the current sample.
-- [x] Show imported CSV events and stages on the recording timeline.
-- [x] Count every sample interval in the dashboard duration.
+The API project is `src/MetricBreak.Api`.
 
-### Complete the CSV MVP
+### Web application
 
-- [x] Extend simple/composite breakpoint evaluation and UI to Boolean and categorical conditions.
-- [x] Investigation persistence, restoration, bookmarks, chart layout in workspace (notes/description supported; project-scoped delete pending).
-- [ ] Add initial Analysis functionality: statistics, time-window inspection, and multi-channel comparison.
-- [ ] Add categorical state timelines derived from channel values.
-- [x] Open a CSV without creating a project, through a setup wizard for channels, breakpoints, and debug or run. Save as Project remains an explicit later step.
-- [ ] Test the full CSV workflow end to end, including large files, malformed data, recovery, and performance.
+The web application is `src/MetricBreak.Web`.
 
-### After the CSV MVP
+```text
+cd src/MetricBreak.Web
+npm install
+npm run dev
+```
 
-- [ ] Add two-recording comparison, alignment, and divergence rules.
-- [ ] Expand telemetry search and data-quality diagnostics.
-- [ ] Evaluate other recording and streaming data sources behind stable ingestion abstractions.
-- [ ] Evaluate optional external integrations (excluding LLM inference; see [docs/PRODUCT.md](docs/PRODUCT.md)).
+### Tests
+
+Test projects are located under `tests/`. The repository includes domain and API tests covering ingestion, replay, breakpoints, investigations, and project persistence. Full browser and end-to-end validation remains a release task.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and contribution guidance.
 
 ## Contributing
 
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for setup and pull request expectations.
-
-All changes must follow **[docs/ORIGINATION.md](docs/ORIGINATION.md)** (original authorship, no pasted third-party source, vendored files documented in [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md)). Pull requests use the checklist in [.github/pull_request_template.md](.github/pull_request_template.md).
+All changes must follow [docs/ORIGINATION.md](docs/ORIGINATION.md). Pull requests should explain the problem solved, testing performed, and any impact on replay or breakpoint behavior. See [.github/pull_request_template.md](.github/pull_request_template.md).
 
 ## License
 
