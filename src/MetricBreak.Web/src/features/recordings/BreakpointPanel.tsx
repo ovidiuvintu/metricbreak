@@ -30,6 +30,7 @@ interface BreakpointPanelProps {
   onRunTo?: (breakpointId: string, direction: "forward" | "backward") => void;
   focusedBreakpointId?: string | null;
   coverage?: BreakpointCoverage[];
+  emptyMessage?: string;
 }
 
 const relationLabel: Record<BreakpointCoverageRelation, string> = {
@@ -121,6 +122,7 @@ export function BreakpointPanel({
   breakpoints, compositeBreakpoints, channels, loading, busy, error,
   onAdd, onAddComposite, onSetEnabled, onDelete, onRunTo, focusedBreakpointId,
   coverage = [],
+  emptyMessage = "No breakpoints configured. Use Add breakpoint in the toolbar, or Add here.",
 }: BreakpointPanelProps) {
   const names = new Map(channels.map(c => [c.channelId, c.name]));
   const scopeName = (channelId: string) =>
@@ -205,7 +207,7 @@ export function BreakpointPanel({
         <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}><CircularProgress size={24} /></Box>
       ) : total === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>
-          No breakpoints configured. Use Add breakpoint in the toolbar, or Add here.
+          {emptyMessage}
         </Typography>
       ) : (
         <Stack divider={<Divider flexItem />} spacing={0}>

@@ -203,8 +203,8 @@ export function RecordingDebuggerDashboard({
                 <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                     Recording Dashboard
                 </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 420 }}>
-                    Drop a CSV here to open a single-file session. Save as Project when you want to keep the work.
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 460 }}>
+                    Drop a CSV here. Setup walks through channels, breakpoints, then debug or run.
                 </Typography>
                 <Stack direction="row" spacing={1}>
                     <Button
@@ -538,7 +538,7 @@ function QuickOpenSurface({
                     }}
                 >
                     <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-                        Drop CSV to open a session
+                        Drop CSV to set up a session
                     </Typography>
                 </Box>
             )}

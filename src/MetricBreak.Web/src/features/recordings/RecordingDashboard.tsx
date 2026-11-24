@@ -33,7 +33,7 @@ import {
   RecordingChart,
   type ChartViewportReader,
 } from "./RecordingChart";
-import { ImportRecordingDialog } from "./ImportRecordingDialog";
+import { CsvOpenWizard, type CsvWizardFinish } from "./CsvOpenWizard";
 import { ReplayControls } from "./ReplayControls";
 import { BreakpointPanel } from "./BreakpointPanel";
 import { RecordingTimelinePanel } from "./RecordingTimelinePanel";
@@ -66,7 +66,7 @@ import {
 } from "./chartAxisAssignment";
 import type { AppSection } from "../../app/AppSidebar";
 
-import { recordingApi } from "./recordingApi";
+import { isCsvFile, recordingApi } from "./recordingApi";
 import { investigationApi } from "../investigations/investigationApi";
 import { replayApi } from "./replayApi";
 import {
@@ -99,6 +99,16 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+const SLIDING_WINDOW_STORAGE_KEY = "metricbreak-sliding-window";
+
+function readSlidingWindowEnabled(): boolean {
+  try {
+    return localStorage.getItem(SLIDING_WINDOW_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 interface RecordingDashboardProps {
   section: AppSection;
   onSelectSection: (section: AppSection) => void;
@@ -124,6 +134,15 @@ export function RecordingDashboard({
   themeMode = "light",
   onToggleTheme,
 }: RecordingDashboardProps) {
+  const [slidingWindow, setSlidingWindow] = useState(readSlidingWindowEnabled);
+  const updateSlidingWindow = (enabled: boolean) => {
+    setSlidingWindow(enabled);
+    try {
+      localStorage.setItem(SLIDING_WINDOW_STORAGE_KEY, String(enabled));
+    } catch {
+      // Keep the choice for this session when storage is unavailable.
+    }
+  };
   const { context, setRecordingSession, setActiveInvestigation, clearInvestigation } = useWorkspace();
   const [session, setSession] = useState<SessionState | null>(
     null,
@@ -216,12 +235,15 @@ export function RecordingDashboard({
     currentSequence: number;
     sample: SampleRangeItem;
   } | null>(null);
-  // The sample shown before the latest cursor move. A one-step update can
-  // compare against it immediately, instead of blanking the Values list
-  // while the preceding sample is fetched.
-  const heldWatchSampleRef = useRef<{
+  // The sample that was current before this cursor position. Kept in state so
+  // a later render of the same sequence still has it. Playback that slides the
+  // chart window re-renders this dashboard after the cursor moves, and a ref
+  // updated in an effect was already overwritten by then.
+  const [watchComparison, setWatchComparison] = useState<{
     sessionId: string;
-    sample: SessionState["currentSample"];
+    sequence: number;
+    current: SessionState["currentSample"];
+    previous: SessionState["currentSample"] | null;
   } | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -253,9 +275,17 @@ export function RecordingDashboard({
     string | null
   >(null);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
-  const [quickOpenBusy, setQuickOpenBusy] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardFile, setWizardFile] = useState<File | null>(null);
+  const [wizardConfirmTimestamp, setWizardConfirmTimestamp] = useState(false);
+  const [wizardSessionId, setWizardSessionId] = useState<string | null>(null);
+  const pendingWizardRef = useRef<{
+    file: File | null;
+    confirmTimestamp: boolean;
+  } | null>(null);
+  const requestCsvWizardRef = useRef<
+    (file: File | null, confirmTimestamp: boolean) => void
+  >(() => {});
   const [saveAsProjectOpen, setSaveAsProjectOpen] = useState(false);
   const [saveAsProjectBusy, setSaveAsProjectBusy] = useState(false);
   const [saveAsProjectError, setSaveAsProjectError] = useState("");
@@ -329,14 +359,37 @@ export function RecordingDashboard({
   // A cancellation flag prevents older seeks from publishing stale comparisons.
   const watchSessionId = session?.sessionId;
   const watchSequence = session?.currentSample?.sequence;
+  const watchSample = session?.currentSample ?? null;
+
+  if (
+    watchSessionId &&
+    watchSample &&
+    (watchComparison?.sessionId !== watchSessionId ||
+      watchComparison.sequence !== watchSample.sequence)
+  ) {
+    const stepped =
+      watchComparison?.sessionId === watchSessionId &&
+      watchComparison.current.sequence + 1 === watchSample.sequence
+        ? watchComparison.current
+        : null;
+    setWatchComparison({
+      sessionId: watchSessionId,
+      sequence: watchSample.sequence,
+      current: watchSample,
+      previous: stepped,
+    });
+  }
 
   useEffect(() => {
     if (inspectorTab !== 2 || !watchSessionId || watchSequence == null || watchSequence <= 0) {
       return;
     }
 
-    const held = heldWatchSampleRef.current;
-    if (held?.sessionId === watchSessionId && held.sample.sequence + 1 === watchSequence) {
+    if (
+      watchComparison?.sessionId === watchSessionId &&
+      watchComparison.sequence === watchSequence &&
+      watchComparison.previous?.sequence === watchSequence - 1
+    ) {
       return;
     }
 
@@ -359,18 +412,7 @@ export function RecordingDashboard({
       });
 
     return () => { cancelled = true; };
-  }, [inspectorTab, watchSessionId, watchSequence]);
-
-  useEffect(() => {
-    if (watchSessionId && session?.currentSample) {
-      heldWatchSampleRef.current = {
-        sessionId: watchSessionId,
-        sample: session.currentSample,
-      };
-    } else {
-      heldWatchSampleRef.current = null;
-    }
-  }, [watchSessionId, session?.currentSample]);
+  }, [inspectorTab, watchSessionId, watchSequence, watchComparison]);
 
   useEffect(() => {
     if (!session?.recordingId || session.currentSample == null) return;
@@ -409,15 +451,16 @@ export function RecordingDashboard({
     previousSampleResult.currentSequence === watchSequence
       ? previousSampleResult.sample
       : null;
-  const heldWatchSample = heldWatchSampleRef.current;
-  const heldPreviousSample =
-    heldWatchSample != null &&
-    heldWatchSample.sessionId === watchSessionId &&
+  const steppedPreviousSample =
+    watchComparison != null &&
+    watchComparison.sessionId === watchSessionId &&
+    watchComparison.sequence === watchSequence &&
+    watchComparison.previous != null &&
     session?.currentSample != null &&
-    heldWatchSample.sample.sequence + 1 === session.currentSample.sequence
-      ? heldWatchSample.sample
+    watchComparison.previous.sequence + 1 === session.currentSample.sequence
+      ? watchComparison.previous
       : null;
-  const previousWatchSample = fetchedPreviousSample ?? heldPreviousSample;
+  const previousWatchSample = fetchedPreviousSample ?? steppedPreviousSample;
 
   useEffect(() => {
     const sessionId = session?.sessionId;
@@ -458,6 +501,7 @@ export function RecordingDashboard({
 
   const loadRecording = async (
     sessionId: string,
+    options?: { selectChannels?: "default" | "none" },
   ): Promise<boolean> => {
     cancelLocalPlayback();
     playbackSessionRef.current = null;
@@ -505,6 +549,7 @@ export function RecordingDashboard({
 
       setSelectedChannelIds((current) => {
         if (!isSameSession) {
+          if (options?.selectChannels === "none") return [];
           return loadedChannels
             .slice(0, 3)
             .map((channel) => channel.channelId);
@@ -576,8 +621,6 @@ export function RecordingDashboard({
     result: CreateSessionResponse,
     destination: "dashboard" | "recordings" = "dashboard",
   ) => {
-    setDialogOpen(false);
-    setPendingImportFile(null);
     setImportSuccess(null);
 
     const loaded = await loadRecording(result.sessionId);
@@ -609,53 +652,6 @@ export function RecordingDashboard({
     requestSessionNavigation({ kind: "import", result });
   };
 
-  const closeImportDialog = () => {
-    setDialogOpen(false);
-    setPendingImportFile(null);
-  };
-
-  const quickOpenCsv = async (file: File) => {
-    const csvName = file.name.toLowerCase().endsWith(".csv");
-    const csvType = file.type === "text/csv" || file.type === "application/vnd.ms-excel";
-    if (!csvName && !csvType) {
-      setLoadError("Drop a .csv file to open a session.");
-      return;
-    }
-
-    if (quickOpenBusy || loading) return;
-
-    setQuickOpenBusy(true);
-    setLoadError(null);
-
-    try {
-      const preview = await recordingApi.previewTimestamp(file);
-      const ready = !preview.ambiguous
-        && preview.suggestedFormat.trim().length > 0
-        && Number.isInteger(preview.suggestedColumnIndex);
-      if (!ready) {
-        setPendingImportFile(file);
-        setDialogOpen(true);
-        return;
-      }
-
-      const created = await recordingApi.importCsv(file, {
-        columnIndex: preview.suggestedColumnIndex,
-        format: preview.suggestedFormat,
-      });
-      requestSessionNavigation({
-        kind: "import",
-        result: created,
-        destination: "recordings",
-      });
-    } catch (error) {
-      setPendingImportFile(file);
-      setDialogOpen(true);
-      setLoadError(errorMessage(error, "Unable to open the CSV. Confirm the timestamp column."));
-    } finally {
-      setQuickOpenBusy(false);
-    }
-  };
-
   const handleRefresh = async () => {
     if (
       !session ||
@@ -676,14 +672,14 @@ export function RecordingDashboard({
   const executeReplay = async (
     operation: (sessionId: string) => Promise<SessionState>,
     fallbackError: string,
-  ) => {
+  ): Promise<SessionState | null> => {
     if (
       !session ||
       seekInProgressRef.current ||
       breakpointInProgressRef.current ||
       loading
     ) {
-      return;
+      return null;
     }
 
     const sessionId = session.sessionId;
@@ -700,10 +696,12 @@ export function RecordingDashboard({
           ? updatedSession
           : current,
       );
+      return updatedSession;
     } catch (error) {
       if (activeSessionIdRef.current === sessionId) {
         setLoadError(errorMessage(error, fallbackError));
       }
+      return null;
     } finally {
       seekInProgressRef.current = false;
       setSeeking(false);
@@ -728,13 +726,12 @@ export function RecordingDashboard({
     );
   };
 
-  const handleReset = async () => {
-    await executeReplay(
+  const handleReset = () =>
+    executeReplay(
       async (sessionId) =>
         (await replayApi.reset(sessionId)).session,
       "Unable to reset replay.",
     );
-  };
 
   // Chart click-to-seek uses the same playback-aware transaction as dragging.
   // A running recording resumes from the selected sample; a paused or stopped
@@ -1402,7 +1399,7 @@ export function RecordingDashboard({
           size="small"
           variant="contained"
           startIcon={<UploadFileIcon />}
-          onClick={() => setDialogOpen(true)}
+          onClick={() => requestCsvWizardRef.current(null, true)}
           disabled={
             loading || seeking || breakpointBusy || playbackRunningRef.current || playbackBusy
           }
@@ -1487,6 +1484,65 @@ export function RecordingDashboard({
     );
   }, [context.investigationId, session, resolveExportUiState]);
 
+  const openCsvWizard = useCallback((file: File | null, confirmTimestamp: boolean) => {
+    setLoadError(null);
+    setWizardSessionId(null);
+    setWizardFile(file);
+    setWizardConfirmTimestamp(confirmTimestamp);
+    setWizardOpen(true);
+  }, []);
+
+  const requestCsvWizard = useCallback((file: File | null, confirmTimestamp: boolean) => {
+    if (file && !isCsvFile(file)) {
+      setLoadError("Drop a .csv file to open a session.");
+      return;
+    }
+    if (wizardOpen || loading) return;
+
+    if (isInvestigationUiDirty()) {
+      pendingWizardRef.current = { file, confirmTimestamp };
+      setSessionNavDiscardOpen(true);
+      return;
+    }
+
+    openCsvWizard(file, confirmTimestamp);
+  }, [wizardOpen, loading, isInvestigationUiDirty, openCsvWizard]);
+
+  useEffect(() => {
+    requestCsvWizardRef.current = requestCsvWizard;
+  }, [requestCsvWizard]);
+
+  const handleWizardImported = async (result: CreateSessionResponse) => {
+    const loaded = await loadRecording(result.sessionId, { selectChannels: "none" });
+    if (loaded) setWizardSessionId(result.sessionId);
+    return loaded;
+  };
+
+  const closeCsvWizard = (imported: boolean) => {
+    setWizardOpen(false);
+    setWizardFile(null);
+    setBreakpointDialogOpen(false);
+    setBreakpointDraft(null);
+    setCompositeDialogOpen(false);
+    if (imported) onSelectSection("recordings");
+  };
+
+  const completeCsvWizard = async (mode: CsvWizardFinish) => {
+    const breakpointCount = breakpoints.length + compositeBreakpoints.length;
+    setWizardOpen(false);
+    setWizardFile(null);
+    setBreakpointDialogOpen(false);
+    setBreakpointDraft(null);
+    setCompositeDialogOpen(false);
+    onSelectSection("recordings");
+    setReplayCursorVisible(true);
+    setInspectorTab(breakpointCount > 0 ? 1 : 0);
+    if (mode !== "run") return;
+
+    const reset = await handleReset();
+    if (reset) await handlePlay(reset);
+  };
+
   const registerChartViewportReader = useCallback(
     (reader: ChartViewportReader | null) => {
       chartViewportReaderRef.current = reader;
@@ -1551,6 +1607,7 @@ export function RecordingDashboard({
             }
             showCursor={replayCursorVisible}
             playbackState={playbackState}
+            slidingWindow={slidingWindow}
             currentTimestampNanoseconds={session.currentSample?.timestampNanoseconds ?? null}
             timestampOrigin={session.timestampOrigin ?? "Unix"}
             onSeek={handleSeek}
@@ -1609,7 +1666,7 @@ export function RecordingDashboard({
           <Button
             variant="outlined"
             startIcon={<UploadFileIcon />}
-            onClick={() => setDialogOpen(true)}
+            onClick={() => requestCsvWizardRef.current(null, true)}
             sx={{ mt: 1 }}
           >
             Import CSV
@@ -1954,6 +2011,8 @@ export function RecordingDashboard({
       <AppSettingsPanel
         themeMode={themeMode}
         onToggleTheme={onToggleTheme ?? (() => undefined)}
+        slidingWindow={slidingWindow}
+        onSlidingWindowChange={updateSlidingWindow}
       />
     </Box>
   );
@@ -2023,9 +2082,9 @@ export function RecordingDashboard({
       channelCount={channels.length}
       breakpoints={breakpoints}
       compositeBreakpoints={compositeBreakpoints}
-      onImport={() => setDialogOpen(true)}
-      onQuickOpenFile={(file) => void quickOpenCsv(file)}
-      quickOpenBusy={quickOpenBusy}
+      onImport={() => requestCsvWizardRef.current(null, true)}
+      onQuickOpenFile={(file) => requestCsvWizardRef.current(file, false)}
+      quickOpenBusy={wizardOpen}
       onSaveAsProject={() => {
         setSaveAsProjectError("");
         setSaveAsProjectOpen(true);
@@ -2126,7 +2185,7 @@ export function RecordingDashboard({
               >
                 <RecordingsCatalogPanel
                   busy={loading}
-                  onImport={() => setDialogOpen(true)}
+                  onImport={() => requestCsvWizardRef.current(null, true)}
                   onOpened={(result) => void handleImportSuccess(result)}
                 />
                 <InvestigationsResumeList
@@ -2141,11 +2200,32 @@ export function RecordingDashboard({
           : sectionPlaceholder}
       </Box>
 
-      <ImportRecordingDialog
-        open={dialogOpen}
-        initialFile={pendingImportFile}
-        onClose={closeImportDialog}
-        onImported={handleImportSuccess}
+      <CsvOpenWizard
+        open={wizardOpen}
+        initialFile={wizardFile}
+        confirmTimestamp={wizardConfirmTimestamp}
+        sessionReady={
+          wizardSessionId !== null
+          && session?.sessionId === wizardSessionId
+          && !loading
+        }
+        channels={channels}
+        selectedChannelIds={selectedChannelIds}
+        onSelectionChange={handleChannelSelectionChange}
+        breakpoints={breakpoints}
+        compositeBreakpoints={compositeBreakpoints}
+        breakpointBusy={breakpointBusy}
+        breakpointError={breakpointError}
+        onAddBreakpoint={() => {
+          setBreakpointDraft(null);
+          setBreakpointDialogOpen(true);
+        }}
+        onAddComposite={() => setCompositeDialogOpen(true)}
+        onSetBreakpointEnabled={handleSetBreakpointEnabled}
+        onDeleteBreakpoint={handleDeleteBreakpoint}
+        onImported={handleWizardImported}
+        onClose={closeCsvWizard}
+        onFinish={(mode) => void completeCsvWizard(mode)}
       />
 
       <SaveAsProjectDialog
@@ -2162,7 +2242,7 @@ export function RecordingDashboard({
       <BreakpointDialog
         open={breakpointDialogOpen}
         channels={channels}
-        displayedChannelIds={selectedChannelIds}
+        seriesColors={valueSeriesColors}
         busy={breakpointBusy}
         draft={breakpointDraft}
         onClose={() => {
@@ -2178,6 +2258,7 @@ export function RecordingDashboard({
       <CompositeBreakpointDialog
         open={compositeDialogOpen}
         channels={channels}
+        seriesColors={valueSeriesColors}
         busy={breakpointBusy}
         error={breakpointError}
         onClose={() => {
@@ -2191,6 +2272,7 @@ export function RecordingDashboard({
         onClose={() => {
           setSessionNavDiscardOpen(false);
           pendingSessionNavRef.current = null;
+          pendingWizardRef.current = null;
         }}
       >
         <DialogTitle>Discard unsaved chart layout?</DialogTitle>
@@ -2205,6 +2287,7 @@ export function RecordingDashboard({
             onClick={() => {
               setSessionNavDiscardOpen(false);
               pendingSessionNavRef.current = null;
+              pendingWizardRef.current = null;
             }}
           >
             Cancel
@@ -2213,10 +2296,15 @@ export function RecordingDashboard({
             color="warning"
             onClick={() => {
               const pending = pendingSessionNavRef.current;
+              const pendingWizard = pendingWizardRef.current;
               setSessionNavDiscardOpen(false);
               pendingSessionNavRef.current = null;
+              pendingWizardRef.current = null;
               if (pending) {
                 void runSessionNavigation(pending);
+              }
+              if (pendingWizard) {
+                openCsvWizard(pendingWizard.file, pendingWizard.confirmTimestamp);
               }
             }}
           >
