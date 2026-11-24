@@ -458,7 +458,7 @@ export function CsvOpenWizard({
               {" "}
               {breakpointCount === 0
                 ? "No breakpoints yet, so a run plays straight through."
-                : `${breakpointCount} ${breakpointCount === 1 ? "breakpoint" : "breakpoints"} will pause a run.`}
+                : `${breakpointCount} ${breakpointCount === 1 ? "breakpoint" : "breakpoints"} will stop the run at the first hit.`}
             </Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <Button
@@ -507,7 +507,9 @@ export function CsvOpenWizard({
                     </Typography>
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    Play from the start. Playback pauses when a breakpoint hits.
+                    {breakpointCount === 0
+                      ? "Play from the start."
+                      : "Jump from the start to the first breakpoint hit."}
                   </Typography>
                 </Stack>
               </Button>

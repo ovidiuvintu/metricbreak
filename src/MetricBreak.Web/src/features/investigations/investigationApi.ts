@@ -107,8 +107,17 @@ export const investigationApi = {
                 dataZoomStartPercent: number;
                 dataZoomEndPercent: number;
             } | null;
+            selectedChannelNames?: string[] | null;
+            rightAxisChannelNames?: string[] | null;
         } | null;
-        session: { sequenceNumber: number };
+        session: {
+            sequenceNumber: number;
+            breakpointHit?: {
+                sequenceNumber: number;
+                breakpointId?: string | null;
+                label?: string | null;
+            } | null;
+        };
     }> {
         const query = projectId?.trim()
             ? `?projectId=${encodeURIComponent(projectId.trim())}`

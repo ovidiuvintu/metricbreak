@@ -32,7 +32,17 @@ public sealed record TimestampMappingSnapshot(
 public sealed record SessionExportSnapshot(
     long SequenceNumber,
     string ExecutionState,
-    string PauseReason);
+    string PauseReason,
+    InvestigationHitSnapshot? BreakpointHit = null);
+
+/// <summary>
+/// The breakpoint stop this investigation is about. The replay cursor may
+/// have moved backward from this sample while the finding was inspected.
+/// </summary>
+public sealed record InvestigationHitSnapshot(
+    long SequenceNumber,
+    Guid? BreakpointId,
+    string? Label);
 
 public sealed record BreakpointExportSnapshot(
     Guid BreakpointId,

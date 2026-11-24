@@ -56,10 +56,13 @@ import { projectApi } from "../projects/projectApi";
 import { AnalysisPanel } from "../analysis/AnalysisPanel";
 import type { PaletteMode } from "@mui/material";
 import { formatOpenInvestigationError } from "../investigations/formatOpenInvestigationError";
+import { ApiError } from "../../shared/api/httpClient";
+import { clearLastInvestigation, loadLastInvestigation } from "../investigations/investigationResumeStorage";
+import { resolveSavedChannelIds } from "../investigations/resolveSavedChannelIds";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
 import { saveResumeSequence, getResumeSequence } from "../dashboard/replayResumeStorage";
 import { loadInvestigationSelection } from "../investigations/investigationSelectionStorage";
-import type { AxisPin, InvestigationUiState } from "../investigations/investigationTypes";
+import type { AxisPin, InvestigationHit, InvestigationUiState } from "../investigations/investigationTypes";
 import {
   axisPinsFromLegacyRightAxis,
   type AxisPins,
@@ -68,7 +71,7 @@ import type { AppSection } from "../../app/AppSidebar";
 
 import { isCsvFile, recordingApi } from "./recordingApi";
 import { investigationApi } from "../investigations/investigationApi";
-import { replayApi } from "./replayApi";
+import { replayApi, type BreakpointStopDetails } from "./replayApi";
 import {
   breakpointApi,
   type Breakpoint,
@@ -77,12 +80,19 @@ import {
   type CreateBreakpointRequest,
   type CreateCompositeBreakpointRequest,
   type CreateMissingDataBreakpointRequest,
+  type CreateTimelineBreakpointRequest,
 } from "./breakpointApi";
 
 import type { CreateSessionResponse } from "./recordingTypes";
 import type { SessionState } from "./sessionTypes";
 import type { ChannelMetadata } from "./channelMetadata";
 import type { SampleRangeItem } from "./sampleTypes";
+
+interface PinnedBreakpointHit {
+  sequence: number;
+  breakpointId: string | null;
+  label: string | null;
+}
 
 type InspectorTab = 0 | 1 | 2 | 3;
 type PlaybackState = "stopped" | "playing" | "paused";
@@ -331,9 +341,12 @@ export function RecordingDashboard({
       chartViewport: uiState.chartViewport ?? null,
     });
   const [breakpointHitsRefreshKey, setBreakpointHitsRefreshKey] = useState(0);
+  const [breakpointHit, setBreakpointHit] = useState<PinnedBreakpointHit | null>(null);
 
   const [compositeDialogOpen, setCompositeDialogOpen] = useState(false);
 
+  const channelsRef = useRef<ChannelMetadata[]>([]);
+  channelsRef.current = channels;
   const loadedSessionIdRef = useRef<string | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
 
@@ -542,8 +555,8 @@ export function RecordingDashboard({
 
   const loadRecording = async (
     sessionId: string,
-    options?: { selectChannels?: "default" | "none" },
-  ): Promise<boolean> => {
+    options?: { selectChannels?: "default" | "none"; resumeCursor?: boolean },
+  ): Promise<ChannelMetadata[] | null> => {
     cancelLocalPlayback();
     playbackSessionRef.current = null;
     playbackStateRef.current = "stopped";
@@ -566,7 +579,7 @@ export function RecordingDashboard({
         ]);
 
       if (version !== loadVersionRef.current) {
-        return false;
+        return null;
       }
 
       const isSameSession =
@@ -613,7 +626,7 @@ export function RecordingDashboard({
 
       loadedSessionIdRef.current = loadedSession.sessionId;
 
-      if (!isSameSession) {
+      if (!isSameSession && options?.resumeCursor !== false) {
         const resumeSequence = getResumeSequence(loadedSession.recordingId);
         if (
           resumeSequence !== null &&
@@ -631,6 +644,10 @@ export function RecordingDashboard({
         }
       }
 
+      if (!isSameSession) {
+        setBreakpointHit(null);
+      }
+
       console.debug("Recording loaded:", {
         sessionId: loadedSession.sessionId,
         sampleCount: loadedSession.sampleCount,
@@ -639,7 +656,7 @@ export function RecordingDashboard({
           (loadedBreakpoints.compositeBreakpoints?.length ?? 0),
       });
 
-      return true;
+      return loadedChannels;
     } catch (error) {
       if (version === loadVersionRef.current) {
         setLoadError(
@@ -647,7 +664,7 @@ export function RecordingDashboard({
         );
       }
 
-      return false;
+      return null;
     } finally {
       if (version === loadVersionRef.current) {
         setLoading(false);
@@ -767,12 +784,36 @@ export function RecordingDashboard({
     );
   };
 
-  const handleReset = () =>
-    executeReplay(
+  const rememberBreakpointStop = (stop: BreakpointStopDetails | null | undefined) => {
+    if (!stop) return;
+    const hit = stop.hits?.[0];
+    const label = (() => {
+      if (!hit) return null;
+      if (hit.operator === "TimelineEvent" || hit.operator === "TimelineStage") {
+        const kind = hit.operator === "TimelineStage" ? "Stage" : "Event";
+        return `${kind} ${hit.observedText?.trim() || "Any"}`;
+      }
+      const channelName = channelsRef.current.find((channel) => channel.channelId === hit.channelId)?.name;
+      return [channelName, hit.operator, hit.threshold]
+        .filter((part) => part !== null && part !== undefined && part !== "")
+        .join(" ");
+    })();
+    setBreakpointHit({
+      sequence: stop.sequence,
+      breakpointId: hit?.breakpointId ?? null,
+      label,
+    });
+    setInspectorTab(2);
+  };
+
+  const handleReset = () => {
+    setBreakpointHit(null);
+    return executeReplay(
       async (sessionId) =>
         (await replayApi.reset(sessionId)).session,
       "Unable to reset replay.",
     );
+  };
 
   // Chart click-to-seek uses the same playback-aware transaction as dragging.
   // A running recording resumes from the selected sample; a paused or stopped
@@ -798,6 +839,7 @@ export function RecordingDashboard({
           "Continue did not execute: no active breakpoints.",
         );
       } else if (response.hitBreakpoint) {
+        rememberBreakpointStop(response.stop);
         console.debug(
           "Replay stopped at breakpoint:",
           response.stop,
@@ -977,6 +1019,7 @@ export function RecordingDashboard({
              playbackStateRef.current = response.hitBreakpoint ? "paused" : "stopped";
              setPlaybackState(playbackStateRef.current);
              if (response.hitBreakpoint) {
+               rememberBreakpointStop(response.stop);
                console.debug("Playback stopped at breakpoint:", response.stop);
              }
              return;
@@ -1168,7 +1211,11 @@ export function RecordingDashboard({
     await executeReplay(async (sessionId) => {
       const response = await breakpointApi.runTo(sessionId, breakpointId, direction);
       setFocusedBreakpointId(breakpointId);
-      setInspectorTab(1);
+      if (response.hitBreakpoint) {
+        rememberBreakpointStop(response.stop);
+      } else {
+        setInspectorTab(1);
+      }
       if (!response.hitBreakpoint) {
         setBreakpointError(
           direction === "forward"
@@ -1243,6 +1290,28 @@ export function RecordingDashboard({
     }
   };
 
+  const handleCreateTimelineBreakpoint = async (
+    request: CreateTimelineBreakpointRequest,
+  ) => {
+    let createdBreakpointId: string | null = null;
+    const succeeded = await executeBreakpointMutation(
+      async (sessionId) => {
+        const created = await breakpointApi.createTimeline(sessionId, request);
+        createdBreakpointId = created.breakpointId;
+      },
+    );
+
+    if (succeeded) {
+      setBreakpointDialogOpen(false);
+      setBreakpointDraft(null);
+      setInspectorTab(1);
+      if (createdBreakpointId) {
+        setFocusedBreakpointId(createdBreakpointId);
+        await handleRunToBreakpoint(createdBreakpointId, "forward");
+      }
+    }
+  };
+
   const handleQuickBookmark = async (payload?: {
     sequence?: number;
     timestampNanoseconds?: number | string;
@@ -1263,6 +1332,7 @@ export function RecordingDashboard({
       timestampNanoseconds,
       title: payload?.title,
       annotation: payload?.annotation,
+      ensureInvestigation: () => ensureSavedInvestigation(),
     });
 
     if (!result.ok) {
@@ -1461,25 +1531,71 @@ export function RecordingDashboard({
     [],
   );
 
-  const applyInvestigationUiState = useCallback((uiState: InvestigationUiState) => {
-    setSelectedChannelIds(uiState.selectedChannelIds ?? []);
-    const pins = uiState.axisPins && Object.keys(uiState.axisPins).length > 0
-      ? uiState.axisPins as AxisPins
-      : axisPinsFromLegacyRightAxis(uiState.rightAxisChannelIds ?? []);
+  const channelNamesFor = useCallback((ids: string[]) => ids.flatMap((id) => {
+    const channel = channels.find((item) => item.channelId === id);
+    return channel ? [channel.name] : [];
+  }), [channels]);
+
+  const breakpointHitPayload = useCallback((): InvestigationHit | null => {
+    if (!breakpointHit) return null;
+    return {
+      sequenceNumber: breakpointHit.sequence,
+      breakpointId: breakpointHit.breakpointId,
+      label: breakpointHit.label,
+    };
+  }, [breakpointHit]);
+
+  const applyInvestigationUiState = useCallback((
+    uiState: InvestigationUiState,
+    channelList?: ChannelMetadata[],
+  ): InvestigationUiState => {
+    const source = channelList ?? channels;
+    const selected = resolveSavedChannelIds(
+      source,
+      uiState.selectedChannelNames,
+      uiState.selectedChannelIds,
+    );
+    const nextSelected = selected
+      ?? source.slice(0, 3).map((channel) => channel.channelId);
+    setSelectedChannelIds(nextSelected);
+    const right = resolveSavedChannelIds(
+      source,
+      uiState.rightAxisChannelNames,
+      uiState.rightAxisChannelIds,
+    ) ?? [];
+    const currentIds = new Set(source.map((channel) => channel.channelId));
+    const savedPins = uiState.axisPins ?? {};
+    const pinsStillValid = Object.keys(savedPins).length > 0
+      && Object.keys(savedPins).every((id) => currentIds.has(id));
+    const pins = pinsStillValid ? savedPins as AxisPins : axisPinsFromLegacyRightAxis(right);
     setAxisPins(pins);
-    const viewport = uiState.chartViewport;
+    const viewport = uiState.chartViewport ?? null;
     if (viewport) {
       setRestoreChartViewport(viewport);
       setRestoreChartViewportRequestId((value) => value + 1);
     }
-  }, []);
+    const namesFor = (ids: string[]) => ids.flatMap((id) => {
+      const channel = source.find((item) => item.channelId === id);
+      return channel ? [channel.name] : [];
+    });
+    return {
+      selectedChannelIds: nextSelected,
+      rightAxisChannelIds: right,
+      selectedChannelNames: namesFor(nextSelected),
+      rightAxisChannelNames: namesFor(right),
+      axisPins: pins,
+      chartViewport: viewport,
+    };
+  }, [channels]);
 
   const resolveExportUiState = useCallback((): InvestigationUiState => ({
     selectedChannelIds,
     rightAxisChannelIds: effectiveRightAxisIds,
+    selectedChannelNames: channelNamesFor(selectedChannelIds),
+    rightAxisChannelNames: channelNamesFor(effectiveRightAxisIds),
     axisPins,
     chartViewport: chartViewportReaderRef.current?.read() ?? null,
-  }), [selectedChannelIds, effectiveRightAxisIds, axisPins]);
+  }), [selectedChannelIds, effectiveRightAxisIds, axisPins, channelNamesFor]);
 
   const handleSaveAsProject = async (projectName: string, rootPath: string) => {
     if (!session) return;
@@ -1493,6 +1609,7 @@ export function RecordingDashboard({
         name: projectName,
         projectId: project.projectId,
         uiState: resolveExportUiState(),
+        breakpointHit: breakpointHitPayload(),
       });
       setActiveProject(project, { keepSession: true });
       setActiveInvestigation({
@@ -1558,7 +1675,7 @@ export function RecordingDashboard({
   const handleWizardImported = async (result: CreateSessionResponse) => {
     const loaded = await loadRecording(result.sessionId, { selectChannels: "none" });
     if (loaded) setWizardSessionId(result.sessionId);
-    return loaded;
+    return loaded !== null;
   };
 
   const registerSessionInActiveProject = async () => {
@@ -1568,6 +1685,7 @@ export function RecordingDashboard({
       name: session.recordingName,
       projectId: activeProject.projectId,
       uiState: resolveExportUiState(),
+      breakpointHit: breakpointHitPayload(),
     });
     setActiveInvestigation({
       investigationId: exported.investigationId,
@@ -1609,8 +1727,49 @@ export function RecordingDashboard({
     if (mode !== "run") return;
 
     const reset = await handleReset();
-    if (reset) await handlePlay(reset);
+    if (!reset) return;
+    if (breakpointCount > 0) {
+      await handleContinue();
+      return;
+    }
+    await handlePlay(reset);
   };
+
+  async function ensureSavedInvestigation(): Promise<{
+    investigationId: string;
+    projectId: string | null;
+  } | null> {
+    if (!session) return null;
+    if (context.investigationId) {
+      return {
+        investigationId: context.investigationId,
+        projectId: context.projectId,
+      };
+    }
+
+    const uiState = resolveExportUiState();
+    const exported = await investigationApi.exportSession(session.sessionId, {
+      name: session.recordingName,
+      projectId: context.projectId,
+      uiState,
+      breakpointHit: breakpointHitPayload(),
+    });
+    setActiveInvestigation({
+      investigationId: exported.investigationId,
+      investigationName: session.recordingName,
+      projectId: context.projectId,
+    });
+    saveInvestigationSelection({
+      recordingName: session.recordingName,
+      projectId: context.projectId ?? "",
+      investigationId: exported.investigationId,
+    });
+    rememberInvestigationUiBaseline(exported.investigationId, uiState);
+    return {
+      investigationId: exported.investigationId,
+      projectId: context.projectId,
+    };
+  }
 
   const registerChartViewportReader = useCallback(
     (reader: ChartViewportReader | null) => {
@@ -1958,18 +2117,32 @@ export function RecordingDashboard({
         projectId || null,
       );
 
-      const loaded = await loadRecording(opened.sessionId);
-      if (!loaded) return;
+      const loadedChannels = await loadRecording(opened.sessionId, {
+        selectChannels: document.uiState ? "none" : "default",
+        resumeCursor: false,
+      });
+      if (!loadedChannels) return;
+
+      const savedHit = document.session.breakpointHit;
+      setBreakpointHit(savedHit
+        ? {
+            sequence: savedHit.sequenceNumber,
+            breakpointId: savedHit.breakpointId ?? null,
+            label: savedHit.label ?? null,
+          }
+        : null);
 
       if (document.uiState) {
         const uiState: InvestigationUiState = {
           selectedChannelIds: document.uiState.selectedChannelIds ?? [],
           rightAxisChannelIds: document.uiState.rightAxisChannelIds ?? [],
+          selectedChannelNames: document.uiState.selectedChannelNames ?? [],
+          rightAxisChannelNames: document.uiState.rightAxisChannelNames ?? [],
           axisPins: document.uiState.axisPins,
           chartViewport: document.uiState.chartViewport ?? null,
         };
-        applyInvestigationUiState(uiState);
-        rememberInvestigationUiBaseline(investigationId, uiState);
+        const restored = applyInvestigationUiState(uiState, loadedChannels);
+        rememberInvestigationUiBaseline(investigationId, restored);
       }
 
       const name =
@@ -1995,6 +2168,13 @@ export function RecordingDashboard({
       onInvestigationOpened?.(investigationId, projectId);
       onSelectSection("recordings");
     } catch (error) {
+      if (
+        error instanceof ApiError
+        && error.status === 404
+        && loadLastInvestigation()?.investigationId === investigationId
+      ) {
+        clearLastInvestigation();
+      }
       const message = formatOpenInvestigationError(error);
       setLoadError(message);
       if (
@@ -2017,10 +2197,11 @@ export function RecordingDashboard({
     if (!investigationRequest) return;
     if (investigationRequest.nonce === seenInvestigationRequestRef.current) return;
     seenInvestigationRequestRef.current = investigationRequest.nonce;
-    const projectId = activeProject?.projectId;
-    if (!projectId) return;
-    void openInvestigationRef.current(investigationRequest.investigationId, projectId);
-  }, [investigationRequest, activeProject?.projectId]);
+    void openInvestigationRef.current(
+      investigationRequest.investigationId,
+      investigationRequest.projectId,
+    );
+  }, [investigationRequest]);
 
   const handleOpenInvestigation = async (
     investigationId: string,
@@ -2080,8 +2261,16 @@ export function RecordingDashboard({
           ...breakpoints.map((item) => `${item.breakpointId}:${item.isEnabled}`),
           ...compositeBreakpoints.map((item) => `${item.breakpointId}:${item.isEnabled}`),
         ].join("|")}
+        breakpointHit={breakpointHit}
         onInspectSample={(sequence) => {
           void handleSeek(sequence).then(() => onSelectSection("recordings"));
+        }}
+        onBookmarkChange={(request) => {
+          void handleQuickBookmark({
+            sequence: request.sequence,
+            title: request.title,
+            annotation: request.annotation,
+          });
         }}
       />
     </Box>
@@ -2158,6 +2347,8 @@ export function RecordingDashboard({
         isUiStateDirty={isInvestigationUiDirty}
         onUiStateBaselineSaved={rememberInvestigationUiBaseline}
         onOpenInvestigation={handleOpenInvestigation}
+        breakpointHit={breakpointHitPayload()}
+        ensureInvestigation={() => ensureSavedInvestigation()}
       />
       </Box>
     </Box>
@@ -2225,6 +2416,26 @@ export function RecordingDashboard({
           overflow: "hidden",
         }}
       >
+        {breakpointHit && (section === "recordings" || section === "analysis") && (
+          <Alert
+            severity="info"
+            sx={{ flexShrink: 0, mb: 0.5 }}
+            action={section === "analysis" ? undefined : (
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => onSelectSection("analysis")}
+              >
+                What changed
+              </Button>
+            )}
+          >
+            Breakpoint hit at sample {breakpointHit.sequence.toLocaleString()}
+            {breakpointHit.label ? ` (${breakpointHit.label})` : ""}.
+            Step backward to inspect the lead-up. This event stays pinned when the cursor moves.
+          </Alert>
+        )}
+
         {(loadError || importSuccess) && (
           <Box sx={{ flexShrink: 0, mb: 0.5 }}>
             {loadError && (
@@ -2332,6 +2543,7 @@ export function RecordingDashboard({
         seriesColors={valueSeriesColors}
         busy={breakpointBusy}
         draft={breakpointDraft}
+        timeline={recordingTimeline}
         onClose={() => {
           if (!breakpointBusy) {
             setBreakpointDialogOpen(false);
@@ -2340,6 +2552,7 @@ export function RecordingDashboard({
         }}
         onCreate={(request) => handleCreateBreakpoint(request)}
         onCreateMissingData={handleCreateMissingDataBreakpoint}
+        onCreateTimeline={handleCreateTimelineBreakpoint}
       />
 
       <CompositeBreakpointDialog

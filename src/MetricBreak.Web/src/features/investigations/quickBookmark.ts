@@ -19,6 +19,10 @@ export async function tryQuickBookmark(params: {
   timestampNanoseconds: number | string;
   title?: string | null;
   annotation?: string | null;
+  ensureInvestigation?: () => Promise<{
+    investigationId: string;
+    projectId: string | null;
+  } | null>;
 }): Promise<QuickBookmarkResult> {
   if (!params.recordingName.trim()) {
     return {
@@ -28,12 +32,18 @@ export async function tryQuickBookmark(params: {
     };
   }
 
-  const investigationId = params.investigationId?.trim()
+  let investigationId = params.investigationId?.trim()
     || loadInvestigationSelection(params.recordingName)?.investigationId;
 
-  const projectId = params.projectId?.trim()
+  let projectId = params.projectId?.trim()
     ?? loadInvestigationSelection(params.recordingName)?.projectId
     ?? null;
+
+  if (!investigationId && params.ensureInvestigation) {
+    const ensured = await params.ensureInvestigation();
+    investigationId = ensured?.investigationId;
+    if (ensured) projectId = ensured.projectId;
+  }
 
   if (!investigationId) {
     return {

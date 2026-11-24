@@ -24,11 +24,23 @@ export interface PlaybackStartResponse {
   generation: number;
 }
 
+export interface BreakpointStopDetails {
+  sequence: number;
+  timestampNanoseconds: number;
+  hits: {
+    breakpointId: string;
+    channelId: string;
+    operator: string;
+    threshold: number;
+    observedText?: string | null;
+  }[];
+}
+
 export interface PlaybackAdvanceResponse {
   samplesAdvanced: number;
   endOfRecording: boolean;
   hitBreakpoint: boolean;
-  stop: unknown | null;
+  stop: BreakpointStopDetails | null;
   session: SessionState;
 }
 
@@ -139,7 +151,7 @@ export interface ContinueResponse {
   executed: boolean;
   hitBreakpoint: boolean;
   reachedEndOfRecording: boolean;
-  stop: unknown | null;
+  stop: BreakpointStopDetails | null;
   session: SessionState;
 }
 

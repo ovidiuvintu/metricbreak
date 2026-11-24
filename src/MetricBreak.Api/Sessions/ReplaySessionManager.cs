@@ -126,6 +126,12 @@ public sealed class ReplaySessionManager
                         Operator: MissingDataBreakpoint.OperatorName,
                         Threshold: missing.MinimumSeconds,
                         IsEnabled: registered.IsEnabled),
+                    TimelineBreakpoint timeline => new BreakpointExportSnapshot(
+                        BreakpointId: timeline.Id,
+                        ChannelName: timeline.Name ?? "",
+                        Operator: timeline.OperatorName,
+                        Threshold: 0,
+                        IsEnabled: registered.IsEnabled),
                     _ => null,
                 })
                 .OfType<BreakpointExportSnapshot>()
@@ -166,7 +172,8 @@ public sealed class ReplaySessionManager
                     ExecutionState:
                         snapshot.ExecutionState.Status.ToString(),
                     PauseReason:
-                        snapshot.ExecutionState.PauseReason.ToString()),
+                        snapshot.ExecutionState.PauseReason.ToString(),
+                    BreakpointHit: request?.BreakpointHit),
                 Breakpoints: breakpoints,
                 Bookmarks: Array.Empty<InvestigationBookmarkSnapshot>(),
                 Metadata: metadata,
@@ -231,6 +238,33 @@ public sealed class ReplaySessionManager
 
         foreach (var exportedBreakpoint in investigation.Breakpoints)
         {
+            if (TryTimelineKind(exportedBreakpoint.Operator, out var markerKind))
+            {
+                TimelineBreakpoint timelineBreakpoint;
+                try
+                {
+                    timelineBreakpoint = TimelineBreakpointFactory.Create(
+                        exportedBreakpoint.BreakpointId,
+                        markerKind,
+                        string.IsNullOrWhiteSpace(exportedBreakpoint.ChannelName)
+                            ? null
+                            : exportedBreakpoint.ChannelName,
+                        imported.Timeline);
+                }
+                catch (ArgumentException exception)
+                {
+                    error = exception.Message;
+                    return false;
+                }
+
+                entry.Breakpoints.Add(timelineBreakpoint);
+
+                if (!exportedBreakpoint.IsEnabled)
+                    entry.Breakpoints.Disable(timelineBreakpoint.Id);
+
+                continue;
+            }
+
             if (string.Equals(
                     exportedBreakpoint.Operator,
                     MissingDataBreakpoint.OperatorName,
@@ -557,6 +591,50 @@ public sealed class ReplaySessionManager
         }
     }
 
+    public bool TryAddTimelineBreakpoint(
+        Guid sessionId,
+        string kind,
+        string? name,
+        out TimelineBreakpoint? breakpoint)
+    {
+        breakpoint = null;
+
+        if (!_sessions.TryGetValue(sessionId, out var entry))
+            return false;
+
+        lock (entry.SyncRoot)
+        {
+            if (entry.IsClosed)
+                return false;
+
+            breakpoint = TimelineBreakpointFactory.Create(
+                Guid.NewGuid(),
+                kind,
+                name,
+                entry.Imported.Timeline);
+            entry.Breakpoints.Add(breakpoint);
+            return true;
+        }
+    }
+
+    private static bool TryTimelineKind(string? op, out TimelineMarkerKind kind)
+    {
+        if (string.Equals(op, TimelineBreakpoint.EventOperatorName, StringComparison.OrdinalIgnoreCase))
+        {
+            kind = TimelineMarkerKind.Event;
+            return true;
+        }
+
+        if (string.Equals(op, TimelineBreakpoint.StageOperatorName, StringComparison.OrdinalIgnoreCase))
+        {
+            kind = TimelineMarkerKind.Stage;
+            return true;
+        }
+
+        kind = default;
+        return false;
+    }
+
     private static MetricBreak.Domain.Recordings.ChannelValue? ParseExpected(
         MetricBreak.Domain.Recordings.ChannelValueType type, ComparisonOperator op, string? value)
     {
@@ -604,6 +682,8 @@ public sealed class ReplaySessionManager
                         BreakpointResponseMapper.Map(conditional, registered.IsEnabled),
                     MissingDataBreakpoint missing =>
                         BreakpointResponseMapper.Map(missing, registered.IsEnabled),
+                    TimelineBreakpoint timeline =>
+                        BreakpointResponseMapper.Map(timeline, registered.IsEnabled),
                     _ => null,
                 })
                 .OfType<BreakpointResponse>()

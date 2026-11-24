@@ -71,9 +71,22 @@ public static class BreakpointEvaluator
             MissingDataBreakpoint missing =>
                 Evaluate(missing, sample, previous, readSample),
 
+            TimelineBreakpoint timeline =>
+                Evaluate(timeline, sample),
+
             _ => throw new NotSupportedException(
                 $"Unsupported breakpoint type: {breakpoint.GetType().Name}")
         };
+    }
+
+    public static bool Evaluate(
+        TimelineBreakpoint breakpoint,
+        TelemetrySample sample)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+        ArgumentNullException.ThrowIfNull(sample);
+
+        return breakpoint.Matches(sample.SequenceNumber);
     }
 
     public static bool Evaluate(
@@ -242,9 +255,33 @@ public static class BreakpointEvaluator
             MissingDataBreakpoint missing =>
                 EvaluateHit(missing, position, sample, previous, readSample),
 
+            TimelineBreakpoint timeline =>
+                EvaluateHit(timeline, position, sample),
+
             _ => throw new NotSupportedException(
                 $"Unsupported breakpoint type: {breakpoint.GetType().Name}")
         };
+    }
+
+    public static BreakpointHit? EvaluateHit(
+        TimelineBreakpoint breakpoint,
+        SamplePosition position,
+        TelemetrySample sample)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+        ArgumentNullException.ThrowIfNull(sample);
+
+        ValidatePosition(position, sample);
+
+        if (!breakpoint.TryGetMarkerName(sample.SequenceNumber, out var markerName))
+            return null;
+
+        return BreakpointHit.ForTimeline(
+            breakpoint.Id,
+            position,
+            sample.Timestamp,
+            breakpoint.Kind,
+            markerName);
     }
 
     private static bool TryMeasureGap(

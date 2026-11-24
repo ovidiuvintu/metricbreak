@@ -33,5 +33,20 @@ public static class BreakpointResponseMapper
             Threshold: breakpoint.MinimumSeconds,
             IsEnabled: isEnabled);
     }
+
+    public static BreakpointResponse Map(
+        TimelineBreakpoint breakpoint,
+        bool isEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        return new BreakpointResponse(
+            BreakpointId: breakpoint.Id,
+            ChannelId: Guid.Empty,
+            Operator: breakpoint.OperatorName,
+            Threshold: 0,
+            IsEnabled: isEnabled,
+            Value: breakpoint.Name);
+    }
 }
 

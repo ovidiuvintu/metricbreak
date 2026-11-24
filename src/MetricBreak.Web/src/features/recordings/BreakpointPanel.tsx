@@ -101,7 +101,15 @@ const symbols: Record<BreakpointOperator, string> = {
   GreaterThan: ">", GreaterThanOrEqual: ">=", LessThan: "<",
   LessThanOrEqual: "<=", Equal: "==", NotEqual: "!=", Changed: "changed", RisingEdge: "rises above", FallingEdge: "falls below",
   MissingLongerThan: "missing >",
+  TimelineEvent: "event",
+  TimelineStage: "stage",
 };
+
+function timelineLabel(operator: BreakpointOperator, value?: string): string | null {
+  if (operator !== "TimelineEvent" && operator !== "TimelineStage") return null;
+  const kind = operator === "TimelineStage" ? "Stage" : "Event";
+  return `${kind} · ${value?.trim() || "Any"}`;
+}
 
 function CoverageCaption({ coverage }: { coverage: BreakpointCoverage | undefined }) {
   if (!coverage) return null;
@@ -128,9 +136,10 @@ export function BreakpointPanel({
   const scopeName = (channelId: string) =>
     isRecordingGap(channelId) ? "Recording" : (names.get(channelId) ?? channelId);
   const format = (c: { channelId: string; operator: BreakpointOperator; threshold: number; value?: string }) =>
-    c.operator === "MissingLongerThan"
+    timelineLabel(c.operator, c.value) ??
+    (c.operator === "MissingLongerThan"
       ? `${scopeName(c.channelId)} missing > ${c.threshold}s`
-      : `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`;
+      : `${names.get(c.channelId) ?? c.channelId} ${symbols[c.operator]} ${c.operator === "Changed" ? "" : c.value ?? c.threshold.toLocaleString()}`);
   const total = breakpoints.length + compositeBreakpoints.length;
   const coverageById = new Map(coverage.map(item => [item.breakpointId, item]));
 
@@ -228,11 +237,14 @@ export function BreakpointPanel({
               <Box sx={{ flex: 1, minWidth: 0 }}>
                 <Tooltip title={format(b)}>
                   <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
-                    {b.operator === "MissingLongerThan" ? scopeName(b.channelId) : (names.get(b.channelId) ?? b.channelId)}
+                    {timelineLabel(b.operator, b.value) ??
+                      (b.operator === "MissingLongerThan" ? scopeName(b.channelId) : (names.get(b.channelId) ?? b.channelId))}
                   </Typography>
                 </Tooltip>
                 <Typography variant="caption" color="text.secondary">
-                  {b.operator === "MissingLongerThan"
+                  {timelineLabel(b.operator, b.value)
+                    ? "Stops on this marker"
+                    : b.operator === "MissingLongerThan"
                     ? `missing > ${b.threshold}s`
                     : `${symbols[b.operator]} ${b.operator === "Changed" ? "" : b.value ?? b.threshold.toLocaleString()}`}
                 </Typography>

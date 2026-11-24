@@ -15,6 +15,8 @@ export type AxisPin = "left" | "right";
 export interface InvestigationUiState {
     selectedChannelIds: string[];
     rightAxisChannelIds: string[];
+    selectedChannelNames?: string[];
+    rightAxisChannelNames?: string[];
     axisPins?: Partial<Record<string, AxisPin>>;
     chartViewport?: {
         pageStart: number;
@@ -23,12 +25,19 @@ export interface InvestigationUiState {
     } | null;
 }
 
+export interface InvestigationHit {
+    sequenceNumber: number;
+    breakpointId?: string | null;
+    label?: string | null;
+}
+
 export interface ExportInvestigationRequest {
     investigationId?: string | null;
     name?: string | null;
     description?: string | null;
     projectId?: string | null;
     uiState?: InvestigationUiState | null;
+    breakpointHit?: InvestigationHit | null;
 }
 
 export interface TimelineEntrySnapshot {

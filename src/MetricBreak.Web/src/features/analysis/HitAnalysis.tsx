@@ -27,18 +27,30 @@ import type {
 const defaultLookback = 10;
 const maxLookback = 10_000;
 
+interface BookmarkChangeRequest {
+  sequence: number;
+  title: string;
+  annotation: string;
+}
+
 interface EventAnalysisSectionProps {
   session: SessionState;
   breakpointKey: string;
+  sequence?: number;
+  title?: string;
   onInspectSample: (sequence: number) => void;
+  onBookmarkChange?: (request: BookmarkChangeRequest) => void;
 }
 
 export function EventAnalysisSection({
   session,
   breakpointKey,
+  sequence: sequenceOverride,
+  title,
   onInspectSample,
+  onBookmarkChange,
 }: EventAnalysisSectionProps) {
-  const sequence = session.currentSample?.sequence ?? 0;
+  const sequence = sequenceOverride ?? session.currentSample?.sequence ?? 0;
   const [lookbackInput, setLookbackInput] = useState(String(defaultLookback));
   const [lookback, setLookback] = useState(defaultLookback);
   const [analysis, setAnalysis] = useState<EventAnalysis | null>(null);
@@ -84,7 +96,7 @@ export function EventAnalysisSection({
 
   return (
     <Box>
-      <Typography variant="h6">At the replay cursor</Typography>
+      <Typography variant="h6">{title ?? "At the replay cursor"}</Typography>
       <Typography variant="body2" color="text.secondary">
         Sample {sequence.toLocaleString()}
         {analysis
@@ -122,6 +134,29 @@ export function EventAnalysisSection({
                 {" "}and this sample.
               </Typography>
             ) : (
+              <>
+              {onBookmarkChange && analysis.precedingSequence != null && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  sx={{ mt: 1 }}
+                  onClick={() => {
+                    const preceding = analysis.precedingSequence;
+                    if (preceding == null) return;
+                    const summary = analysis.immediateChanges
+                      .map((change) =>
+                        `${channelLabel(change.name, change.unit)}: ${formatReading(change.previous)} → ${formatReading(change.current)}`)
+                      .join("; ");
+                    onBookmarkChange({
+                      sequence: preceding,
+                      title: `Before sample ${sequence.toLocaleString()}`,
+                      annotation: summary,
+                    });
+                  }}
+                >
+                  Bookmark what changed
+                </Button>
+              )}
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -148,6 +183,7 @@ export function EventAnalysisSection({
                   ))}
                 </TableBody>
               </Table>
+              </>
             )}
           </Box>
 

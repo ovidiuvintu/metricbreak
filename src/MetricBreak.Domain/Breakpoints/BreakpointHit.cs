@@ -33,6 +33,12 @@ public sealed record BreakpointHit
 
     public bool IsMissingData { get; }
 
+    public bool IsTimeline { get; }
+
+    public string? MarkerName { get; }
+
+    public TimelineMarkerKind? MarkerKind { get; }
+
     public LogicalOperator? LogicalOperator { get; }
 
     public IReadOnlyList<BreakpointConditionHit> Conditions { get; }
@@ -152,6 +158,67 @@ public sealed record BreakpointHit
         Conditions = Array.AsReadOnly(Array.Empty<BreakpointConditionHit>());
     }
 
+    public static BreakpointHit ForTimeline(
+        Guid breakpointId,
+        SamplePosition position,
+        TelemetryTimestamp timestamp,
+        TimelineMarkerKind kind,
+        string markerName)
+    {
+        return new BreakpointHit(
+            breakpointId,
+            position,
+            timestamp,
+            kind,
+            markerName,
+            timeline: true);
+    }
+
+    private BreakpointHit(
+        Guid breakpointId,
+        SamplePosition position,
+        TelemetryTimestamp timestamp,
+        TimelineMarkerKind kind,
+        string markerName,
+        bool timeline)
+    {
+        if (!timeline)
+        {
+            throw new ArgumentException(
+                "Use the comparison constructor for a value breakpoint.",
+                nameof(timeline));
+        }
+
+        ValidateCommon(breakpointId, position);
+
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        if (string.IsNullOrWhiteSpace(markerName))
+        {
+            throw new ArgumentException(
+                "Marker name cannot be empty.",
+                nameof(markerName));
+        }
+
+        BreakpointId = breakpointId;
+        Position = position;
+        Timestamp = timestamp;
+        ChannelId = Guid.Empty;
+        ObservedValue = 0;
+        Operator = default;
+        Threshold = 0;
+        IsComposite = false;
+        IsMissingData = false;
+        IsTimeline = true;
+        MarkerKind = kind;
+        MarkerName = markerName.Trim();
+        LogicalOperator = null;
+        Conditions = Array.AsReadOnly(Array.Empty<BreakpointConditionHit>());
+    }
+
     /// <summary>
     /// Constructor for a composite breakpoint hit.
     /// </summary>
@@ -234,6 +301,9 @@ public sealed record BreakpointHit
             && Threshold.Equals(other.Threshold)
             && IsComposite == other.IsComposite
             && IsMissingData == other.IsMissingData
+            && IsTimeline == other.IsTimeline
+            && MarkerName == other.MarkerName
+            && MarkerKind == other.MarkerKind
             && LogicalOperator == other.LogicalOperator
             && Conditions.SequenceEqual(other.Conditions);
     }
@@ -251,6 +321,9 @@ public sealed record BreakpointHit
         hash.Add(Threshold);
         hash.Add(IsComposite);
         hash.Add(IsMissingData);
+        hash.Add(IsTimeline);
+        hash.Add(MarkerName);
+        hash.Add(MarkerKind);
         hash.Add(LogicalOperator);
 
         foreach (var condition in Conditions)

@@ -59,6 +59,16 @@ public sealed class BreakpointCollection
     }
 
     /// <summary>
+    /// Registers a timeline event or stage breakpoint, enabled by default.
+    /// </summary>
+    public void Add(TimelineBreakpoint breakpoint)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+
+        AddCore(breakpoint);
+    }
+
+    /// <summary>
     /// Registers a breakpoint while enforcing unique IDs.
     /// </summary>
     private void AddCore(IBreakpoint breakpoint)
